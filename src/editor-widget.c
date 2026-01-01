@@ -43,11 +43,16 @@ struct _EditorWidget {
     
     /* Syntax */
     SyntaxContext *syntax_ctx;
+
+    /* Visual navigation */
+    double target_x;  /* Target X position for Up/Down navigation (in pixels) */
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
 static void editor_widget_ensure_metrics(EditorWidget *self);
 static void editor_widget_reset_cursor_blink(EditorWidget *self);
+static void update_target_x(EditorWidget *self);
+static void move_cursor(EditorWidget *self, int visual_lines_delta);
 
 G_DEFINE_TYPE_WITH_CODE (EditorWidget, editor_widget, GTK_TYPE_WIDGET,
                          G_IMPLEMENT_INTERFACE (GTK_TYPE_SCROLLABLE, editor_widget_scrollable_init))
@@ -628,6 +633,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         }
     }
     
+    update_target_x(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
@@ -803,35 +809,134 @@ scroll_to_cursor(EditorWidget *self)
     }
 }
 
-static void
-move_cursor(EditorWidget *self, int visual_lines)
+static PangoLayout *
+create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len)
 {
-    size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
-    size_t col_offset = self->cursor_offset - document_get_offset_of_line(self->doc, line);
-    
-    /* Logic to move to next line preserving col? */
-    /* Only simple logic: move to start of next line + col? */
-    size_t param_line = line + visual_lines;
-    size_t count = document_get_line_count(self->doc);
-    
-    if (param_line >= count) param_line = count - 1;
-    if (param_line < 0) param_line = 0; /* wrapped unsigned check? logic.. visual_lines is int */
-    if (visual_lines < 0 && line == 0) param_line = 0;
-    
-    size_t new_line_start = document_get_offset_of_line(self->doc, param_line);
     size_t len;
-    char *text = document_get_line(self->doc, param_line, &len);
-    g_free(text);
-    
-    size_t new_col = col_offset;
-    if (new_col > len) new_col = len; /* If newline included, might need len-1? */
-    if (new_col > 0 && new_col == len) {
-        /* check if last char is newline */
-        /* document_get_line returns string with newline if present. */
-        /* If we are at end, it's fine. */
+    char *text = document_get_line(self->doc, line_idx, &len);
+    if (!text) return NULL;
+
+    if (!g_utf8_validate(text, len, NULL)) {
+        char *safe = g_utf8_make_valid(text, len);
+        g_free(text);
+        text = safe;
+        len = strlen(text);
     }
+
+    if (len > 0 && text[len-1] == '\n') {
+        len--;
+    }
+
+    PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
+    PangoLayout *layout = pango_layout_new(context);
+    pango_layout_set_font_description(layout, self->font_desc);
+    pango_layout_set_text(layout, text, (int)len);
     
-    self->cursor_offset = new_line_start + new_col;
+    int width = gtk_widget_get_width(GTK_WIDGET(self));
+    pango_layout_set_width(layout, width * PANGO_SCALE);
+    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+
+    if (out_text) *out_text = text;
+    else g_free(text);
+    if (out_len) *out_len = len;
+
+    return layout;
+}
+
+static void
+update_target_x(EditorWidget *self)
+{
+    size_t line_idx = document_get_line_of_offset(self->doc, self->cursor_offset);
+    size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+    size_t index_in_line = self->cursor_offset - line_start;
+    
+    char *text;
+    size_t len;
+    PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
+    if (!layout) return;
+    
+    if (index_in_line > len) index_in_line = len;
+    
+    PangoRectangle strong_pos;
+    pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
+    self->target_x = pango_units_to_double(strong_pos.x);
+    
+    g_object_unref(layout);
+    g_free(text);
+}
+
+static void
+move_cursor(EditorWidget *self, int visual_lines_delta)
+{
+    size_t line_idx = document_get_line_of_offset(self->doc, self->cursor_offset);
+    size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+    size_t char_idx = self->cursor_offset - line_start;
+
+    char *text = NULL;
+    size_t len;
+    PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
+    if (!layout) return;
+
+    /* If target_x isn't set, set it from current position */
+    if (self->target_x < 0) {
+        PangoRectangle strong_pos;
+        pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &strong_pos, NULL);
+        self->target_x = pango_units_to_double(strong_pos.x);
+    }
+
+    PangoLayoutIter *iter = pango_layout_get_iter(layout);
+    int current_v_line_idx = 0;
+    do {
+        PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
+        if (char_idx >= p_line->start_index && char_idx <= p_line->start_index + p_line->length) {
+            break;
+        }
+        current_v_line_idx++;
+    } while (pango_layout_iter_next_line(iter));
+    pango_layout_iter_free(iter);
+
+    int target_v_line_idx = current_v_line_idx + visual_lines_delta;
+    int total_v_lines = pango_layout_get_line_count(layout);
+
+    if (target_v_line_idx >= 0 && target_v_line_idx < total_v_lines) {
+        /* Move within the same logical line */
+        iter = pango_layout_get_iter(layout);
+        for (int i = 0; i < target_v_line_idx; i++) pango_layout_iter_next_line(iter);
+        PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
+        
+        int index, trailing;
+        pango_layout_line_x_to_index(v_line, (int)(self->target_x * PANGO_SCALE), &index, &trailing);
+        self->cursor_offset = line_start + index + trailing;
+        pango_layout_iter_free(iter);
+    } else {
+        /* Move to different logical line */
+        int logic_delta = (visual_lines_delta > 0) ? 1 : -1;
+        size_t next_line_idx = line_idx + logic_delta;
+        size_t total_logical = document_get_line_count(self->doc);
+        
+        if (next_line_idx < total_logical) {
+            g_object_unref(layout);
+            g_free(text);
+            
+            layout = create_pango_layout_for_line(self, next_line_idx, &text, &len);
+            line_start = document_get_offset_of_line(self->doc, next_line_idx);
+            
+            int v_count = pango_layout_get_line_count(layout);
+            int v_target = (logic_delta > 0) ? 0 : v_count - 1;
+            
+            iter = pango_layout_get_iter(layout);
+            for (int i = 0; i < v_target; i++) pango_layout_iter_next_line(iter);
+            PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
+            
+            int index, trailing;
+            pango_layout_line_x_to_index(v_line, (int)(self->target_x * PANGO_SCALE), &index, &trailing);
+            self->cursor_offset = line_start + index + trailing;
+            pango_layout_iter_free(iter);
+        }
+    }
+
+    g_object_unref(layout);
+    g_free(text);
 }
 
 static gboolean
@@ -869,6 +974,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                 self->cursor_offset = utf8_prev_grapheme(self->doc, self->cursor_offset);
             }
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
@@ -879,6 +985,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                 self->cursor_offset = utf8_next_grapheme(self->doc, self->cursor_offset);
             }
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
@@ -887,6 +994,7 @@ on_key_pressed(GtkEventControllerKey *controller,
             size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
             self->cursor_offset = document_get_offset_of_line(self->doc, line);
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
@@ -897,20 +1005,16 @@ on_key_pressed(GtkEventControllerKey *controller,
             size_t len;
             char *t = document_get_line(self->doc, line, &len);
             g_free(t);
-            /* If line has newline, end is len-1? */
             size_t start = document_get_offset_of_line(self->doc, line);
-            /* Check if last char is \n */
-            /* We need to peek but document_get_line returns string with \n. */
             size_t real_len = len;
             if (len > 0) {
-                 /* We can't easily check last char from here without getting text again.
-                    Optimized: document_get_text_range for last byte. */
                  char *last = document_get_text_range(self->doc, start + len - 1, 1);
                  if (last && last[0] == '\n') real_len--;
                  g_free(last);
             }
             self->cursor_offset = start + real_len;
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
@@ -1112,7 +1216,7 @@ editor_widget_init(EditorWidget *self)
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
     gtk_widget_add_controller(GTK_WIDGET(self), controller);
     
-    self->im_context = gtk_im_multicontext_new();
+    self->im_context = gtk_im_context_simple_new();
     gtk_im_context_set_client_widget(self->im_context, GTK_WIDGET(self));
     g_signal_connect(self->im_context, "commit", G_CALLBACK(on_im_commit), self);
 
