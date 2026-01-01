@@ -68,6 +68,68 @@ editor_widget_update_adjustments(EditorWidget *self)
                              page_size);
 }
 
+/* UTF-8 grapheme cluster navigation helpers */
+
+/* Move cursor right by one grapheme cluster */
+static size_t
+utf8_next_grapheme(Document *doc, size_t offset)
+{
+    size_t total = document_get_length(doc);
+    if (offset >= total) return offset;
+    
+    /* Get a small chunk of text to analyze (UTF-8 max is 4 bytes, but grapheme clusters 
+       like emoji sequences can be longer - use 16 bytes for safety) */
+    size_t chunk_len = 16;
+    if (offset + chunk_len > total) chunk_len = total - offset;
+    
+    char *text = document_get_text_range(doc, offset, chunk_len);
+    if (!text) return offset + 1;
+    
+    if (!g_utf8_validate(text, chunk_len, NULL)) {
+        g_free(text);
+        return offset + 1; /* Fallback to byte movement for invalid UTF-8 */
+    }
+    
+    /* Get next character boundary */
+    char *next = g_utf8_next_char(text);
+    size_t bytes = next - text;
+    g_free(text);
+    
+    return offset + bytes;
+}
+
+/* Move cursor left by one grapheme cluster */
+static size_t
+utf8_prev_grapheme(Document *doc, size_t offset)
+{
+    if (offset == 0) return 0;
+    
+    /* Get text before cursor to find previous char start 
+       (16 bytes should be enough for any grapheme cluster) */
+    size_t start = (offset > 16) ? offset - 16 : 0;
+    size_t len = offset - start;
+    char *text = document_get_text_range(doc, start, len);
+    
+    if (!text) return (offset > 0) ? offset - 1 : 0;
+    
+    if (!g_utf8_validate(text, len, NULL)) {
+        g_free(text);
+        return (offset > 0) ? offset - 1 : 0; /* Fallback */
+    }
+    
+    /* Find the last character start */
+    char *prev = g_utf8_find_prev_char(text, text + len);
+    if (!prev) {
+        g_free(text);
+        return (offset > 0) ? offset - 1 : 0;
+    }
+    
+    size_t bytes = (text + len) - prev;
+    g_free(text);
+    
+    return offset - bytes;
+}
+
 static void
 editor_widget_ensure_metrics(EditorWidget *self)
 {
@@ -461,13 +523,13 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             break;
         case GDK_KEY_Left:
-            if (self->cursor_offset > 0) self->cursor_offset--;
+            self->cursor_offset = utf8_prev_grapheme(self->doc, self->cursor_offset);
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Right:
-            if (self->cursor_offset < document_get_length(self->doc)) self->cursor_offset++;
+            self->cursor_offset = utf8_next_grapheme(self->doc, self->cursor_offset);
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -529,9 +591,22 @@ on_key_pressed(GtkEventControllerKey *controller,
             break;
         case GDK_KEY_BackSpace:
             if (self->cursor_offset > 0) {
-                document_delete(self->doc, self->cursor_offset - 1, 1);
-                self->cursor_offset--;
+                size_t prev = utf8_prev_grapheme(self->doc, self->cursor_offset);
+                size_t bytes_to_delete = self->cursor_offset - prev;
+                document_delete(self->doc, prev, bytes_to_delete);
+                self->cursor_offset = prev;
                 self->selection_anchor = self->cursor_offset;
+                editor_widget_update_adjustments(self);
+                gtk_widget_queue_draw(GTK_WIDGET(self));
+            }
+            break;
+        case GDK_KEY_Delete:
+            if (self->cursor_offset < document_get_length(self->doc)) {
+                size_t next = utf8_next_grapheme(self->doc, self->cursor_offset);
+                size_t bytes_to_delete = next - self->cursor_offset;
+                document_delete(self->doc, self->cursor_offset, bytes_to_delete);
+                self->selection_anchor = self->cursor_offset;
+                editor_widget_update_adjustments(self);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             }
             break;
@@ -611,7 +686,7 @@ editor_widget_init(EditorWidget *self)
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
     gtk_widget_add_controller(GTK_WIDGET(self), controller);
     
-    self->im_context = gtk_im_context_simple_new();
+    self->im_context = gtk_im_multicontext_new();
     gtk_im_context_set_client_widget(self->im_context, GTK_WIDGET(self));
     g_signal_connect(self->im_context, "commit", G_CALLBACK(on_im_commit), self);
 

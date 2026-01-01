@@ -41,13 +41,25 @@ static void
 activate(GtkApplication *app, gpointer user_data)
 {
     GtkWidget *window = gtk_application_window_new(app);
-    gtk_window_set_title(GTK_WINDOW(window), "Virtual Text Editor");
+    gtk_window_set_title(GTK_WINDOW(window), "Untitled - Virtual Text Editor");
     gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
     
     setup_window(GTK_WINDOW(window));
 
-    GtkWidget *label = gtk_label_new("Please drop a file or use Open button.");
-    gtk_window_set_child(GTK_WINDOW(window), label);
+    /* Create a new empty document */
+    Document *doc = document_new(NULL);
+    
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_window_set_child(GTK_WINDOW(window), scrolled);
+
+    GtkWidget *editor = editor_widget_new();
+    editor_widget_set_document(EDITOR_WIDGET(editor), doc);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), editor);
+    
+    g_object_set_data_full(G_OBJECT(window), "document", doc, (GDestroyNotify)document_free);
+    
+    /* Focus the editor so user can start typing immediately */
+    gtk_widget_grab_focus(editor);
     
     gtk_window_present(GTK_WINDOW(window));
 }
