@@ -949,7 +949,11 @@ piece_table_get_offset_of_line(PieceTable *pt, size_t line_index)
 {
     size_t start_lf, start_byte;
     PieceNode *node = find_node_for_line(pt, line_index, &start_lf, &start_byte);
-    if (!node) return 0; // max length?
+    if (!node) {
+        if (pt->root && line_index >= pt->root->lf_subtree)
+            return pt->root->size_subtree;
+        return 0;
+    }
     
     /* node is root. node->left lines = start_lf.
        We want line_index.
