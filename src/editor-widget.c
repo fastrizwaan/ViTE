@@ -343,6 +343,12 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         gtk_snapshot_save(snapshot);
         gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(0, current_y_pos));
         
+        /* Calculate height of this layout */
+        int pixel_h;
+        pango_layout_get_pixel_size(layout, NULL, &pixel_h);
+        double layout_h = (double)pixel_h;
+        if (layout_h < self->line_height) layout_h = self->line_height; /* Min height */
+        
         /* Draw Line Background if selected */
         /* Selection rendering across lines is complex. 
            Simplified: If line is fully selected or partially.
@@ -352,51 +358,71 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         size_t start_sel = MIN(self->cursor_offset, self->selection_anchor);
         size_t end_sel = MAX(self->cursor_offset, self->selection_anchor);
         size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
-        size_t raw_line_end = line_start_off + len; /* Including newline */
-        size_t line_end_off = line_start_off + len;
+        size_t raw_line_end = line_start_off + len + 1; /* Approximate end including newline if any */
         
-        /* Check if selection intersects this line */
         if (start_sel < raw_line_end && end_sel > line_start_off && start_sel != end_sel) {
             size_t sel_in_line_start = MAX(start_sel, line_start_off) - line_start_off;
-            size_t sel_in_line_end = MIN(end_sel, line_end_off) - line_start_off;
-            
-            double x, w;
+            size_t sel_in_line_end = MIN(end_sel, (line_start_off + len)) - line_start_off;
             
             /* Handle empty/newline-only lines */
-            if (len == 0 || (len == 1 && text[0] == '\n')) {
-                /* Empty line - draw small selection indicator */
-                x = 0;
-                w = 8.0; /* Small indicator width */
-            } else {
-                /* Get pixel ranges from Pango */
-                PangoRectangle r1, r2;
-                pango_layout_index_to_pos(layout, sel_in_line_start, &r1);
-                pango_layout_index_to_pos(layout, MIN(sel_in_line_end, len), &r2);
-                
-                x = pango_units_to_double(r1.x);
-                w = pango_units_to_double(r2.x - r1.x);
-                
-                /* Handle RTL text */
-                if (w < 0) { x += w; w = -w; }
-                
-                /* If selection extends past line end (newline selected), extend to edge */
-                if (end_sel > line_start_off + len) {
-                    w = width - x;
-                }
-            }
-            
-            if (w > 0) {
+            if (len == 0) {
                 gtk_snapshot_append_color(snapshot, 
                                           &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
-                                          &GRAPHENE_RECT_INIT(x, 0, w, self->line_height));
+                                          &GRAPHENE_RECT_INIT(0, 0, 8.0, layout_h));
+            } else {
+                /* Iterate over visual lines in the layout */
+                PangoLayoutIter *iter = pango_layout_get_iter(layout);
+                gboolean has_next = TRUE;
+                while (has_next) {
+                    PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
+                    int line_start_index = p_line->start_index;
+                    int line_end_index = line_start_index + p_line->length;
+                    
+                    PangoRectangle line_rect;
+                    pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
+                    
+                    double ry = pango_units_to_double(line_rect.y);
+                    double rh;
+                    
+                    /* Peek next line to calculate height for vertical continuity */
+                    if (pango_layout_iter_next_line(iter)) {
+                        PangoRectangle next_rect;
+                        pango_layout_iter_get_line_extents(iter, NULL, &next_rect);
+                        rh = pango_units_to_double(next_rect.y) - ry;
+                        /* We have already moved the iterator, but we need to process 'p_line' */
+                        /* The 'while' will continue with the next line */
+                        has_next = TRUE;
+                    } else {
+                        rh = layout_h - ry;
+                        has_next = FALSE;
+                    }
+                    
+                    if (sel_in_line_end > line_start_index && sel_in_line_start < line_end_index) {
+                        int intersect_start = MAX((int)sel_in_line_start, line_start_index);
+                        int intersect_end = MIN((int)sel_in_line_end, line_end_index);
+                        
+                        int x1, x2;
+                        pango_layout_line_index_to_x(p_line, intersect_start, FALSE, &x1);
+                        pango_layout_line_index_to_x(p_line, intersect_end, FALSE, &x2);
+                        
+                        double rx = pango_units_to_double(MIN(x1, x2));
+                        double rw = pango_units_to_double(abs(x2 - x1));
+                        
+                        /* If selection extends beyond this visual line (it's either a wrap or logical end) */
+                        if (end_sel > line_start_off + line_end_index) {
+                            rw = width - rx;
+                        }
+                        
+                        if (rw > 0) {
+                            gtk_snapshot_append_color(snapshot, 
+                                                      &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
+                                                      &GRAPHENE_RECT_INIT(rx, ry, rw, rh));
+                        }
+                    }
+                }
+                pango_layout_iter_free(iter);
             }
         }
-
-        /* Calculate height of this line */
-        int pixel_h;
-        pango_layout_get_pixel_size(layout, NULL, &pixel_h);
-        double layout_h = (double)pixel_h;
-        if (layout_h < self->line_height) layout_h = self->line_height; /* Min height */
 
         gtk_snapshot_append_layout(snapshot, layout, &self->color_text);
         
@@ -745,6 +771,22 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     }
 }
 
+static gboolean
+editor_widget_delete_selection(EditorWidget *self)
+{
+    if (self->cursor_offset == self->selection_anchor) return FALSE;
+    
+    size_t start = MIN(self->cursor_offset, self->selection_anchor);
+    size_t end = MAX(self->cursor_offset, self->selection_anchor);
+    size_t len = end - start;
+    
+    document_delete(self->doc, start, len);
+    self->cursor_offset = start;
+    self->selection_anchor = start;
+    
+    return TRUE;
+}
+
 static void
 scroll_to_cursor(EditorWidget *self)
 {
@@ -888,6 +930,7 @@ on_key_pressed(GtkEventControllerKey *controller,
              break;   
         }
         case GDK_KEY_Return:
+            editor_widget_delete_selection(self);
             document_insert(self->doc, self->cursor_offset, "\n", 1);
             self->cursor_offset++;
             self->selection_anchor = self->cursor_offset;
@@ -897,7 +940,11 @@ on_key_pressed(GtkEventControllerKey *controller,
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_BackSpace:
-            if (self->cursor_offset > 0) {
+            if (editor_widget_delete_selection(self)) {
+                editor_widget_reset_cursor_blink(self);
+                editor_widget_update_adjustments(self);
+                gtk_widget_queue_draw(GTK_WIDGET(self));
+            } else if (self->cursor_offset > 0) {
                 size_t prev = utf8_prev_grapheme(self->doc, self->cursor_offset);
                 size_t bytes_to_delete = self->cursor_offset - prev;
                 document_delete(self->doc, prev, bytes_to_delete);
@@ -909,7 +956,11 @@ on_key_pressed(GtkEventControllerKey *controller,
             }
             break;
         case GDK_KEY_Delete:
-            if (self->cursor_offset < document_get_length(self->doc)) {
+            if (editor_widget_delete_selection(self)) {
+                editor_widget_reset_cursor_blink(self);
+                editor_widget_update_adjustments(self);
+                gtk_widget_queue_draw(GTK_WIDGET(self));
+            } else if (self->cursor_offset < document_get_length(self->doc)) {
                 size_t next = utf8_next_grapheme(self->doc, self->cursor_offset);
                 size_t bytes_to_delete = next - self->cursor_offset;
                 document_delete(self->doc, self->cursor_offset, bytes_to_delete);
@@ -972,6 +1023,8 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->doc) return;
+    
+    editor_widget_delete_selection(self);
     
     size_t len = strlen(str);
     document_insert(self->doc, self->cursor_offset, str, len);
