@@ -923,7 +923,11 @@ piece_table_get_line_of_offset(PieceTable *pt, size_t offset)
     /* Find node containing offset, summing LF of left subtrees + LF inside node up to split */
     size_t node_start;
     PieceNode *node = find_node_at_offset(pt, offset, &node_start);
-    if (!node) return 0; /* Should be max? */
+    if (!node) {
+        if (pt->root && offset >= pt->root->size_subtree)
+            return pt->root->lf_subtree;
+        return 0;
+    }
     
     /* We need the path to sum Left subtrees.
        Splay implementation moves node to root.
