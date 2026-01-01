@@ -1,5 +1,6 @@
 #include "editor-widget.h"
 #include "syntax.h"
+#include <math.h>
 
 struct _EditorWidget {
     GtkWidget parent_instance;
@@ -24,6 +25,11 @@ struct _EditorWidget {
     size_t cursor_offset;
     size_t selection_anchor; /* If different from cursor_offset, we have selection */
     
+    /* Cursor blink animation */
+    guint cursor_blink_tick_id;
+    gint64 cursor_blink_start_time;
+    double cursor_alpha;  /* Current cursor opacity 0.0-1.0 */
+    
     /* Input */
     GtkIMContext *im_context;
     
@@ -33,6 +39,7 @@ struct _EditorWidget {
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
 static void editor_widget_ensure_metrics(EditorWidget *self);
+static void editor_widget_reset_cursor_blink(EditorWidget *self);
 
 G_DEFINE_TYPE_WITH_CODE (EditorWidget, editor_widget, GTK_TYPE_WIDGET,
                          G_IMPLEMENT_INTERFACE (GTK_TYPE_SCROLLABLE, editor_widget_scrollable_init))
@@ -265,7 +272,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         gtk_snapshot_append_layout(snapshot, layout, &self->color_text);
         
         /* Draw cursor */
-        if (line_idx == cursor_line) {
+        if (line_idx == cursor_line && self->cursor_alpha > 0.01) {
              size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
              if (self->cursor_offset >= line_start_off) {
                  size_t index_in_line = self->cursor_offset - line_start_off;
@@ -274,17 +281,18 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                  PangoRectangle strong_pos;
                  pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
                  
-                 /* Cursor might be tall if wrapped? */
-                 /* pango_layout_get_cursor_pos gives pos inside the layout logic */
+                 /* Apply cursor alpha for blink animation */
+                 GdkRGBA cursor_color = self->color_cursor;
+                 cursor_color.alpha = self->cursor_alpha;
+                 
+                 /* Snap to integer pixels for crisp cursor */
+                 int cursor_x = (int)(pango_units_to_double(strong_pos.x) + 0.5);
+                 int cursor_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
+                 int cursor_h = (int)(pango_units_to_double(strong_pos.height) + 0.5);
                  
                  gtk_snapshot_append_color(snapshot, 
-                                           &self->color_cursor,
-                                           &GRAPHENE_RECT_INIT(
-                                                pango_units_to_double(strong_pos.x),
-                                                pango_units_to_double(strong_pos.y),
-                                                2,
-                                                pango_units_to_double(strong_pos.height)
-                                           ));
+                                           &cursor_color,
+                                           &GRAPHENE_RECT_INIT(cursor_x, cursor_y, 1, cursor_h));
              }
         }
         
@@ -375,8 +383,9 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                                      (int)((y - current_y) * PANGO_SCALE), 
                                      &index, &trailing);
             
+            /* Add trailing to handle clicks at end of characters/line */
             size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
-            *out_offset = line_start_off + index;
+            *out_offset = line_start_off + index + trailing;
             
             g_object_unref(layout);
             g_free(text);
@@ -585,6 +594,7 @@ on_key_pressed(GtkEventControllerKey *controller,
             document_insert(self->doc, self->cursor_offset, "\n", 1);
             self->cursor_offset++;
             self->selection_anchor = self->cursor_offset;
+            editor_widget_reset_cursor_blink(self);
             editor_widget_update_adjustments(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -596,6 +606,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                 document_delete(self->doc, prev, bytes_to_delete);
                 self->cursor_offset = prev;
                 self->selection_anchor = self->cursor_offset;
+                editor_widget_reset_cursor_blink(self);
                 editor_widget_update_adjustments(self);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             }
@@ -606,6 +617,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                 size_t bytes_to_delete = next - self->cursor_offset;
                 document_delete(self->doc, self->cursor_offset, bytes_to_delete);
                 self->selection_anchor = self->cursor_offset;
+                editor_widget_reset_cursor_blink(self);
                 editor_widget_update_adjustments(self);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             }
@@ -659,8 +671,45 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
     self->cursor_offset += len;
     self->selection_anchor = self->cursor_offset;
     
+    editor_widget_reset_cursor_blink(self);  /* Keep cursor visible while typing */
     editor_widget_update_adjustments(self);
     scroll_to_cursor(self);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+/* Cursor blink animation using frame clock tick callback */
+static gboolean
+cursor_blink_tick_callback(GtkWidget *widget, GdkFrameClock *frame_clock, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(widget);
+    
+    gint64 now = gdk_frame_clock_get_frame_time(frame_clock);
+    
+    /* First tick - initialize start time */
+    if (self->cursor_blink_start_time == 0) {
+        self->cursor_blink_start_time = now;
+    }
+    
+    /* Calculate elapsed time in seconds */
+    double elapsed = (double)(now - self->cursor_blink_start_time) / 1000000.0;
+    
+    /* Blink cycle: 1 second period (500ms on, 500ms off) with smooth sine wave */
+    /* sin(elapsed * PI * 2) gives a -1 to 1 wave over 1 second */
+    /* We map this to 0-1 alpha with smoother fade */
+    double phase = sin(elapsed * G_PI * 2.0);  /* -1 to 1 over 1 second */
+    self->cursor_alpha = (phase + 1.0) / 2.0;  /* Map to 0-1 */
+    
+    gtk_widget_queue_draw(widget);
+    
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+editor_widget_reset_cursor_blink(EditorWidget *self)
+{
+    /* Reset blink animation to fully visible when user types or moves cursor */
+    self->cursor_blink_start_time = 0;
+    self->cursor_alpha = 1.0;
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
@@ -668,6 +717,13 @@ static void
 editor_widget_dispose(GObject *object)
 {
     EditorWidget *self = EDITOR_WIDGET(object);
+    
+    /* Remove cursor blink tick callback */
+    if (self->cursor_blink_tick_id) {
+        gtk_widget_remove_tick_callback(GTK_WIDGET(self), self->cursor_blink_tick_id);
+        self->cursor_blink_tick_id = 0;
+    }
+    
     if (self->hadjustment) g_clear_object(&self->hadjustment);
     if (self->vadjustment) g_clear_object(&self->vadjustment);
     if (self->font_desc) pango_font_description_free(self->font_desc);
@@ -681,6 +737,12 @@ static void
 editor_widget_init(EditorWidget *self)
 {
     self->font_desc = pango_font_description_from_string("Monospace 12");
+    
+    /* Initialize cursor blink animation */
+    self->cursor_alpha = 1.0;
+    self->cursor_blink_start_time = 0;
+    self->cursor_blink_tick_id = gtk_widget_add_tick_callback(
+        GTK_WIDGET(self), cursor_blink_tick_callback, NULL, NULL);
     
     GtkEventController *controller = gtk_event_controller_key_new();
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
