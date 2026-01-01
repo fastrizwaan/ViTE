@@ -588,15 +588,36 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     editor_widget_reset_cursor_blink(self);
     
     if (n_press == 2) {
-        /* Double click - select word */
-        size_t word_start, word_end;
-        find_word_at_offset(self->doc, off, &word_start, &word_end);
-        self->selection_anchor = word_start;
-        self->cursor_offset = word_end;
+        /* Double click - select word, with special newline extension */
+        size_t total = document_get_length(self->doc);
+        gboolean is_newline = FALSE;
+        if (off < total) {
+            char *ctext = document_get_text_range(self->doc, off, 1);
+            if (ctext && ctext[0] == '\n') is_newline = TRUE;
+            g_free(ctext);
+        }
+        
+        if (is_newline) {
+            size_t sel_start = off;
+            size_t sel_end = off + 1;
+            if (off + 1 < total) {
+                size_t next_line_start, next_line_end;
+                find_line_at_offset(self->doc, off + 1, &next_line_start, &next_line_end);
+                sel_end = next_line_end;
+            }
+            self->selection_anchor = sel_start;
+            self->cursor_offset = sel_end;
+        } else {
+            size_t word_start, word_end;
+            find_word_at_offset(self->doc, off, &word_start, &word_end);
+            self->selection_anchor = word_start;
+            self->cursor_offset = word_end;
+        }
+        
         self->multi_click_selection = TRUE;
         self->multi_click_mode = 2;
-        self->multi_click_start = word_start;  /* Store for drag extension */
-        self->multi_click_end = word_end;
+        self->multi_click_start = self->selection_anchor;
+        self->multi_click_end = self->cursor_offset;
     } else if (n_press == 3) {
         /* Triple click - select entire line */
         size_t line_start, line_end;
