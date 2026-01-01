@@ -857,10 +857,14 @@ on_key_pressed(GtkEventControllerKey *controller,
         case GDK_KEY_Up:
             move_cursor(self, -1);
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            scroll_to_cursor(self);
+            gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Down:
             move_cursor(self, 1);
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            scroll_to_cursor(self);
+            gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Left:
             if (state & GDK_CONTROL_MASK) {
@@ -920,6 +924,8 @@ on_key_pressed(GtkEventControllerKey *controller,
              double page = (self->vadjustment) ? gtk_adjustment_get_page_size(self->vadjustment) : 10;
              move_cursor(self, -(int)page);
              if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+             scroll_to_cursor(self);
+             gtk_widget_queue_draw(GTK_WIDGET(self));
              break;
         }
         case GDK_KEY_Page_Down:
@@ -927,6 +933,8 @@ on_key_pressed(GtkEventControllerKey *controller,
              double page = (self->vadjustment) ? gtk_adjustment_get_page_size(self->vadjustment) : 10;
              move_cursor(self, (int)page);
              if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+             scroll_to_cursor(self);
+             gtk_widget_queue_draw(GTK_WIDGET(self));
              break;   
         }
         case GDK_KEY_Return:
