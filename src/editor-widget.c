@@ -373,12 +373,11 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             if (len == 0) {
                 gtk_snapshot_append_color(snapshot, 
                                           &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
-                                          &GRAPHENE_RECT_INIT(0, 0, 8.0, layout_h));
+                                          &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)layout_h));
             } else {
                 /* Iterate over visual lines in the layout */
                 PangoLayoutIter *iter = pango_layout_get_iter(layout);
-                gboolean has_next = TRUE;
-                while (has_next) {
+                do {
                     PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
                     int line_start_index = p_line->start_index;
                     int line_end_index = line_start_index + p_line->length;
@@ -390,41 +389,42 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                     double rh;
                     
                     /* Peek next line to calculate height for vertical continuity */
-                    if (pango_layout_iter_next_line(iter)) {
+                    PangoLayoutIter *next_iter = pango_layout_iter_copy(iter);
+                    if (pango_layout_iter_next_line(next_iter)) {
                         PangoRectangle next_rect;
-                        pango_layout_iter_get_line_extents(iter, NULL, &next_rect);
+                        pango_layout_iter_get_line_extents(next_iter, NULL, &next_rect);
                         rh = pango_units_to_double(next_rect.y) - ry;
-                        /* We have already moved the iterator, but we need to process 'p_line' */
-                        /* The 'while' will continue with the next line */
-                        has_next = TRUE;
                     } else {
                         rh = layout_h - ry;
-                        has_next = FALSE;
                     }
+                    pango_layout_iter_free(next_iter);
                     
-                    if (sel_in_line_end > line_start_index && sel_in_line_start < line_end_index) {
-                        int intersect_start = MAX((int)sel_in_line_start, line_start_index);
-                        int intersect_end = MIN((int)sel_in_line_end, line_end_index);
-                        
+                    if (sel_in_line_end >= (size_t)line_start_index && sel_in_line_start <= (size_t)line_end_index) {
                         int x1, x2;
-                        pango_layout_line_index_to_x(p_line, intersect_start, FALSE, &x1);
-                        pango_layout_line_index_to_x(p_line, intersect_end, FALSE, &x2);
+                        pango_layout_line_index_to_x(p_line, (int)MAX(sel_in_line_start, (size_t)line_start_index), FALSE, &x1);
+                        pango_layout_line_index_to_x(p_line, (int)MIN(sel_in_line_end, (size_t)line_end_index), FALSE, &x2);
                         
                         double rx = pango_units_to_double(MIN(x1, x2));
                         double rw = pango_units_to_double(abs(x2 - x1));
                         
-                        /* If selection extends beyond this visual line (it's either a wrap or logical end) */
+                        /* If selection extends beyond this visual line (wrap or logical end) */
                         if (end_sel > line_start_off + line_end_index) {
                             rw = width - rx;
                         }
                         
-                        if (rw > 0) {
-                            gtk_snapshot_append_color(snapshot, 
-                                                      &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
-                                                      &GRAPHENE_RECT_INIT(rx, ry, rw, rh));
+                        if (rw > 0 || (sel_in_line_start == sel_in_line_end && end_sel > line_start_off + len)) {
+                            /* Even if rw is 0, if this is the last char and we select the newline, show something? 
+                               Actually rw > 0 is better, but for end-of-line we force rw to extend. */
+                            if (rw <= 0 && end_sel > line_start_off + line_end_index) rw = width - rx;
+                            
+                            if (rw > 0) {
+                                gtk_snapshot_append_color(snapshot, 
+                                                          &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
+                                                          &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                            }
                         }
                     }
-                }
+                } while (pango_layout_iter_next_line(iter));
                 pango_layout_iter_free(iter);
             }
         }
