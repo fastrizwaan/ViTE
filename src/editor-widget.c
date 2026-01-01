@@ -30,6 +30,14 @@ struct _EditorWidget {
     gint64 cursor_blink_start_time;
     double cursor_alpha;  /* Current cursor opacity 0.0-1.0 */
     
+    /* Drag and drop */
+    gboolean is_dragging_selection;
+    size_t drag_start_offset;
+    gboolean multi_click_selection; /* Set after double/triple-click to prevent drag_begin clearing selection */
+    int multi_click_mode;  /* 2 = word mode (double-click), 3 = line mode (triple-click) */
+    size_t multi_click_start;  /* Original start of multi-click selection */
+    size_t multi_click_end;    /* Original end of multi-click selection */
+    
     /* Input */
     GtkIMContext *im_context;
     
@@ -137,6 +145,112 @@ utf8_prev_grapheme(Document *doc, size_t offset)
     return offset - bytes;
 }
 
+/* Helper: Check if character at offset is a word character */
+static gboolean
+is_word_char_at(Document *doc, size_t offset)
+{
+    size_t total = document_get_length(doc);
+    if (offset >= total) return FALSE;
+    
+    char *text = document_get_text_range(doc, offset, 4); /* Max UTF-8 char */
+    if (!text) return FALSE;
+    
+    gunichar ch = g_utf8_get_char_validated(text, -1);
+    g_free(text);
+    
+    if (ch == (gunichar)-1 || ch == (gunichar)-2) return FALSE;
+    return g_unichar_isalnum(ch) || ch == '_';
+}
+
+/* Find word boundaries around offset */
+static void
+find_word_at_offset(Document *doc, size_t offset, size_t *word_start, size_t *word_end)
+{
+    size_t total = document_get_length(doc);
+    
+    /* Find start of word - go back while we're on word chars */
+    size_t start = offset;
+    while (start > 0) {
+        size_t prev = utf8_prev_grapheme(doc, start);
+        if (!is_word_char_at(doc, prev)) break;
+        start = prev;
+    }
+    
+    /* Find end of word - go forward while we're on word chars */
+    size_t end = offset;
+    while (end < total && is_word_char_at(doc, end)) {
+        end = utf8_next_grapheme(doc, end);
+    }
+    
+    /* If we started on non-word char, select just that char */
+    if (start == end && offset < total) {
+        end = utf8_next_grapheme(doc, offset);
+        start = offset;
+    }
+    
+    *word_start = start;
+    *word_end = end;
+}
+
+/* Find line boundaries (start and end of line, excluding trailing newline) */
+static void
+find_line_at_offset(Document *doc, size_t offset, size_t *line_start, size_t *line_end)
+{
+    size_t line_idx = document_get_line_of_offset(doc, offset);
+    *line_start = document_get_offset_of_line(doc, line_idx);
+    
+    /* Get line length */
+    size_t len;
+    char *text = document_get_line(doc, line_idx, &len);
+    
+    /* Exclude trailing newline from selection */
+    if (len > 0 && text[len - 1] == '\n') {
+        len--;
+    }
+    
+    g_free(text);
+    
+    *line_end = *line_start + len;
+}
+
+/* Move to start of next word */
+static size_t
+word_next(Document *doc, size_t offset)
+{
+    size_t total = document_get_length(doc);
+    
+    /* Skip current word characters */
+    while (offset < total && is_word_char_at(doc, offset)) {
+        offset = utf8_next_grapheme(doc, offset);
+    }
+    /* Skip whitespace/non-word to reach next word */
+    while (offset < total && !is_word_char_at(doc, offset)) {
+        offset = utf8_next_grapheme(doc, offset);
+    }
+    return offset;
+}
+
+/* Move to start of current/previous word */
+static size_t
+word_prev(Document *doc, size_t offset)
+{
+    if (offset == 0) return 0;
+    
+    /* Move back one char first */
+    offset = utf8_prev_grapheme(doc, offset);
+    
+    /* Skip non-word characters backwards */
+    while (offset > 0 && !is_word_char_at(doc, offset)) {
+        offset = utf8_prev_grapheme(doc, offset);
+    }
+    /* Find start of current word */
+    while (offset > 0) {
+        size_t prev = utf8_prev_grapheme(doc, offset);
+        if (!is_word_char_at(doc, prev)) break;
+        offset = prev;
+    }
+    return offset;
+}
 static void
 editor_widget_ensure_metrics(EditorWidget *self)
 {
@@ -235,32 +349,47 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         */
         
         /* Draw Selection */
-        /* Simplistic selection: if line is within [anchor, cursor] range */
         size_t start_sel = MIN(self->cursor_offset, self->selection_anchor);
         size_t end_sel = MAX(self->cursor_offset, self->selection_anchor);
         size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
-        size_t line_end_off = line_start_off + len; /* Not including newline for display usually? */
+        size_t raw_line_end = line_start_off + len; /* Including newline */
+        size_t line_end_off = line_start_off + len;
         
-        /* Check overlap */
-        if (start_sel < line_end_off && end_sel > line_start_off) {
-            /* Intersection */
+        /* Check if selection intersects this line */
+        if (start_sel < raw_line_end && end_sel > line_start_off && start_sel != end_sel) {
             size_t sel_in_line_start = MAX(start_sel, line_start_off) - line_start_off;
             size_t sel_in_line_end = MIN(end_sel, line_end_off) - line_start_off;
             
-            /* Get pixel ranges from Pango */
-            PangoRectangle r1, r2;
-            pango_layout_index_to_pos(layout, sel_in_line_start, &r1);
-            pango_layout_index_to_pos(layout, sel_in_line_end, &r2);
+            double x, w;
             
-            /* Draw rectangle */
-            double x = pango_units_to_double(r1.x);
-            double w = pango_units_to_double(r2.x - r1.x);
-            /* Handle RTL? r2.x might be < r1.x. Abs needed for width. */
-            if (w < 0) { x += w; w = -w; }
+            /* Handle empty/newline-only lines */
+            if (len == 0 || (len == 1 && text[0] == '\n')) {
+                /* Empty line - draw small selection indicator */
+                x = 0;
+                w = 8.0; /* Small indicator width */
+            } else {
+                /* Get pixel ranges from Pango */
+                PangoRectangle r1, r2;
+                pango_layout_index_to_pos(layout, sel_in_line_start, &r1);
+                pango_layout_index_to_pos(layout, MIN(sel_in_line_end, len), &r2);
+                
+                x = pango_units_to_double(r1.x);
+                w = pango_units_to_double(r2.x - r1.x);
+                
+                /* Handle RTL text */
+                if (w < 0) { x += w; w = -w; }
+                
+                /* If selection extends past line end (newline selected), extend to edge */
+                if (end_sel > line_start_off + len) {
+                    w = width - x;
+                }
+            }
             
-            gtk_snapshot_append_color(snapshot, 
-                                      &(GdkRGBA){0.2, 0.2, 0.6, 0.4}, /* Selection color hardcoded for now or derived? */
-                                      &GRAPHENE_RECT_INIT(x, 0, w, self->line_height));
+            if (w > 0) {
+                gtk_snapshot_append_color(snapshot, 
+                                          &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
+                                          &GRAPHENE_RECT_INIT(x, 0, w, self->line_height));
+            }
         }
 
         /* Calculate height of this line */
@@ -271,8 +400,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
         gtk_snapshot_append_layout(snapshot, layout, &self->color_text);
         
-        /* Draw cursor */
-        if (line_idx == cursor_line && self->cursor_alpha > 0.01) {
+        /* Draw cursor - only when no selection */
+        gboolean has_selection = (self->cursor_offset != self->selection_anchor);
+        if (line_idx == cursor_line && self->cursor_alpha > 0.01 && !has_selection) {
              size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
              if (self->cursor_offset >= line_start_off) {
                  size_t index_in_line = self->cursor_offset - line_start_off;
@@ -419,21 +549,55 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     EditorWidget *self = EDITOR_WIDGET(user_data);
     gtk_widget_grab_focus(GTK_WIDGET(self));
     
+    if (!self->doc) return;
+    
     size_t off;
     editor_widget_get_offset_at_point(self, x, y, &off);
     
-    self->cursor_offset = off;
+    editor_widget_reset_cursor_blink(self);
     
     if (n_press == 2) {
-        /* Double click select word - TODO */
+        /* Double click - select word */
+        size_t word_start, word_end;
+        find_word_at_offset(self->doc, off, &word_start, &word_end);
+        self->selection_anchor = word_start;
+        self->cursor_offset = word_end;
+        self->multi_click_selection = TRUE;
+        self->multi_click_mode = 2;
+        self->multi_click_start = word_start;  /* Store for drag extension */
+        self->multi_click_end = word_end;
     } else if (n_press == 3) {
-        /* Triple click select line - TODO */
+        /* Triple click - select entire line */
+        size_t line_start, line_end;
+        find_line_at_offset(self->doc, off, &line_start, &line_end);
+        self->selection_anchor = line_start;
+        self->cursor_offset = line_end;
+        self->multi_click_selection = TRUE;
+        self->multi_click_mode = 3;
+        self->multi_click_start = line_start;  /* Store for drag extension */
+        self->multi_click_end = line_end;
     } else {
-        /* Single click reset selection */
+        /* Single click */
+        self->multi_click_selection = FALSE;
         GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
-        if (state & GDK_SHIFT_MASK) {
-            /* Extend selection */
+        
+        /* Check if clicking inside existing selection */
+        size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
+        size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+        gboolean has_selection = (sel_start != sel_end);
+        gboolean click_in_selection = has_selection && (off >= sel_start && off < sel_end);
+        
+        if (click_in_selection && !(state & GDK_SHIFT_MASK)) {
+            /* Start potential drag of selection */
+            self->is_dragging_selection = TRUE;
+            self->drag_start_offset = off;
+            /* Don't change selection yet - wait for drag or click release */
+        } else if (state & GDK_SHIFT_MASK) {
+            /* Extend selection - keep anchor, move cursor */
+            self->cursor_offset = off;
         } else {
+            /* Reset selection */
+            self->cursor_offset = off;
             self->selection_anchor = off;
         }
     }
@@ -442,18 +606,143 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
 }
 
 static void
+on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    if (!self->doc) return;
+    
+    /* If we just did a multi-click selection (double/triple-click), 
+       don't process drag_begin as it would interfere with the selection */
+    if (self->multi_click_selection) {
+        self->is_dragging_selection = TRUE;  /* Treat as selecting within multi-click */
+        return;
+    }
+    
+    /* Check if we're starting a drag on a selection */
+    size_t off;
+    editor_widget_get_offset_at_point(self, x, y, &off);
+    
+    size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
+    size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+    
+    if (sel_start != sel_end && off >= sel_start && off < sel_end) {
+        /* Starting drag on existing selection - prepare for DnD */
+        self->is_dragging_selection = TRUE;
+        self->drag_start_offset = off;
+    } else {
+        /* Normal click/drag - selection handled by on_click_pressed and on_drag_update */
+        self->is_dragging_selection = FALSE;
+    }
+}
+
+static void
 on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
+    if (!self->doc) return;
+    
     double start_x, start_y;
     gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
     
     size_t off;
     editor_widget_get_offset_at_point(self, start_x + offset_x, start_y + offset_y, &off);
     
-    self->cursor_offset = off;
+    if (self->multi_click_selection) {
+        /* Multi-click drag - extend selection while keeping original word/line as minimum */
+        size_t current_start = off;
+        size_t current_end = off;
+        
+        if (self->multi_click_mode == 2) {
+            /* Word mode */
+            find_word_at_offset(self->doc, off, &current_start, &current_end);
+        } else if (self->multi_click_mode == 3) {
+            /* Line mode */
+            find_line_at_offset(self->doc, off, &current_start, &current_end);
+        }
+        
+        if (off < self->multi_click_start) {
+            /* Dragging before the original selection - extend backwards */
+            self->selection_anchor = self->multi_click_end;
+            self->cursor_offset = current_start;
+        } else if (off > self->multi_click_end) {
+            /* Dragging after the original selection - extend forwards */
+            self->selection_anchor = self->multi_click_start;
+            self->cursor_offset = current_end;
+        } else {
+            /* Still within original selection - keep original bounds */
+            self->selection_anchor = self->multi_click_start;
+            self->cursor_offset = self->multi_click_end;
+        }
+    } else if (self->is_dragging_selection) {
+        /* Dragging selection for DnD - visual feedback handled by cursor */
+        /* We'll execute the move on drag_end */
+    } else {
+        /* Normal drag selection - extend selection to current position */
+        /* Only update cursor, anchor was set by on_click_pressed */
+        self->cursor_offset = off;
+    }
+    
     scroll_to_cursor(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static void
+on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    if (!self->doc) return;
+    
+    /* If this was a multi-click selection (double/triple-click), 
+       just clear the flag and preserve the selection */
+    if (self->multi_click_selection) {
+        self->multi_click_selection = FALSE;
+        self->is_dragging_selection = FALSE;
+        return;
+    }
+    
+    if (self->is_dragging_selection) {
+        double start_x, start_y;
+        gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
+        
+        size_t drop_off;
+        editor_widget_get_offset_at_point(self, start_x + offset_x, start_y + offset_y, &drop_off);
+        
+        size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
+        size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+        
+        /* Check if there was actual movement (not just a click) - 8px threshold */
+        gboolean has_movement = (fabs(offset_x) > 8 || fabs(offset_y) > 8);
+        
+        if (has_movement && (drop_off < sel_start || drop_off >= sel_end)) {
+            /* Move selection to new location */
+            size_t sel_len = sel_end - sel_start;
+            char *text = document_get_text_range(self->doc, sel_start, sel_len);
+            
+            if (text) {
+                document_delete(self->doc, sel_start, sel_len);
+                
+                if (drop_off > sel_end) {
+                    drop_off -= sel_len;
+                }
+                
+                document_insert(self->doc, drop_off, text, sel_len);
+                
+                self->selection_anchor = drop_off;
+                self->cursor_offset = drop_off + sel_len;
+                
+                g_free(text);
+                editor_widget_update_adjustments(self);
+            }
+        } else if (!has_movement) {
+            /* Just a click inside selection - place cursor there */
+            self->cursor_offset = drop_off;
+            self->selection_anchor = drop_off;
+        }
+        /* If moved but still inside selection, do nothing */
+        
+        self->is_dragging_selection = FALSE;
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+    }
 }
 
 static void
@@ -532,13 +821,21 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             break;
         case GDK_KEY_Left:
-            self->cursor_offset = utf8_prev_grapheme(self->doc, self->cursor_offset);
+            if (state & GDK_CONTROL_MASK) {
+                self->cursor_offset = word_prev(self->doc, self->cursor_offset);
+            } else {
+                self->cursor_offset = utf8_prev_grapheme(self->doc, self->cursor_offset);
+            }
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Right:
-            self->cursor_offset = utf8_next_grapheme(self->doc, self->cursor_offset);
+            if (state & GDK_CONTROL_MASK) {
+                self->cursor_offset = word_next(self->doc, self->cursor_offset);
+            } else {
+                self->cursor_offset = utf8_next_grapheme(self->doc, self->cursor_offset);
+            }
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -633,6 +930,16 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (state & GDK_CONTROL_MASK) {
                  document_redo(self->doc);
                  gtk_widget_queue_draw(GTK_WIDGET(self));
+            }
+            break;
+        case GDK_KEY_a:
+            if (state & GDK_CONTROL_MASK) {
+                /* Select all */
+                self->selection_anchor = 0;
+                self->cursor_offset = document_get_length(self->doc);
+                gtk_widget_queue_draw(GTK_WIDGET(self));
+            } else {
+                handled = FALSE;
             }
             break;
         /* IME handles letters */
@@ -764,7 +1071,9 @@ editor_widget_init(EditorWidget *self)
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(click));
 
     GtkGesture *drag = gtk_gesture_drag_new();
+    g_signal_connect(drag, "drag-begin", G_CALLBACK(on_drag_begin), self);
     g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), self);
+    g_signal_connect(drag, "drag-end", G_CALLBACK(on_drag_end), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(drag));
     
     gtk_widget_set_focusable(GTK_WIDGET(self), TRUE);
