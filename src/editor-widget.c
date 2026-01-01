@@ -832,10 +832,6 @@ move_cursor(EditorWidget *self, int visual_lines)
     }
     
     self->cursor_offset = new_line_start + new_col;
-    self->selection_anchor = self->cursor_offset; /* Reset selection strictly */
-    
-    scroll_to_cursor(self);
-    gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
 static gboolean
