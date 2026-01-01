@@ -961,6 +961,250 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
 }
 
 static gboolean
+is_alt_word_char_at(Document *doc, size_t offset)
+{
+    size_t total = document_get_length(doc);
+    if (offset >= total) return FALSE;
+    
+    char *text = document_get_text_range(doc, offset, 4);
+    if (!text) return FALSE;
+    
+    gunichar ch = g_utf8_get_char_validated(text, -1);
+    g_free(text);
+    
+    if (ch == (gunichar)-1 || ch == (gunichar)-2) return FALSE;
+    
+    /* For Alt+Arrow, _ is a separator */
+    if (ch == '_') return FALSE;
+    
+    return g_unichar_isalnum(ch);
+}
+
+static void
+editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
+{
+    size_t start = MIN(self->cursor_offset, self->selection_anchor);
+    size_t end = MAX(self->cursor_offset, self->selection_anchor);
+    size_t len = end - start;
+    size_t total = document_get_length(self->doc);
+    
+    if (delta > 0) {
+        /* Move Right */
+        if (end >= total) return;
+        size_t next = utf8_next_grapheme(self->doc, end);
+        size_t char_len = next - end;
+        
+        char *sel_text = document_get_text_range(self->doc, start, len);
+        char *char_text = document_get_text_range(self->doc, end, char_len);
+        
+        /* Swap: [sel][char] -> [char][sel] */
+        document_delete(self->doc, start, len + char_len);
+        document_insert(self->doc, start, char_text, char_len);
+        document_insert(self->doc, start + char_len, sel_text, len);
+        
+        self->cursor_offset = start + char_len + (self->cursor_offset == end ? len : 0);
+        self->selection_anchor = start + char_len + (self->selection_anchor == end ? len : 0);
+        
+        g_free(sel_text);
+        g_free(char_text);
+    } else {
+        /* Move Left */
+        if (start == 0) return;
+        size_t prev = utf8_prev_grapheme(self->doc, start);
+        size_t char_len = start - prev;
+        
+        char *char_text = document_get_text_range(self->doc, prev, char_len);
+        char *sel_text = document_get_text_range(self->doc, start, len);
+        
+        /* Swap: [char][sel] -> [sel][char] */
+        document_delete(self->doc, prev, char_len + len);
+        document_insert(self->doc, prev, sel_text, len);
+        document_insert(self->doc, prev + len, char_text, char_len);
+        
+        self->cursor_offset = prev + (self->cursor_offset == start ? 0 : len);
+        self->selection_anchor = prev + (self->selection_anchor == start ? 0 : len);
+        
+        g_free(sel_text);
+        g_free(char_text);
+    }
+    update_target_x(self);
+}
+
+static void
+editor_widget_move_lines_vertically(EditorWidget *self, int delta)
+{
+    size_t start_off = MIN(self->cursor_offset, self->selection_anchor);
+    size_t end_off = MAX(self->cursor_offset, self->selection_anchor);
+    
+    size_t start_line = document_get_line_of_offset(self->doc, start_off);
+    size_t end_line = document_get_line_of_offset(self->doc, end_off);
+    
+    /* If selection ends exactly at start of next line, don't include that line */
+    if (end_off > start_off && end_off == document_get_offset_of_line(self->doc, end_line) && end_line > start_line) {
+        end_line--;
+    }
+    
+    size_t total_lines = document_get_line_count(self->doc);
+    
+    if (delta < 0 && start_line > 0) {
+        /* Move Up */
+        size_t prev_line = start_line - 1;
+        size_t prev_start = document_get_offset_of_line(self->doc, prev_line);
+        size_t range_start = document_get_offset_of_line(self->doc, start_line);
+        size_t range_end = document_get_offset_of_line(self->doc, end_line + 1);
+        if (end_line + 1 == total_lines) range_end = document_get_length(self->doc);
+        
+        size_t prev_len = range_start - prev_start;
+        size_t range_len = range_end - range_start;
+        
+        char *prev_text = document_get_text_range(self->doc, prev_start, prev_len);
+        char *range_text = document_get_text_range(self->doc, range_start, range_len);
+        
+        /* Swap: [prev][range] -> [range][prev] */
+        document_delete(self->doc, prev_start, prev_len + range_len);
+        document_insert(self->doc, prev_start, range_text, range_len);
+        document_insert(self->doc, prev_start + range_len, prev_text, prev_len);
+        
+        self->cursor_offset = prev_start + (start_off - range_start) + (self->cursor_offset > self->selection_anchor ? range_len : 0);
+        self->selection_anchor = prev_start + (start_off - range_start) + (self->selection_anchor > self->cursor_offset ? range_len : 0);
+        /* Simple re-select whole lines as requested */
+        self->selection_anchor = prev_start;
+        self->cursor_offset = prev_start + range_len;
+        
+        g_free(prev_text);
+        g_free(range_text);
+    } else if (delta > 0 && end_line + 1 < total_lines) {
+        /* Move Down */
+        size_t next_line = end_line + 1;
+        size_t range_start = document_get_offset_of_line(self->doc, start_line);
+        size_t range_end = document_get_offset_of_line(self->doc, next_line);
+        size_t next_end = document_get_offset_of_line(self->doc, next_line + 1);
+        if (next_line + 1 == total_lines) next_end = document_get_length(self->doc);
+        
+        size_t range_len = range_end - range_start;
+        size_t next_len = next_end - range_end;
+        
+        char *range_text = document_get_text_range(self->doc, range_start, range_len);
+        char *next_text = document_get_text_range(self->doc, range_end, next_len);
+        
+        /* Swap: [range][next] -> [next][range] */
+        document_delete(self->doc, range_start, range_len + next_len);
+        document_insert(self->doc, range_start, next_text, next_len);
+        document_insert(self->doc, range_start + next_len, range_text, range_len);
+        
+        self->selection_anchor = range_start + next_len;
+        self->cursor_offset = range_start + next_len + range_len;
+        
+        g_free(range_text);
+        g_free(next_text);
+    }
+    update_target_x(self);
+}
+
+static void
+editor_widget_swap_words(EditorWidget *self, int delta)
+{
+    size_t total = document_get_length(self->doc);
+    size_t off = self->cursor_offset;
+    
+    /* Find boundaries of current word */
+    /* If at end of word, back up to be inside it */
+    if (off > 0 && !is_alt_word_char_at(self->doc, off) && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self->doc, off))) {
+        off = utf8_prev_grapheme(self->doc, off);
+    }
+    
+    /* If not in a word, find the next one in choice direction? 
+       User example implies caret is at start of "world".
+    */
+    if (!is_alt_word_char_at(self->doc, off)) {
+        if (delta > 0) {
+            while (off < total && !is_alt_word_char_at(self->doc, off)) off = utf8_next_grapheme(self->doc, off);
+        } else {
+            while (off > 0 && !is_alt_word_char_at(self->doc, off)) off = utf8_prev_grapheme(self->doc, off);
+        }
+    }
+    
+    if (off >= total || !is_alt_word_char_at(self->doc, off)) return;
+    
+    size_t w1_start = off;
+    while (w1_start > 0 && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self->doc, w1_start)))
+        w1_start = utf8_prev_grapheme(self->doc, w1_start);
+        
+    size_t w1_end = off;
+    while (w1_end < total && is_alt_word_char_at(self->doc, w1_end))
+        w1_end = utf8_next_grapheme(self->doc, w1_end);
+        
+    size_t w1_len = w1_end - w1_start;
+    
+    if (delta > 0) {
+        /* Swap with word to the right */
+        size_t sep_start = w1_end;
+        size_t sep_end = sep_start;
+        while (sep_end < total && !is_alt_word_char_at(self->doc, sep_end))
+            sep_end = utf8_next_grapheme(self->doc, sep_end);
+            
+        if (sep_end >= total) return;
+        
+        size_t w2_start = sep_end;
+        size_t w2_end = w2_start;
+        while (w2_end < total && is_alt_word_char_at(self->doc, w2_end))
+            w2_end = utf8_next_grapheme(self->doc, w2_end);
+            
+        size_t w2_len = w2_end - w2_start;
+        size_t sep_len = w2_start - w1_end;
+        
+        char *w1_text = document_get_text_range(self->doc, w1_start, w1_len);
+        char *sep_text = document_get_text_range(self->doc, w1_end, sep_len);
+        char *w2_text = document_get_text_range(self->doc, w2_start, w2_len);
+        
+        /* [W1][SEP][W2] -> [W2][SEP][W1] */
+        document_delete(self->doc, w1_start, w1_len + sep_len + w2_len);
+        document_insert(self->doc, w1_start, w2_text, w2_len);
+        document_insert(self->doc, w1_start + w2_len, sep_text, sep_len);
+        document_insert(self->doc, w1_start + w2_len + sep_len, w1_text, w1_len);
+        
+        self->selection_anchor = w1_start + w2_len + sep_len;
+        self->cursor_offset = self->selection_anchor + w1_len;
+        
+        g_free(w1_text); g_free(sep_text); g_free(w2_text);
+    } else {
+        /* Swap with word to the left */
+        size_t sep_end = w1_start;
+        size_t sep_start = sep_end;
+        while (sep_start > 0 && !is_alt_word_char_at(self->doc, utf8_prev_grapheme(self->doc, sep_start)))
+            sep_start = utf8_prev_grapheme(self->doc, sep_start);
+            
+        if (sep_start == 0 && !is_alt_word_char_at(self->doc, 0)) return;
+        
+        size_t w2_end = sep_start;
+        size_t w2_start = w2_end;
+        while (w2_start > 0 && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self->doc, w2_start)))
+            w2_start = utf8_prev_grapheme(self->doc, w2_start);
+            
+        if (w2_start == w2_end) return;
+        
+        size_t w2_len = w2_end - w2_start;
+        size_t sep_len = w1_start - w2_end;
+        
+        char *w2_text = document_get_text_range(self->doc, w2_start, w2_len);
+        char *sep_text = document_get_text_range(self->doc, w2_end, sep_len);
+        char *w1_text = document_get_text_range(self->doc, w1_start, w1_len);
+        
+        /* [W2][SEP][W1] -> [W1][SEP][W2] */
+        document_delete(self->doc, w2_start, w2_len + sep_len + w1_len);
+        document_insert(self->doc, w2_start, w1_text, w1_len);
+        document_insert(self->doc, w2_start + w1_len, sep_text, sep_len);
+        document_insert(self->doc, w2_start + w1_len + sep_len, w2_text, w2_len);
+        
+        self->selection_anchor = w2_start;
+        self->cursor_offset = w2_start + w1_len;
+        
+        g_free(w1_text); g_free(sep_text); g_free(w2_text);
+    }
+    update_target_x(self);
+}
+
+static gboolean
 on_key_pressed(GtkEventControllerKey *controller,
                guint                  keyval,
                guint                  keycode,
@@ -977,36 +1221,60 @@ on_key_pressed(GtkEventControllerKey *controller,
     
     switch (keyval) {
         case GDK_KEY_Up:
-            move_cursor(self, -1);
-            if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            if (state & GDK_ALT_MASK) {
+                editor_widget_move_lines_vertically(self, -1);
+            } else {
+                move_cursor(self, -1);
+                if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            }
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Down:
-            move_cursor(self, 1);
-            if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            if (state & GDK_ALT_MASK) {
+                editor_widget_move_lines_vertically(self, 1);
+            } else {
+                move_cursor(self, 1);
+                if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            }
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Left:
-            if (state & GDK_CONTROL_MASK) {
-                self->cursor_offset = word_prev(self->doc, self->cursor_offset);
+            if (state & GDK_ALT_MASK) {
+                if (self->cursor_offset != self->selection_anchor) {
+                    editor_widget_move_selection_horizontally(self, -1);
+                } else {
+                    editor_widget_swap_words(self, -1);
+                }
             } else {
-                self->cursor_offset = utf8_prev_grapheme(self->doc, self->cursor_offset);
+                if (state & GDK_CONTROL_MASK) {
+                    self->cursor_offset = word_prev(self->doc, self->cursor_offset);
+                } else {
+                    self->cursor_offset = utf8_prev_grapheme(self->doc, self->cursor_offset);
+                }
+                if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+                update_target_x(self);
             }
-            if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
-            update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Right:
-            if (state & GDK_CONTROL_MASK) {
-                self->cursor_offset = word_next(self->doc, self->cursor_offset);
+            if (state & GDK_ALT_MASK) {
+                if (self->cursor_offset != self->selection_anchor) {
+                    editor_widget_move_selection_horizontally(self, 1);
+                } else {
+                    editor_widget_swap_words(self, 1);
+                }
             } else {
-                self->cursor_offset = utf8_next_grapheme(self->doc, self->cursor_offset);
+                if (state & GDK_CONTROL_MASK) {
+                    self->cursor_offset = word_next(self->doc, self->cursor_offset);
+                } else {
+                    self->cursor_offset = utf8_next_grapheme(self->doc, self->cursor_offset);
+                }
+                if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+                update_target_x(self);
             }
-            if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
-            update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
