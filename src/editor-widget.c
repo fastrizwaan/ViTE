@@ -712,13 +712,13 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
                 find_line_at_offset(self->doc, off + 1, &next_line_start, &next_line_end);
                 sel_end = next_line_end;
             }
-            self->selection_anchor = sel_start;
-            self->cursor_offset = sel_end;
+            self->selection_anchor = sel_end;
+            self->cursor_offset = sel_start;
         } else {
             size_t word_start, word_end;
             editor_widget_find_word_boundary(self, off, &word_start, &word_end);
-            self->selection_anchor = word_start;
-            self->cursor_offset = word_end;
+            self->selection_anchor = word_end;
+            self->cursor_offset = word_start;
         }
         self->alt_word_mode = TRUE; /* Double click starts word mode */
         self->multi_click_selection = TRUE;
@@ -729,8 +729,8 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         /* Triple click - select entire line */
         size_t line_start, line_end;
         find_line_at_offset(self->doc, off, &line_start, &line_end);
-        self->selection_anchor = line_start;
-        self->cursor_offset = line_end;
+        self->selection_anchor = line_end;
+        self->cursor_offset = line_start;
         self->alt_word_mode = TRUE; /* Triple click is also word-like */
         self->multi_click_selection = TRUE;
         self->multi_click_mode = 3;
@@ -749,18 +749,9 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         
         if (state & GDK_SHIFT_MASK) {
             if (click_in_selection) {
-                /* Inside click -> Smart Pivot: anchor goes to the FAR end */
-                size_t dist_to_start = off - sel_start;
-                size_t dist_to_end = sel_end - off;
-                
-                if (dist_to_start <= dist_to_end) {
-                    /* Closer to start -> Anchor at end, keep selection from click to end */
-                    self->selection_anchor = sel_end;
-                } else {
-                    /* Closer to end -> Anchor at start, keep selection from start to click */
-                    self->selection_anchor = sel_start;
-                }
+                /* Inside click -> Keep anchor, just move cursor to reduce selection */
                 self->cursor_offset = off;
+                /* Anchor stays as-is (self->selection_anchor is unchanged) */
             } else {
                 /* Outside click -> Smart Pivot */
                 if (off >= sel_end) {
@@ -1698,9 +1689,10 @@ on_key_pressed(GtkEventControllerKey *controller,
             break;
         case GDK_KEY_a:
             if (state & GDK_CONTROL_MASK) {
-                /* Select all */
-                self->selection_anchor = 0;
-                self->cursor_offset = document_get_length(self->doc);
+                /* Select all - anchor at end so Shift+Click reduces from start */
+                self->selection_anchor = document_get_length(self->doc);
+                self->cursor_offset = 0;
+                self->alt_word_mode = TRUE; /* Treat as auto-selection */
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             } else {
                 handled = FALSE;
