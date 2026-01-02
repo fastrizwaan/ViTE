@@ -2506,6 +2506,129 @@ get_cursor_screen_coordinates(EditorWidget *self, double *out_x, double *out_y)
     return FALSE; /* Not found visible */
 }
 
+/* Indentation helpers */
+static void
+editor_widget_indent_selection(EditorWidget *self)
+{
+    if (!self->doc) return;
+
+    size_t start = MIN(self->cursor_offset, self->selection_anchor);
+    size_t end = MAX(self->cursor_offset, self->selection_anchor);
+    
+    size_t start_line = document_get_line_of_offset(self->doc, start);
+    size_t end_line = document_get_line_of_offset(self->doc, end);
+    
+    /* If end is exactly at the start of a line, don't include that line in indentation */
+    if (end > start && end == document_get_offset_of_line(self->doc, end_line)) {
+        if (end_line > start_line) end_line--;
+    }
+
+    /* Prepare indentation string */
+    char *indent_str;
+    size_t indent_len;
+    if (self->indent_style == 0) {
+        indent_len = self->indent_width;
+        indent_str = g_malloc(indent_len + 1);
+        memset(indent_str, ' ', indent_len);
+        indent_str[indent_len] = '\0';
+    } else {
+        indent_len = 1;
+        indent_str = g_strdup("\t");
+    }
+
+    document_begin_undo_group(self->doc);
+    
+    size_t bytes_added = 0;
+    
+    for (size_t i = start_line; i <= end_line; i++) {
+        size_t line_start = document_get_offset_of_line(self->doc, i);
+        document_insert(self->doc, line_start, indent_str, indent_len);
+        bytes_added += indent_len;
+    }
+    
+    document_end_undo_group(self->doc);
+    g_free(indent_str);
+
+    /* Update selection: snapped to line start for block indent behavior */
+    size_t new_start = document_get_offset_of_line(self->doc, start_line);
+    size_t new_end = end + bytes_added;
+    
+    if (self->cursor_offset == start) {
+        self->cursor_offset = new_start;
+        self->selection_anchor = new_end;
+    } else {
+        self->cursor_offset = new_end;
+        self->selection_anchor = new_start;
+    }
+}
+
+static void
+editor_widget_unindent_selection(EditorWidget *self)
+{
+    if (!self->doc) return;
+
+    size_t start = MIN(self->cursor_offset, self->selection_anchor);
+    size_t end = MAX(self->cursor_offset, self->selection_anchor);
+    
+    size_t start_line = document_get_line_of_offset(self->doc, start);
+    size_t end_line = document_get_line_of_offset(self->doc, end);
+    
+    if (end > start && end == document_get_offset_of_line(self->doc, end_line)) {
+        if (end_line > start_line) end_line--;
+    }
+    
+    document_begin_undo_group(self->doc);
+    
+    size_t total_removed = 0;
+    
+    for (size_t i = start_line; i <= end_line; i++) {
+        size_t line_off = document_get_offset_of_line(self->doc, i);
+        size_t len;
+        char *line_text = document_get_line(self->doc, i, &len);
+        
+        gboolean can_unindent = FALSE;
+        size_t delete_len = 0;
+        
+        if (len > 0) {
+            if (line_text[0] == '\t') {
+                can_unindent = TRUE;
+                delete_len = 1;
+            } else if (line_text[0] == ' ') {
+                /* Check for up to indent_width spaces */
+                size_t spaces = 0;
+                while (spaces < self->indent_width && spaces < len && line_text[spaces] == ' ') {
+                    spaces++;
+                }
+                if (spaces > 0) {
+                    can_unindent = TRUE;
+                    delete_len = spaces;
+                }
+            }
+        }
+        
+        g_free(line_text);
+        
+        if (can_unindent) {
+            document_delete(self->doc, line_off, delete_len);
+            total_removed += delete_len;
+        }
+    }
+    
+    document_end_undo_group(self->doc);
+    
+    /* Adjust selection: snapped to line start */
+    size_t new_start = document_get_offset_of_line(self->doc, start_line);
+    size_t new_end = (end > total_removed) ? end - total_removed : 0;
+    
+    if (self->cursor_offset == start) {
+        self->cursor_offset = new_start;
+        self->selection_anchor = new_end;
+    } else {
+        self->cursor_offset = new_end;
+        self->selection_anchor = new_start;
+    }
+}
+
 static gboolean
 on_key_pressed(GtkEventControllerKey *controller,
                guint                  keyval,
@@ -2725,27 +2848,58 @@ on_key_pressed(GtkEventControllerKey *controller,
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Tab:
-            editor_widget_delete_selection(self);
-            if (self->indent_style == 0) { 
-                /* Spaces */
-                /* Could optimize to insert N spaces block */
-                char *spaces = g_malloc(self->indent_width + 1);
-                memset(spaces, ' ', self->indent_width);
-                spaces[self->indent_width] = '\0';
-                document_insert(self->doc, self->cursor_offset, spaces, self->indent_width);
-                self->cursor_offset += self->indent_width;
-                g_free(spaces);
+        case GDK_KEY_ISO_Left_Tab:
+        {
+            gboolean shift = (state & GDK_SHIFT_MASK) || (keyval == GDK_KEY_ISO_Left_Tab);
+            gboolean has_selection = (self->cursor_offset != self->selection_anchor);
+            
+            if (shift) {
+                if (has_selection) {
+                    editor_widget_unindent_selection(self);
+                } else {
+                    return FALSE; /* Allow focus navigation if no selection */
+                }
             } else {
-                /* Tab char */
-                document_insert(self->doc, self->cursor_offset, "\t", 1);
-                self->cursor_offset++;
+                /* Check for multiline selection */
+                size_t start = MIN(self->cursor_offset, self->selection_anchor);
+                size_t end = MAX(self->cursor_offset, self->selection_anchor);
+                
+                size_t start_line = document_get_line_of_offset(self->doc, start);
+                size_t end_line = document_get_line_of_offset(self->doc, end);
+                
+                /* If end is at start of line, it doesn't count as part of that line for multiline check */
+                if (end > start && end == document_get_offset_of_line(self->doc, end_line)) {
+                     if (end_line > start_line) end_line--;
+                }
+                
+                if (end_line > start_line) {
+                    editor_widget_indent_selection(self);
+                } else {
+                    /* Single line / normal tab behavior */
+                     editor_widget_delete_selection(self);
+                    if (self->indent_style == 0) { 
+                        /* Spaces */
+                        char *spaces = g_malloc(self->indent_width + 1);
+                        memset(spaces, ' ', self->indent_width);
+                        spaces[self->indent_width] = '\0';
+                        document_insert(self->doc, self->cursor_offset, spaces, self->indent_width);
+                        self->cursor_offset += self->indent_width;
+                        g_free(spaces);
+                    } else {
+                        /* Tab char */
+                        document_insert(self->doc, self->cursor_offset, "\t", 1);
+                        self->cursor_offset++;
+                    }
+                    self->selection_anchor = self->cursor_offset;
+                }
             }
-            self->selection_anchor = self->cursor_offset;
+            
             editor_widget_reset_cursor_blink(self);
             editor_widget_update_adjustments(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
+        }
         case GDK_KEY_BackSpace:
             if (editor_widget_delete_selection(self)) {
                 editor_widget_reset_cursor_blink(self);
