@@ -48,6 +48,13 @@ struct _EditorWidget {
     double target_x;  /* Target X position for Up/Down navigation (in pixels) */
 
     gboolean alt_word_mode; /* TRUE if selection was auto-created for word swapping */
+
+    /* Advanced Drag and Drop */
+    double drag_x, drag_y;
+    size_t drag_drop_offset;
+    gboolean drag_copy_mode;
+    PangoLayout *drag_ghost_layout;
+    gboolean is_dnd_active; /* TRUE only after passing 8px threshold */
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
@@ -490,7 +497,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         
         /* Draw cursor - only when no selection */
         gboolean has_selection = (self->cursor_offset != self->selection_anchor);
-        if (line_idx == cursor_line && self->cursor_alpha > 0.01 && !has_selection) {
+        if (line_idx == cursor_line && self->cursor_alpha > 0.01 && !has_selection && !self->is_dragging_selection) {
              size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
              if (self->cursor_offset >= line_start_off) {
                  size_t index_in_line = self->cursor_offset - line_start_off;
@@ -513,6 +520,28 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                                            &GRAPHENE_RECT_INIT(cursor_x, cursor_y, 1, cursor_h));
              }
         }
+
+        /* Draw DnD Drop Caret */
+        if (self->is_dragging_selection && self->drag_drop_offset != (size_t)-1) {
+            size_t drop_line = document_get_line_of_offset(self->doc, self->drag_drop_offset);
+            if (line_idx == drop_line) {
+                size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
+                size_t index_in_line = self->drag_drop_offset - line_start_off;
+                if (index_in_line > len) index_in_line = len;
+
+                PangoRectangle strong_pos;
+                pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
+
+                GdkRGBA caret_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){0.2, 0.5, 0.9, 1.0};
+                int caret_x = (int)(pango_units_to_double(strong_pos.x) + 0.5);
+                int caret_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
+                int caret_h = (int)(pango_units_to_double(strong_pos.height) + 0.5);
+
+                gtk_snapshot_append_color(snapshot, 
+                                          &caret_color,
+                                          &GRAPHENE_RECT_INIT(caret_x, caret_y, 1, caret_h));
+            }
+        }
         
         /* Update Y position for next line */
         current_y_pos += layout_h;
@@ -523,6 +552,27 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
         if (current_y_pos > height) {
              break;
+        }
+    }
+
+    /* Draw DnD Overlays (Border & Ghost) */
+    if (self->is_dnd_active) {
+        /* 1. Viewport Border */
+        GdkRGBA border_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){0.2, 0.5, 0.9, 1.0};
+        gtk_snapshot_append_border(snapshot, 
+                                   &GSK_ROUNDED_RECT_INIT(0, 0, (float)width, (float)height),
+                                   (float[4]){1, 1, 1, 1},
+                                   (GdkRGBA[4]){border_color, border_color, border_color, border_color});
+
+        /* 2. Ghost Text Preview */
+        if (self->drag_ghost_layout) {
+            gtk_snapshot_save(snapshot);
+            gtk_snapshot_push_opacity(snapshot, 0.5);
+            /* Offset from mouse pointer slightly */
+            gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT((float)self->drag_x + 10, (float)self->drag_y + 10));
+            gtk_snapshot_append_layout(snapshot, self->drag_ghost_layout, &self->color_text);
+            gtk_snapshot_pop(snapshot);
+            gtk_snapshot_restore(snapshot);
         }
     }
 }
@@ -747,9 +797,20 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
         /* Starting drag on existing selection - prepare for DnD */
         self->is_dragging_selection = TRUE;
         self->drag_start_offset = off;
+
+        /* Create ghost layout for the selected text */
+        char *text = document_get_text_range(self->doc, sel_start, sel_end - sel_start);
+        if (text) {
+            if (self->drag_ghost_layout) g_object_unref(self->drag_ghost_layout);
+            self->drag_ghost_layout = gtk_widget_create_pango_layout(GTK_WIDGET(self), text);
+            pango_layout_set_font_description(self->drag_ghost_layout, self->font_desc);
+            g_free(text);
+        }
+        self->is_dnd_active = FALSE;
     } else {
         /* Normal click/drag - selection handled by on_click_pressed and on_drag_update */
         self->is_dragging_selection = FALSE;
+        self->is_dnd_active = FALSE;
     }
 }
 
@@ -793,8 +854,36 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
         }
         self->alt_word_mode = TRUE; /* Dragging a multi-click selection preserves word-like behavior */
     } else if (self->is_dragging_selection) {
-        /* Dragging selection for DnD - visual feedback handled by cursor */
-        /* We'll execute the move on drag_end */
+        /* Dragging selection for DnD - visual feedback handled in snapshot */
+        gboolean has_movement = (fabs(offset_x) > 8 || fabs(offset_y) > 8);
+        
+        if (has_movement) {
+            self->is_dnd_active = TRUE;
+            self->drag_x = start_x + offset_x;
+            self->drag_y = start_y + offset_y;
+
+            /* Detect copy mode (Ctrl held) */
+            GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
+            self->drag_copy_mode = (state & GDK_CONTROL_MASK) != 0;
+
+            /* Calculate drop insertion point */
+            size_t drop_off;
+            editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &drop_off);
+            
+            size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
+            size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+
+            /* Rule: Never show caret inside or overlap selected range */
+            if (drop_off >= sel_start && drop_off < sel_end) {
+                self->drag_drop_offset = (size_t)-1; /* Suppress caret */
+            } else {
+                self->drag_drop_offset = drop_off;
+            }
+        } else {
+            /* Not moved enough yet - suppress feedback */
+            self->drag_drop_offset = (size_t)-1;
+            self->is_dnd_active = FALSE;
+        }
     } else {
         /* Normal drag selection - extend selection to current position */
         /* Only update cursor, anchor was set by on_click_pressed */
@@ -821,28 +910,26 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     }
     
     if (self->is_dragging_selection) {
-        double start_x, start_y;
-        gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
-        
-        size_t drop_off;
-        editor_widget_get_offset_at_point(self, start_x + offset_x, start_y + offset_y, &drop_off);
+        size_t drop_off = self->drag_drop_offset;
         
         size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
         size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
         
-        /* Check if there was actual movement (not just a click) - 8px threshold */
-        gboolean has_movement = (fabs(offset_x) > 8 || fabs(offset_y) > 8);
+        /* Check if there was actual movement (not just a click) - use flag set in update */
+        gboolean dnd_was_active = self->is_dnd_active;
         
-        if (has_movement && (drop_off < sel_start || drop_off >= sel_end)) {
-            /* Move selection to new location */
+        if (dnd_was_active && drop_off != (size_t)-1) {
+            /* Move or Copy selection to new location */
             size_t sel_len = sel_end - sel_start;
             char *text = document_get_text_range(self->doc, sel_start, sel_len);
             
             if (text) {
-                document_delete(self->doc, sel_start, sel_len);
-                
-                if (drop_off > sel_end) {
-                    drop_off -= sel_len;
+                if (!self->drag_copy_mode) {
+                    /* Move mode: delete original */
+                    document_delete(self->doc, sel_start, sel_len);
+                    if (drop_off > sel_end) {
+                        drop_off -= sel_len;
+                    }
                 }
                 
                 document_insert(self->doc, drop_off, text, sel_len);
@@ -854,14 +941,25 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
                 g_free(text);
                 editor_widget_update_adjustments(self);
             }
-        } else if (!has_movement) {
+        } else if (!dnd_was_active) {
             /* Just a click inside selection - place cursor there */
-            self->cursor_offset = drop_off;
-            self->selection_anchor = drop_off;
+            double start_x, start_y;
+            gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
+            size_t click_off;
+            editor_widget_get_offset_at_point(self, start_x, start_y, &click_off);
+            
+            self->cursor_offset = click_off;
+            self->selection_anchor = click_off;
         }
-        /* If moved but still inside selection, do nothing */
-        
+
+        /* Cleanup DnD state */
+        if (self->drag_ghost_layout) {
+            g_object_unref(self->drag_ghost_layout);
+            self->drag_ghost_layout = NULL;
+        }
         self->is_dragging_selection = FALSE;
+        self->is_dnd_active = FALSE;
+        self->drag_drop_offset = (size_t)-1;
         gtk_widget_queue_draw(GTK_WIDGET(self));
     }
 }
@@ -1381,6 +1479,12 @@ on_key_pressed(GtkEventControllerKey *controller,
         return TRUE;
 
     gboolean handled = TRUE;
+
+    if (self->is_dragging_selection && (keyval == GDK_KEY_Control_L || keyval == GDK_KEY_Control_R)) {
+        self->drag_copy_mode = TRUE;
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        return TRUE;
+    }
     
     switch (keyval) {
         case GDK_KEY_Up:
@@ -1579,6 +1683,24 @@ on_key_pressed(GtkEventControllerKey *controller,
     return handled;
 }
 
+static gboolean
+on_key_released(GtkEventControllerKey *controller,
+                guint                  keyval,
+                guint                  keycode,
+                GdkModifierType        state,
+                gpointer               user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    
+    if (self->is_dragging_selection && (keyval == GDK_KEY_Control_L || keyval == GDK_KEY_Control_R)) {
+        self->drag_copy_mode = FALSE;
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        return TRUE;
+    }
+    
+    return FALSE;
+}
+
 static void
 on_focus_enter (GtkEventControllerFocus *controller,
                 gpointer                 user_data)
@@ -1679,6 +1801,51 @@ cursor_blink_tick_callback(GtkWidget *widget, GdkFrameClock *frame_clock, gpoint
     
     gtk_widget_queue_draw(widget);
     
+    /* 
+       Auto-scrolling during drag-and-drop 
+    */
+    if (self->is_dnd_active && self->vadjustment) {
+        double height = gtk_widget_get_height(widget);
+        double threshold = 30.0;
+        double scroll_delta = 0;
+        
+        if (self->drag_y < threshold && self->drag_y >= 0) {
+            /* Scroll up */
+            scroll_delta = -((threshold - self->drag_y) / threshold) * 5.0;
+        } else if (self->drag_y > height - threshold && self->drag_y <= height) {
+            /* Scroll down */
+            scroll_delta = ((self->drag_y - (height - threshold)) / threshold) * 5.0;
+        }
+        
+        if (scroll_delta != 0) {
+            double old_val = gtk_adjustment_get_value(self->vadjustment);
+            double new_val = old_val + scroll_delta;
+            double upper = gtk_adjustment_get_upper(self->vadjustment);
+            double page_size = gtk_adjustment_get_page_size(self->vadjustment);
+            
+            if (new_val < 0) new_val = 0;
+            if (new_val > upper - page_size) new_val = upper - page_size;
+            
+            if (new_val != old_val) {
+                gtk_adjustment_set_value(self->vadjustment, new_val);
+                
+                /* Recalculate drop offset since viewport moved */
+                size_t drop_off;
+                editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &drop_off);
+                
+                size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
+                size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+
+                if (drop_off >= sel_start && drop_off < sel_end) {
+                    self->drag_drop_offset = (size_t)-1;
+                } else {
+                    self->drag_drop_offset = drop_off;
+                }
+                gtk_widget_queue_draw(widget);
+            }
+        }
+    }
+    
     return G_SOURCE_CONTINUE;
 }
 
@@ -1722,8 +1889,13 @@ editor_widget_init(EditorWidget *self)
     self->cursor_blink_tick_id = gtk_widget_add_tick_callback(
         GTK_WIDGET(self), cursor_blink_tick_callback, NULL, NULL);
     
+    self->drag_drop_offset = (size_t)-1;
+    self->drag_copy_mode = FALSE;
+    self->drag_ghost_layout = NULL;
+    
     GtkEventController *controller = gtk_event_controller_key_new();
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
+    g_signal_connect(controller, "key-released", G_CALLBACK(on_key_released), self);
     gtk_widget_add_controller(GTK_WIDGET(self), controller);
     
     self->im_context = gtk_im_multicontext_new();
