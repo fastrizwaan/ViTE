@@ -705,7 +705,21 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         }
         
         if (is_newline) {
+            /* Select trailing whitespace + newline + next line */
             size_t sel_start = off;
+            
+            /* Scan backwards to include any trailing whitespace before the newline */
+            while (sel_start > 0) {
+                char *c = document_get_text_range(self->doc, sel_start - 1, 1);
+                if (c && (c[0] == ' ' || c[0] == '\t')) {
+                    sel_start--;
+                    g_free(c);
+                } else {
+                    g_free(c);
+                    break;
+                }
+            }
+            
             size_t sel_end = off + 1;
             if (off + 1 < total) {
                 size_t next_line_start, next_line_end;
@@ -715,10 +729,51 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
             self->selection_anchor = sel_end;
             self->cursor_offset = sel_start;
         } else {
-            size_t word_start, word_end;
-            editor_widget_find_word_boundary(self, off, &word_start, &word_end);
-            self->selection_anchor = word_end;
-            self->cursor_offset = word_start;
+            /* Check if clicking on whitespace - select all contiguous whitespace */
+            gboolean is_whitespace = FALSE;
+            if (off < total) {
+                char *ctext = document_get_text_range(self->doc, off, 1);
+                if (ctext && (ctext[0] == ' ' || ctext[0] == '\t')) is_whitespace = TRUE;
+                g_free(ctext);
+            }
+            
+            if (is_whitespace) {
+                /* Select all contiguous whitespace only */
+                size_t ws_start = off;
+                size_t ws_end = off;
+                
+                /* Scan backwards for whitespace start */
+                while (ws_start > 0) {
+                    char *c = document_get_text_range(self->doc, ws_start - 1, 1);
+                    if (c && (c[0] == ' ' || c[0] == '\t')) {
+                        ws_start--;
+                        g_free(c);
+                    } else {
+                        g_free(c);
+                        break;
+                    }
+                }
+                
+                /* Scan forwards for whitespace end */
+                while (ws_end < total) {
+                    char *c = document_get_text_range(self->doc, ws_end, 1);
+                    if (c && (c[0] == ' ' || c[0] == '\t')) {
+                        ws_end++;
+                        g_free(c);
+                    } else {
+                        g_free(c);
+                        break;
+                    }
+                }
+                
+                self->selection_anchor = ws_end;
+                self->cursor_offset = ws_start;
+            } else {
+                size_t word_start, word_end;
+                editor_widget_find_word_boundary(self, off, &word_start, &word_end);
+                self->selection_anchor = word_end;
+                self->cursor_offset = word_start;
+            }
         }
         self->alt_word_mode = TRUE; /* Double click starts word mode */
         self->multi_click_selection = TRUE;
