@@ -187,7 +187,8 @@ editor_widget_update_adjustments(EditorWidget *self)
        So upper = content_height + padding. 
        If content_height < viewport_height, upper = viewport_height.
     */
-    double content_height = (double)total_lines * self->line_height + self->padding_top * 2 + self->line_height; /* Extra line buffer */
+    /* Fix: Add extra buffer (5 lines) to allow comfortable scrolling past the end */
+    double content_height = (double)total_lines * self->line_height + self->padding_top * 2 + (self->line_height * 5); 
     double upper = MAX(content_height, widget_height);
 
     gtk_adjustment_configure(self->vadjustment,
@@ -1966,7 +1967,8 @@ scroll_to_cursor(EditorWidget *self)
     /* Range of logical scroll values that keep cursor visible */
     /* Min Scroll: Cursor at bottom of page */
     /* Scroll Fraction = (cursor_local_y + cursor_h - PageSize) / RealH */
-    double min_visual_offset = cursor_local_y + cursor_h - page;
+    /* Fix: Account for padding_top and add a margin (line_height) so cursor isn't sitting on the very edge */
+    double min_visual_offset = cursor_local_y + cursor_h - page + self->padding_top + self->line_height;
 
     
     double min_fraction = min_visual_offset / real_line_height;
@@ -2558,9 +2560,17 @@ on_key_pressed(GtkEventControllerKey *controller,
             break;
         case GDK_KEY_Home:
         {
-            size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
-            self->cursor_offset = document_get_offset_of_line(self->doc, line);
+            if (state & GDK_CONTROL_MASK) {
+                /* Ctrl+Home: Move to start of document */
+                self->cursor_offset = 0;
+            } else {
+                /* Home: Move to start of line */
+                size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
+                self->cursor_offset = document_get_offset_of_line(self->doc, line);
+            }
+            
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            
             update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -2568,19 +2578,27 @@ on_key_pressed(GtkEventControllerKey *controller,
         }
         case GDK_KEY_End:
         {
-            size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
-            size_t len;
-            char *t = document_get_line(self->doc, line, &len);
-            g_free(t);
-            size_t start = document_get_offset_of_line(self->doc, line);
-            size_t real_len = len;
-            if (len > 0) {
-                 char *last = document_get_text_range(self->doc, start + len - 1, 1);
-                 if (last && last[0] == '\n') real_len--;
-                 g_free(last);
+            if (state & GDK_CONTROL_MASK) {
+                /* Ctrl+End: Move to end of document */
+                self->cursor_offset = document_get_length(self->doc);
+            } else {
+                /* End: Move to end of line */
+                size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
+                size_t len;
+                char *t = document_get_line(self->doc, line, &len);
+                g_free(t);
+                size_t start = document_get_offset_of_line(self->doc, line);
+                size_t real_len = len;
+                if (len > 0) {
+                     char *last = document_get_text_range(self->doc, start + len - 1, 1);
+                     if (last && last[0] == '\n') real_len--;
+                     g_free(last);
+                }
+                self->cursor_offset = start + real_len;
             }
-            self->cursor_offset = start + real_len;
+            
             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+            
             update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
