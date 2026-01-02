@@ -747,16 +747,43 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         gboolean has_selection = (sel_start != sel_end);
         gboolean click_in_selection = has_selection && (off >= sel_start && off < sel_end);
         
-        if (click_in_selection && !(state & GDK_SHIFT_MASK)) {
+        if (state & GDK_SHIFT_MASK) {
+            if (click_in_selection) {
+                /* Inside click -> Smart Pivot: anchor goes to the FAR end */
+                size_t dist_to_start = off - sel_start;
+                size_t dist_to_end = sel_end - off;
+                
+                if (dist_to_start <= dist_to_end) {
+                    /* Closer to start -> Anchor at end, keep selection from click to end */
+                    self->selection_anchor = sel_end;
+                } else {
+                    /* Closer to end -> Anchor at start, keep selection from start to click */
+                    self->selection_anchor = sel_start;
+                }
+                self->cursor_offset = off;
+            } else {
+                /* Outside click -> Smart Pivot */
+                if (off >= sel_end) {
+                    /* Clicked after selection -> Anchor at start, extend right */
+                    self->selection_anchor = sel_start;
+                    self->cursor_offset = off;
+                } else if (off < sel_start) {
+                    /* Clicked before selection -> Anchor at end, extend left */
+                    self->selection_anchor = sel_end;
+                    self->cursor_offset = off;
+                } else {
+                    /* Fallback (shouldn't happen given logic above) */
+                    self->cursor_offset = off;
+                }
+            }
+            self->alt_word_mode = FALSE; /* Becomes manual after modification */
+        } else if (click_in_selection) {
             /* Start potential drag of selection */
             self->is_dragging_selection = TRUE;
             self->drag_start_offset = off;
             /* Don't change selection yet - wait for drag or click release */
-        } else if (state & GDK_SHIFT_MASK) {
-            /* Extend selection - keep anchor, move cursor */
-            self->cursor_offset = off;
         } else {
-            /* Reset selection */
+            /* Standard click: Reset selection */
             self->cursor_offset = off;
             self->selection_anchor = off;
             self->alt_word_mode = FALSE;
@@ -942,14 +969,19 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
                 editor_widget_update_adjustments(self);
             }
         } else if (!dnd_was_active) {
-            /* Just a click inside selection - place cursor there */
-            double start_x, start_y;
-            gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
-            size_t click_off;
-            editor_widget_get_offset_at_point(self, start_x, start_y, &click_off);
-            
-            self->cursor_offset = click_off;
-            self->selection_anchor = click_off;
+            /* Just a click inside selection - check if Shift was held */
+            GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
+            if (!(state & GDK_SHIFT_MASK)) {
+                /* Non-Shift click inside selection - place cursor there (clear selection) */
+                double start_x, start_y;
+                gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
+                size_t click_off;
+                editor_widget_get_offset_at_point(self, start_x, start_y, &click_off);
+                
+                self->cursor_offset = click_off;
+                self->selection_anchor = click_off;
+            }
+            /* If Shift was held, on_click_pressed already handled the selection correctly */
         }
 
         /* Cleanup DnD state */
