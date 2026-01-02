@@ -413,15 +413,20 @@ editor_widget_ensure_metrics(EditorWidget *self)
         self->font_desc = pango_font_description_from_string(self->font_name);
     }
     
-    PangoLayout *layout = pango_layout_new(context);
-    pango_layout_set_font_description(layout, self->font_desc);
-    pango_layout_set_text(layout, "Wg", -1);
+    PangoFontMetrics *metrics = pango_context_get_metrics(context, self->font_desc, pango_context_get_language(context));
+    int ascent = pango_font_metrics_get_ascent(metrics);
+    int descent = pango_font_metrics_get_descent(metrics);
     
-    int h;
-    pango_layout_get_pixel_size(layout, NULL, &h);
-    self->line_height = (double)h;
+    /* Calculate line height from metrics ensuring space for all scripts */
+    self->line_height = (double)(ascent + descent) / PANGO_SCALE;
     
-    g_object_unref(layout);
+    /* Add a tiny bit of breathing room? 
+       Standard editors often add a small leading. 
+       Let's stick to exact metrics first as requested, but ensure integer alignment?
+       Ceiling it is safer to avoid clipping. */
+    self->line_height = ceil(self->line_height);
+
+    pango_font_metrics_unref(metrics);
 }
 
 static void
@@ -696,7 +701,24 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                  /* Snap to integer pixels for crisp cursor */
                  int cursor_x = (int)(pango_units_to_double(strong_pos.x) + 0.5);
                  int cursor_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
-                 int cursor_h = (int)(pango_units_to_double(strong_pos.height) + 0.5);
+                 
+                 /* User requested caret size as per line height. 
+                    Force cursor height to match our calculated line_height for consistency 
+                    across different scripts/lines. */
+                 int cursor_h = (int)self->line_height;
+                 
+                 /* Adjust y if Pango's local line top differs significantly?
+                    Usually strong_pos.y is relative to the layout top (0).
+                    If we force height, we should center it or align top?
+                    For a single line layout, y is 0. */
+                 cursor_y = 0; /* Align to top of the line slot */
+                 
+                 /* Wait, 'strong_pos.y+current_y_pos' is where it goes?
+                    snapshot is translated to 'current_y_pos + self->padding_top'.
+                    Inside that, drawn at cursor_y. 
+                    If we force height to be the full line slot, y should be 0 relative to the line.
+                 */
+                 cursor_y = 0;
                  
                  gtk_snapshot_append_color(snapshot, 
                                            &cursor_color,
