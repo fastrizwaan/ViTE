@@ -13,6 +13,7 @@ sources = files(
   'src/piece-table.c',
   'src/document.c',
   'src/undo.c',
+  'src/preferences.c',
   'src/syntax.c',
   'src/editor-widget.c',
 )

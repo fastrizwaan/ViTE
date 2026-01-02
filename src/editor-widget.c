@@ -65,6 +65,23 @@ struct _EditorWidget {
     /* Viewport padding */
     int padding_left;
     int padding_top;
+
+    /* Configuration Properties */
+    gboolean show_line_numbers;
+    gboolean highlight_current_line;
+    gboolean display_overview_map;
+    gboolean show_right_margin;
+    int right_margin_position;
+    gboolean wrap_lines;
+    gboolean auto_indent;
+    int indent_style; /* 0 = Space, 1 = Tab */
+    int tab_width;
+    int indent_width;
+    gboolean use_custom_font;
+    char *font_name;
+    
+    gboolean dragging_map;
+    double map_drag_start_scroll; /* Scroll value when map drag began */
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
@@ -110,6 +127,14 @@ get_gutter_width(EditorWidget *self)
     return (digits * (self->line_height * 0.5)) + 4.0; /* 2px padding on each side */
 }
 
+/* Helper to get gutter width based on settings */
+static double
+get_effective_gutter_width(EditorWidget *self)
+{
+    if (!self->show_line_numbers) return 0.0;
+    return get_gutter_width(self);
+}
+
 G_DEFINE_TYPE_WITH_CODE (EditorWidget, editor_widget, GTK_TYPE_WIDGET,
                          G_IMPLEMENT_INTERFACE (GTK_TYPE_SCROLLABLE, editor_widget_scrollable_init))
 
@@ -119,6 +144,18 @@ enum {
     PROP_VADJUSTMENT,
     PROP_HSCROLL_POLICY,
     PROP_VSCROLL_POLICY,
+    PROP_SHOW_LINE_NUMBERS,
+    PROP_HIGHLIGHT_CURRENT_LINE,
+    PROP_DISPLAY_OVERVIEW_MAP,
+    PROP_SHOW_RIGHT_MARGIN,
+    PROP_RIGHT_MARGIN_POSITION,
+    PROP_WRAP_LINES,
+    PROP_AUTO_INDENT,
+    PROP_INDENT_STYLE,
+    PROP_TAB_WIDTH,
+    PROP_INDENT_WIDTH,
+    PROP_USE_CUSTOM_FONT,
+    PROP_FONT_NAME,
     N_PROPS
 };
 
@@ -357,7 +394,17 @@ editor_widget_ensure_metrics(EditorWidget *self)
 {
     if (self->line_height > 0) return;
 
+    /* Force re-eval if line_height check is used for caching, 
+       but simplified here we might want to check dirty flags. 
+       For now, let's just re-apply font. */
+       
     PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
+    
+    if (self->use_custom_font && self->font_name) {
+        if (self->font_desc) pango_font_description_free(self->font_desc);
+        self->font_desc = pango_font_description_from_string(self->font_name);
+    }
+    
     PangoLayout *layout = pango_layout_new(context);
     pango_layout_set_font_description(layout, self->font_desc);
     pango_layout_set_text(layout, "Wg", -1);
@@ -397,16 +444,19 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     }
     gtk_snapshot_append_color(snapshot, &bg_color, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)height));
     
-    /* Draw Gutter Background - Removed as per request */
-    double gutter_w = get_gutter_width(self);
-    /* dim background */
-    GdkRGBA gutter_bg = {0.95, 0.95, 0.95, 1.0}; /* Default light gray */
-    /* Check for dark theme approximation - if text is light */
-    if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
-         gutter_bg = (GdkRGBA){0.15, 0.15, 0.15, 1.0};
-    }
+    /* Draw Gutter Background */
+    double gutter_w = get_effective_gutter_width(self);
     
-    gtk_snapshot_append_color(snapshot, &gutter_bg, &GRAPHENE_RECT_INIT(0, 0, (float)gutter_w, (float)height));
+    if (self->show_line_numbers) {
+        /* dim background */
+        GdkRGBA gutter_bg = {0.95, 0.95, 0.95, 1.0}; /* Default light gray */
+        /* Check for dark theme approximation - if text is light */
+        if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
+             gutter_bg = (GdkRGBA){0.15, 0.15, 0.15, 1.0};
+        }
+        
+        gtk_snapshot_append_color(snapshot, &gutter_bg, &GRAPHENE_RECT_INIT(0, 0, (float)gutter_w, (float)height));
+    }
 
     /* Pixel-based scrolling: start_y is in pixels */
     
@@ -455,9 +505,18 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         pango_layout_set_font_description(layout, self->font_desc);
         pango_layout_set_text(layout, text, (int)len);
         
-        /* Word Wrap - account for gutter and padding */
-        pango_layout_set_width(layout, (width - text_start_x) * PANGO_SCALE);
-        pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+        /* Word Wrap - account for gutter, padding, and overview map */
+        int map_w_reserved = self->display_overview_map ? 120 : 0;
+        
+        if (self->wrap_lines) {
+            int available_w = width - text_start_x - map_w_reserved;
+            if (available_w < 50) available_w = 50; /* Safe min width */
+            pango_layout_set_width(layout, available_w * PANGO_SCALE);
+            pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+        } else {
+            pango_layout_set_width(layout, -1);
+            pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+        }
         
         /* Syntax highlight */
         PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, line_idx, text);
@@ -477,8 +536,19 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
              current_y_pos = -pixel_offset;
         }
 
+        /* Draw Current Line Highlight */
+        if (self->highlight_current_line && line_idx == cursor_line) {
+             GdkRGBA hl_color = self->color_text;
+             hl_color.alpha = 0.05; /* Very subtle */
+             /* If dark mode, maybe a bit more alpha? */
+             if (self->color_text.red > 0.5) hl_color.alpha = 0.1;
+             
+             gtk_snapshot_append_color(snapshot, &hl_color, 
+                &GRAPHENE_RECT_INIT(text_start_x, current_y_pos + self->padding_top, width - text_start_x, layout_h));
+        }
+
         /* Draw Line Number */
-        {
+        if (self->show_line_numbers) {
             char lnum_buf[32];
             snprintf(lnum_buf, sizeof(lnum_buf), "%zu", line_idx + 1);
             
@@ -687,7 +757,237 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                                    (float[4]){1, 1, 1, 1},
                                    (GdkRGBA[4]){border_color, border_color, border_color, border_color});
     }
-}
+
+    /* Draw Right Margin */
+    if (self->show_right_margin) {
+        /* Calculate position based on character width approx or exact? 
+           Let's use avg char width from font metrics */
+        PangoContext *ctx = gtk_widget_get_pango_context(widget);
+        PangoFontMetrics *metrics = pango_context_get_metrics(ctx, self->font_desc, NULL);
+        int char_width = pango_font_metrics_get_approximate_char_width(metrics);
+        pango_font_metrics_unref(metrics);
+        
+        double margin_x = text_start_x + (self->right_margin_position * pango_units_to_double(char_width));
+        
+        GdkRGBA margin_col = self->color_text;
+        margin_col.alpha = 0.03;
+        
+        float margin_width = (float)width - (float)margin_x;
+        if (margin_width < 0) margin_width = 0;
+        
+        gtk_snapshot_append_color(snapshot, &margin_col, 
+            &GRAPHENE_RECT_INIT((float)margin_x, 0, margin_width, (float)height));
+        
+        /* Optional: Draw a slightly stronger line at the edge? */
+        GdkRGBA line_col = self->color_text;
+        line_col.alpha = 0.06;
+        gtk_snapshot_append_color(snapshot, &line_col, 
+            &GRAPHENE_RECT_INIT((float)margin_x, 0, 1.0f, (float)height));
+    }
+
+    /* Draw Overview Map */
+    if (self->display_overview_map) {
+        float map_w = 120.0f;
+        
+        /* Infer theme */
+        double text_brightness = (self->color_text.red + self->color_text.green + self->color_text.blue) / 3.0;
+        gboolean is_dark = (text_brightness > 0.5);
+        
+        /* Background */
+        GdkRGBA panel_color = {0, 0, 0, 0.25}; 
+        if (!is_dark) {
+            panel_color.red = 0.95; panel_color.green = 0.95; panel_color.blue = 0.95; panel_color.alpha = 1.0;
+        }
+        
+        gtk_snapshot_append_color(snapshot, &panel_color, 
+             &GRAPHENE_RECT_INIT(width - map_w, 0, map_w, height));
+             
+        GdkRGBA border_col = self->color_text;
+        border_col.alpha = 0.08;
+        gtk_snapshot_append_color(snapshot, &border_col,
+             &GRAPHENE_RECT_INIT(width - map_w, 0, 1, height));
+
+        /* --- FIXED SCALE LOGIC --- */
+        double map_scale = 0.15; /* 15% scale, readable blocks */
+        double total_h = self->line_height * document_get_line_count(self->doc);
+        double map_total_h = total_h * map_scale;
+        
+        /* Calculate Map Scroll Offset */
+        /* If map fits, offset is 0. If map > widget, scroll proportionally */
+        double map_scroll_y = 0;
+        if (map_total_h > height) {
+            double scroll_max = total_h - height; /* Approx max scroll of viewport */
+            if (scroll_max <= 0) scroll_max = 1;
+            
+            double current_scroll_y = 0;
+            if (self->vadjustment) current_scroll_y = gtk_adjustment_get_value(self->vadjustment);
+            
+            double map_scroll_max = map_total_h - height;
+            map_scroll_y = (current_scroll_y / scroll_max) * map_scroll_max;
+        }
+
+        /* Determine visual range to render */
+        /* We only render lines that intersect the map viewport [0, height] */
+        size_t line_cnt = document_get_line_count(self->doc);
+        
+        /* Visible range in map coordinates: [map_scroll_y, map_scroll_y + height] */
+        /* Map Y for line K = K * line_height * map_scale */
+        size_t start_line = (size_t)(map_scroll_y / (self->line_height * map_scale));
+        if (start_line > 0) start_line--; /* Buffer */
+        
+        size_t end_line = (size_t)((map_scroll_y + height) / (self->line_height * map_scale)) + 1;
+        if (end_line > line_cnt) end_line = line_cnt;
+        
+        GdkRGBA main_text_col = self->color_text;
+        main_text_col.alpha = 0.7;
+
+        for (size_t k = start_line; k < end_line; k++) {
+            double ly = (k * self->line_height * map_scale) - map_scroll_y;
+            
+            size_t line_start = document_get_offset_of_line(self->doc, k);
+            size_t next_line_start = document_get_offset_of_line(self->doc, k + 1);
+            size_t total_len = document_get_length(self->doc);
+            
+            size_t line_len;
+            if (next_line_start == (size_t)-1 || next_line_start < line_start) {
+                line_len = total_len - line_start;
+            } else {
+                line_len = next_line_start - line_start;
+                if (line_len > 0) line_len--; 
+            }
+            
+            if (line_len > 100) line_len = 100; 
+            if (line_len == 0) continue;
+            
+            char *text = document_get_text_range(self->doc, line_start, line_len);
+            if (!text) continue;
+            
+            /* Get syntax highlighting for this line */
+            PangoAttrList *attrs = NULL;
+            if (self->syntax_ctx) {
+                attrs = syntax_highlight_line(self->syntax_ctx, k, text);
+            }
+            
+            float mx = (float)(width - map_w + 10); 
+            float my = (float)ly;
+            float block_h = (float)(self->line_height * map_scale);
+            if (block_h > 2.0f) block_h -= 1.0f;
+            
+            int i = 0; 
+            while (i < line_len) {
+                /* Skip whitespace */
+                while (i < line_len && (text[i] == ' ' || text[i] == '\t')) {
+                    mx += 2.0f; i++; 
+                }
+                if (i >= line_len) break;
+                
+                int word_start = i;
+                int w_len = 0;
+                /* Split on whitespace AND punctuation to get smaller tokens */
+                /* This ensures self.method is split into: self, ., method */
+                char c = text[i];
+                if (c == '.' || c == '(' || c == ')' || c == '[' || c == ']' || 
+                    c == '{' || c == '}' || c == ',' || c == ':' || c == ';' ||
+                    c == '=' || c == '+' || c == '-' || c == '*' || c == '/') {
+                    /* Single-char punctuation token */
+                    w_len = 1; i++;
+                } else {
+                    /* Word token - stop at whitespace or punctuation */
+                    while (i < line_len && 
+                           text[i] != ' ' && text[i] != '\t' &&
+                           text[i] != '.' && text[i] != '(' && text[i] != ')' &&
+                           text[i] != '[' && text[i] != ']' && text[i] != '{' && 
+                           text[i] != '}' && text[i] != ',' && text[i] != ':' &&
+                           text[i] != ';' && text[i] != '=' && text[i] != '+' &&
+                           text[i] != '-' && text[i] != '*' && text[i] != '/') {
+                        w_len++; i++;
+                    }
+                }
+                
+                if (w_len > 0) {
+                    float block_w = (float)w_len * 2.0f;
+                    if (mx + block_w > width - 4) block_w = width - 4 - mx;
+                    
+                    if (block_w > 0) {
+                        /* Get color from syntax attrs if available */
+                        GdkRGBA block_color = main_text_col;
+                        
+                        if (attrs) {
+                            /* Iterate through all attributes directly */
+                            GSList *attr_list = pango_attr_list_get_attributes(attrs);
+                            for (GSList *l = attr_list; l != NULL; l = l->next) {
+                                PangoAttribute *attr = (PangoAttribute *)l->data;
+                                
+                                /* Check if this is a foreground color at our position */
+                                if (attr->klass->type == PANGO_ATTR_FOREGROUND &&
+                                    attr->start_index <= (guint)word_start &&
+                                    attr->end_index > (guint)word_start) {
+                                    PangoAttrColor *color_attr = (PangoAttrColor *)attr;
+                                    block_color.red = color_attr->color.red / 65535.0;
+                                    block_color.green = color_attr->color.green / 65535.0;
+                                    block_color.blue = color_attr->color.blue / 65535.0;
+                                    block_color.alpha = 0.8;
+                                    break; /* Use first matching color */
+                                }
+                            }
+                            g_slist_free_full(attr_list, (GDestroyNotify)pango_attribute_destroy);
+                        }
+                        
+                        gtk_snapshot_append_color(snapshot, &block_color,
+                            &GRAPHENE_RECT_INIT(mx, my, block_w, block_h));
+                    }
+                    mx += block_w + 2.0f;
+                }
+            }
+            
+            if (attrs) pango_attr_list_unref(attrs);
+            g_free(text);
+        }
+        
+        /* Viewport Indicator - Use scrollbar-thumb formula */
+        /* This ensures the indicator stays under the mouse during drag */
+        double scroll_y = 0;
+        double upper = 1, page = 1;
+        if (self->vadjustment) {
+            scroll_y = gtk_adjustment_get_value(self->vadjustment);
+            upper = gtk_adjustment_get_upper(self->vadjustment);
+            page = gtk_adjustment_get_page_size(self->vadjustment);
+        }
+        
+        double scroll_max = upper - page;
+        if (scroll_max <= 0) scroll_max = 1;
+        
+        /* Thumb height: based on viewport height at map_scale (dynamic, larger for short files) */
+        double thumb_h = height * map_scale; /* Viewport height scaled down */
+        if (thumb_h < 20) thumb_h = 20;
+        if (thumb_h > height) thumb_h = height;
+        
+        /* Track available for thumb movement */
+        double track = height - thumb_h;
+        
+        /* Thumb position: proportional to scroll position */
+        double thumb_y = (scroll_y / scroll_max) * track;
+        if (thumb_y < 0) thumb_y = 0;
+        if (thumb_y > track) thumb_y = track;
+        
+        GdkRGBA vp_col = {1.0, 1.0, 1.0, 0.12}; 
+        if (!is_dark) {
+           vp_col.red = 0; vp_col.green = 0; vp_col.blue = 0; vp_col.alpha = 0.1;
+        }
+        
+        gtk_snapshot_append_color(snapshot, &vp_col,
+            &GRAPHENE_RECT_INIT(width - map_w, (float)thumb_y, map_w, (float)thumb_h));
+        
+        GdkRGBA vp_border = {1.0, 1.0, 1.0, 0.2};
+        if (!is_dark) { vp_border.red=0; vp_border.green=0; vp_border.blue=0; }
+        
+        gtk_snapshot_append_color(snapshot, &vp_border,
+             &GRAPHENE_RECT_INIT(width - map_w, (float)thumb_y, map_w, 1));
+        gtk_snapshot_append_color(snapshot, &vp_border,
+             &GRAPHENE_RECT_INIT(width - map_w, (float)(thumb_y + thumb_h - 1), map_w, 1));
+    }
+    }
+
 
 
 static void
@@ -726,6 +1026,8 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     
     PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
     int width = gtk_widget_get_width(GTK_WIDGET(self));
+    double gutter_w = get_effective_gutter_width(self);
+    double text_start_x = gutter_w + self->padding_left;
     
     double current_y = 0; /* Updated dynamically */
     
@@ -747,14 +1049,17 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             len--;
         }
 
-        double gutter_w = get_gutter_width(self);
-        double text_start_x = gutter_w + self->padding_left;
-
         PangoLayout *layout = pango_layout_new(context);
         pango_layout_set_font_description(layout, self->font_desc);
-        pango_layout_set_text(layout, text, len);
-        pango_layout_set_width(layout, (width - text_start_x) * PANGO_SCALE);
-        pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+        pango_layout_set_text(layout, text, (int)len);
+        
+        if (self->wrap_lines) {
+            pango_layout_set_width(layout, (width - text_start_x) * PANGO_SCALE);
+            pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+        } else {
+            pango_layout_set_width(layout, -1);
+            pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+        }
         
         int pixel_h;
         pango_layout_get_pixel_size(layout, NULL, &pixel_h);
@@ -812,6 +1117,30 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     *out_offset += last_len;
 }
 
+/* Mouse wheel scroll handler (works even when scrollbar is hidden) */
+static gboolean
+on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    (void)controller;
+    (void)dx;
+    
+    if (!self->vadjustment) return GDK_EVENT_PROPAGATE;
+    
+    double current = gtk_adjustment_get_value(self->vadjustment);
+    double step = self->line_height * 3; /* Scroll 3 lines per wheel tick */
+    double upper = gtk_adjustment_get_upper(self->vadjustment);
+    double page = gtk_adjustment_get_page_size(self->vadjustment);
+    
+    double new_val = current + (dy * step);
+    new_val = CLAMP(new_val, 0, upper - page);
+    
+    gtk_adjustment_set_value(self->vadjustment, new_val);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+    
+    return GDK_EVENT_STOP; /* Event handled */
+}
+
 static void
 on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
 {
@@ -820,6 +1149,24 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     
     if (!self->doc) return;
     
+    /* Handle Overview Map Click */
+    int width = gtk_widget_get_width(GTK_WIDGET(self));
+    if (self->display_overview_map && x > width - 100) {
+        if (self->vadjustment) {
+            double height = gtk_widget_get_height(GTK_WIDGET(self));
+            double upper = gtk_adjustment_get_upper(self->vadjustment);
+            double page = gtk_adjustment_get_page_size(self->vadjustment);
+            
+            double val = (y / height) * upper;
+            
+            if (val > upper - page) val = upper - page;
+            if (val < 0) val = 0;
+            
+            gtk_adjustment_set_value(self->vadjustment, val);
+        }
+        return;
+    }
+
     size_t off;
     editor_widget_get_offset_at_point(self, x, y, &off);
     
@@ -983,6 +1330,17 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->doc) return;
     
+    /* Check for Map Drag */
+    int width = gtk_widget_get_width(GTK_WIDGET(self));
+    if (self->display_overview_map && x > width - 120) {
+        self->dragging_map = TRUE;
+        /* Store initial scroll position for relative dragging */
+        if (self->vadjustment) {
+            self->map_drag_start_scroll = gtk_adjustment_get_value(self->vadjustment);
+        }
+        return;
+    }
+
     /* If we just did a multi-click selection (double/triple-click), 
        don't process drag_begin as it would interfere with the selection */
     if (self->multi_click_selection) {
@@ -1164,6 +1522,41 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
     self->drag_x = start_x + offset_x;
     self->drag_y = start_y + offset_y;
     
+    /* Handle Overview Map Drag */
+    if (self->dragging_map) {
+        if (self->vadjustment) {
+            double height = gtk_widget_get_height(GTK_WIDGET(self));
+            double upper = gtk_adjustment_get_upper(self->vadjustment);
+            double page = gtk_adjustment_get_page_size(self->vadjustment);
+            
+            /* Scrollbar-thumb inverse formula (matches rendering) */
+            /* Rendering: thumb_y = (scroll / scroll_max) * track */
+            /* Inverse: scroll = (thumb_y / track) * scroll_max */
+            /* For delta: delta_scroll = (delta_y / track) * scroll_max */
+            
+            double scroll_max = upper - page;
+            if (scroll_max <= 0) scroll_max = 1;
+            
+            /* Calculate thumb height using same formula as rendering */
+            double map_scale = 0.15;
+            double thumb_h = height * map_scale;
+            if (thumb_h < 20) thumb_h = 20;
+            if (thumb_h > height) thumb_h = height;
+            
+            double track = height - thumb_h;
+            if (track <= 0) track = 1;
+            
+            /* Convert mouse delta to scroll delta */
+            double scroll_delta = (offset_y / track) * scroll_max;
+            
+            double target_scroll = self->map_drag_start_scroll + scroll_delta;
+            target_scroll = CLAMP(target_scroll, 0, upper - page);
+            
+            gtk_adjustment_set_value(self->vadjustment, target_scroll);
+        }
+        return;
+    }
+
     size_t off;
     editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &off);
     
@@ -1244,6 +1637,11 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->doc) return;
+    
+    if (self->dragging_map) {
+        self->dragging_map = FALSE;
+        return;
+    }
     
     /* Always stop autoscroll when drag ends */
     stop_autoscroll(self);
@@ -1513,9 +1911,14 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     pango_layout_set_text(layout, text, (int)len);
     
     int width = gtk_widget_get_width(GTK_WIDGET(self));
-    double gutter_w = get_gutter_width(self);
-    pango_layout_set_width(layout, (width - (gutter_w + self->padding_left)) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    double gutter_w = get_effective_gutter_width(self);
+    if (self->wrap_lines) {
+        pango_layout_set_width(layout, (width - (gutter_w + self->padding_left)) * PANGO_SCALE);
+        pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    } else {
+        pango_layout_set_width(layout, -1);
+        pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    }
 
     if (out_text) *out_text = text;
     else g_free(text);
@@ -2141,8 +2544,56 @@ on_key_pressed(GtkEventControllerKey *controller,
         }
         case GDK_KEY_Return:
             editor_widget_delete_selection(self);
+            
+            /* Auto-indentation logic */
+            char *indent = NULL;
+            if (self->auto_indent) {
+                size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
+                size_t line_len;
+                char *text = document_get_line(self->doc, line, &line_len);
+                if (text) {
+                    /* Count leading whitespace */
+                    size_t i = 0;
+                    while (i < line_len && (text[i] == ' ' || text[i] == '\t')) i++;
+                    if (i > 0) {
+                        indent = g_strndup(text, i);
+                    }
+                    g_free(text);
+                }
+            }
+            
             document_insert(self->doc, self->cursor_offset, "\n", 1);
             self->cursor_offset++;
+            
+            if (indent) {
+                size_t len = strlen(indent);
+                document_insert(self->doc, self->cursor_offset, indent, len);
+                self->cursor_offset += len;
+                g_free(indent);
+            }
+            
+            self->selection_anchor = self->cursor_offset;
+            editor_widget_reset_cursor_blink(self);
+            editor_widget_update_adjustments(self);
+            scroll_to_cursor(self);
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+            break;
+        case GDK_KEY_Tab:
+            editor_widget_delete_selection(self);
+            if (self->indent_style == 0) { 
+                /* Spaces */
+                /* Could optimize to insert N spaces block */
+                char *spaces = g_malloc(self->indent_width + 1);
+                memset(spaces, ' ', self->indent_width);
+                spaces[self->indent_width] = '\0';
+                document_insert(self->doc, self->cursor_offset, spaces, self->indent_width);
+                self->cursor_offset += self->indent_width;
+                g_free(spaces);
+            } else {
+                /* Tab char */
+                document_insert(self->doc, self->cursor_offset, "\t", 1);
+                self->cursor_offset++;
+            }
             self->selection_anchor = self->cursor_offset;
             editor_widget_reset_cursor_blink(self);
             editor_widget_update_adjustments(self);
@@ -2425,6 +2876,7 @@ editor_widget_dispose(GObject *object)
     if (self->font_desc) pango_font_description_free(self->font_desc);
     if (self->im_context) g_object_unref(self->im_context);
     if (self->syntax_ctx) syntax_context_free(self->syntax_ctx);
+    if (self->font_name) g_free(self->font_name);
     
     G_OBJECT_CLASS(editor_widget_parent_class)->dispose(object);
 }
@@ -2433,6 +2885,7 @@ static void
 editor_widget_init(EditorWidget *self)
 {
     self->font_desc = pango_font_description_from_string("Monospace 12");
+    self->font_name = g_strdup("Monospace 12");
     
     /* Initialize cursor blink animation */
     self->cursor_alpha = 1.0;
@@ -2452,6 +2905,19 @@ editor_widget_init(EditorWidget *self)
     /* Viewport padding */
     self->padding_left = 4;
     self->padding_top = 8;
+    
+    /* Config defaults */
+    self->show_line_numbers = TRUE;
+    self->highlight_current_line = TRUE;
+    self->display_overview_map = FALSE;
+    self->show_right_margin = FALSE;
+    self->right_margin_position = 80;
+    self->wrap_lines = TRUE;
+    self->auto_indent = TRUE;
+    self->indent_style = 0; /* Space */
+    self->tab_width = 4;
+    self->indent_width = 4;
+    self->use_custom_font = FALSE;
     
     GtkEventController *controller = gtk_event_controller_key_new();
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
@@ -2479,6 +2945,12 @@ editor_widget_init(EditorWidget *self)
     g_signal_connect(drag, "drag-update", G_CALLBACK(on_drag_update), self);
     g_signal_connect(drag, "drag-end", G_CALLBACK(on_drag_end), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(drag));
+    
+    /* Scroll controller for mouse wheel (works even when scrollbar is hidden) */
+    GtkEventController *scroll_ctrl = gtk_event_controller_scroll_new(
+        GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    g_signal_connect(scroll_ctrl, "scroll", G_CALLBACK(on_scroll), self);
+    gtk_widget_add_controller(GTK_WIDGET(self), scroll_ctrl);
     
     gtk_widget_set_focusable(GTK_WIDGET(self), TRUE);
 }
@@ -2511,6 +2983,68 @@ editor_widget_set_property (GObject      *object,
         case PROP_VSCROLL_POLICY:
             self->vscroll_policy = g_value_get_enum(value);
             break;
+        case PROP_SHOW_LINE_NUMBERS:
+            self->show_line_numbers = g_value_get_boolean(value);
+            gtk_widget_queue_resize(GTK_WIDGET(self));
+            break;
+        case PROP_HIGHLIGHT_CURRENT_LINE:
+            self->highlight_current_line = g_value_get_boolean(value);
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+            break;
+        case PROP_DISPLAY_OVERVIEW_MAP:
+            self->display_overview_map = g_value_get_boolean(value);
+            /* Hide vertical scrollbar when overview map is shown */
+            {
+                GtkWidget *parent = gtk_widget_get_parent(GTK_WIDGET(self));
+                if (parent && GTK_IS_SCROLLED_WINDOW(parent)) {
+                    if (self->display_overview_map) {
+                        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(parent),
+                            GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
+                    } else {
+                        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(parent),
+                            GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+                    }
+                }
+            }
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+            break;
+        case PROP_SHOW_RIGHT_MARGIN:
+            self->show_right_margin = g_value_get_boolean(value);
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+            break;
+        case PROP_RIGHT_MARGIN_POSITION:
+            self->right_margin_position = g_value_get_int(value);
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+            break;
+        case PROP_WRAP_LINES:
+            self->wrap_lines = g_value_get_boolean(value);
+            gtk_widget_queue_resize(GTK_WIDGET(self)); /* Affects layout width */
+            break;
+        case PROP_AUTO_INDENT:
+            self->auto_indent = g_value_get_boolean(value);
+            break;
+        case PROP_INDENT_STYLE:
+            self->indent_style = g_value_get_int(value);
+            break;
+        case PROP_TAB_WIDTH:
+            self->tab_width = g_value_get_int(value);
+            break;
+        case PROP_INDENT_WIDTH:
+            self->indent_width = g_value_get_int(value);
+            break;
+        case PROP_USE_CUSTOM_FONT:
+            self->use_custom_font = g_value_get_boolean(value);
+            self->line_height = 0; /* Force re-calculation */
+            editor_widget_ensure_metrics(self);
+            gtk_widget_queue_resize(GTK_WIDGET(self));
+            break;
+        case PROP_FONT_NAME:
+            g_free(self->font_name);
+            self->font_name = g_value_dup_string(value);
+            self->line_height = 0; /* Force re-calculation */
+            editor_widget_ensure_metrics(self);
+            gtk_widget_queue_resize(GTK_WIDGET(self));
+            break;
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
             break;
@@ -2537,6 +3071,42 @@ editor_widget_get_property (GObject    *object,
         case PROP_VSCROLL_POLICY:
             g_value_set_enum(value, self->vscroll_policy);
             break;
+        case PROP_SHOW_LINE_NUMBERS:
+            g_value_set_boolean(value, self->show_line_numbers);
+            break;
+        case PROP_HIGHLIGHT_CURRENT_LINE:
+            g_value_set_boolean(value, self->highlight_current_line);
+            break;
+        case PROP_DISPLAY_OVERVIEW_MAP:
+            g_value_set_boolean(value, self->display_overview_map);
+            break;
+        case PROP_SHOW_RIGHT_MARGIN:
+            g_value_set_boolean(value, self->show_right_margin);
+            break;
+        case PROP_RIGHT_MARGIN_POSITION:
+            g_value_set_int(value, self->right_margin_position);
+            break;
+        case PROP_WRAP_LINES:
+            g_value_set_boolean(value, self->wrap_lines);
+            break;
+        case PROP_AUTO_INDENT:
+            g_value_set_boolean(value, self->auto_indent);
+            break;
+        case PROP_INDENT_STYLE:
+            g_value_set_int(value, self->indent_style);
+            break;
+        case PROP_TAB_WIDTH:
+            g_value_set_int(value, self->tab_width);
+            break;
+        case PROP_INDENT_WIDTH:
+            g_value_set_int(value, self->indent_width);
+            break;
+        case PROP_USE_CUSTOM_FONT:
+            g_value_set_boolean(value, self->use_custom_font);
+            break;
+        case PROP_FONT_NAME:
+            g_value_set_string(value, self->font_name);
+            break;
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
             break;
@@ -2562,6 +3132,42 @@ editor_widget_class_init(EditorWidgetClass *klass)
     g_object_class_override_property(object_class, PROP_VADJUSTMENT, "vadjustment");
     g_object_class_override_property(object_class, PROP_HSCROLL_POLICY, "hscroll-policy");
     g_object_class_override_property(object_class, PROP_VSCROLL_POLICY, "vscroll-policy");
+    
+    g_object_class_install_property(object_class, PROP_SHOW_LINE_NUMBERS,
+        g_param_spec_boolean("show-line-numbers", "Show Line Numbers", "Show Line Numbers", TRUE, G_PARAM_READWRITE));
+    
+    g_object_class_install_property(object_class, PROP_HIGHLIGHT_CURRENT_LINE,
+        g_param_spec_boolean("highlight-current-line", "Highlight Current Line", "Highlight Current Line", TRUE, G_PARAM_READWRITE));
+        
+    g_object_class_install_property(object_class, PROP_DISPLAY_OVERVIEW_MAP,
+        g_param_spec_boolean("display-overview-map", "Display Overview Map", "Display Overview Map", FALSE, G_PARAM_READWRITE));
+        
+    g_object_class_install_property(object_class, PROP_SHOW_RIGHT_MARGIN,
+        g_param_spec_boolean("show-right-margin", "Show Right Margin", "Show Right Margin", FALSE, G_PARAM_READWRITE));
+
+    g_object_class_install_property(object_class, PROP_RIGHT_MARGIN_POSITION,
+        g_param_spec_int("right-margin-position", "Right Margin Position", "Right Margin Position", 1, 200, 80, G_PARAM_READWRITE));
+        
+    g_object_class_install_property(object_class, PROP_WRAP_LINES,
+        g_param_spec_boolean("wrap-lines", "Wrap Lines", "Wrap Lines", TRUE, G_PARAM_READWRITE));
+        
+    g_object_class_install_property(object_class, PROP_AUTO_INDENT,
+        g_param_spec_boolean("auto-indent", "Auto Indentation", "Auto Indentation", TRUE, G_PARAM_READWRITE));
+        
+    g_object_class_install_property(object_class, PROP_INDENT_STYLE,
+        g_param_spec_int("indent-style", "Indent Style", "Indent Style", 0, 1, 0, G_PARAM_READWRITE));
+
+    g_object_class_install_property(object_class, PROP_TAB_WIDTH,
+        g_param_spec_int("tab-width", "Tab Width", "Tab Width", 1, 16, 4, G_PARAM_READWRITE));
+        
+    g_object_class_install_property(object_class, PROP_INDENT_WIDTH,
+        g_param_spec_int("indent-width", "Indent Width", "Indent Width", 1, 16, 4, G_PARAM_READWRITE));
+
+    g_object_class_install_property(object_class, PROP_USE_CUSTOM_FONT,
+        g_param_spec_boolean("use-custom-font", "Use Custom Font", "Use Custom Font", FALSE, G_PARAM_READWRITE));
+        
+    g_object_class_install_property(object_class, PROP_FONT_NAME,
+        g_param_spec_string("font-name", "Font Name", "Font Name", "Monospace 11", G_PARAM_READWRITE));
 }
 
 static void

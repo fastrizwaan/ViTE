@@ -2,6 +2,7 @@
 #include <adwaita.h>
 #include "editor-widget.h"
 #include "document.h"
+#include "preferences.h"
 
 static void open_file(GtkApplication *app, GFile *file);
 
@@ -28,6 +29,21 @@ on_open_btn_clicked(GtkButton *btn, gpointer user_data)
 }
 
 static void
+on_prefs_btn_clicked(GtkButton *btn, gpointer user_data)
+{
+    GtkWindow *win = GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(btn)));
+    /* We need to get the editor widget. We stored doc, but did we store editor? 
+       Actually, setup_window doesn't store editor.
+       We can traverse children of scrolled window?
+       Or traversing via window -> child (scrolled) -> child (editor).
+    */
+    GtkWidget *scrolled = gtk_window_get_child(win);
+    GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
+    
+    show_preferences_dialog(win, EDITOR_WIDGET(editor));
+}
+
+static void
 setup_window(GtkWindow *window)
 {
     GtkWidget *header = adw_header_bar_new();
@@ -40,6 +56,10 @@ setup_window(GtkWindow *window)
     GtkWidget *btn = gtk_button_new_with_label("Open");
     g_signal_connect(btn, "clicked", G_CALLBACK(on_open_btn_clicked), NULL);
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), btn);
+
+    GtkWidget *btn_prefs = gtk_button_new_from_icon_name("emblem-system-symbolic"); /* Gear icon */
+    g_signal_connect(btn_prefs, "clicked", G_CALLBACK(on_prefs_btn_clicked), NULL);
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_prefs);
 }
 
 static void
