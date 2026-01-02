@@ -82,6 +82,14 @@ struct _EditorWidget {
     
     gboolean dragging_map;
     double map_drag_start_scroll; /* Scroll value when map drag began */
+    double map_click_y; /* Y position where map click started (-1 if not clicking) */
+    
+    /* Smooth scroll animation for map click */
+    gboolean smooth_scroll_active;
+    double smooth_scroll_target;
+    double smooth_scroll_start;
+    gint64 smooth_scroll_start_time;
+    guint smooth_scroll_tick_id;
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
@@ -1117,6 +1125,45 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     *out_offset += last_len;
 }
 
+/* Smooth scroll animation tick callback */
+static gboolean
+smooth_scroll_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    (void)clock;
+    
+    if (!self->smooth_scroll_active || !self->vadjustment) {
+        self->smooth_scroll_tick_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    
+    gint64 now = g_get_monotonic_time();
+    double duration = 200000.0; /* 200ms animation */
+    double elapsed = (double)(now - self->smooth_scroll_start_time);
+    double progress = elapsed / duration;
+    
+    if (progress >= 1.0) {
+        /* Animation complete */
+        gtk_adjustment_set_value(self->vadjustment, self->smooth_scroll_target);
+        self->smooth_scroll_active = FALSE;
+        self->smooth_scroll_tick_id = 0;
+        gtk_widget_queue_draw(widget);
+        return G_SOURCE_REMOVE;
+    }
+    
+    /* Ease-out cubic: 1 - (1-t)^3 */
+    double t = 1.0 - progress;
+    double ease = 1.0 - (t * t * t);
+    
+    double current = self->smooth_scroll_start + 
+                    (self->smooth_scroll_target - self->smooth_scroll_start) * ease;
+    
+    gtk_adjustment_set_value(self->vadjustment, current);
+    gtk_widget_queue_draw(widget);
+    
+    return G_SOURCE_CONTINUE;
+}
+
 /* Mouse wheel scroll handler (works even when scrollbar is hidden) */
 static gboolean
 on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer user_data)
@@ -1149,23 +1196,15 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     
     if (!self->doc) return;
     
-    /* Handle Overview Map Click */
+    /* Handle Overview Map Click - store click position for drag_end */
     int width = gtk_widget_get_width(GTK_WIDGET(self));
-    if (self->display_overview_map && x > width - 100) {
-        if (self->vadjustment) {
-            double height = gtk_widget_get_height(GTK_WIDGET(self));
-            double upper = gtk_adjustment_get_upper(self->vadjustment);
-            double page = gtk_adjustment_get_page_size(self->vadjustment);
-            
-            double val = (y / height) * upper;
-            
-            if (val > upper - page) val = upper - page;
-            if (val < 0) val = 0;
-            
-            gtk_adjustment_set_value(self->vadjustment, val);
-        }
+    int map_w = 120;
+    if (self->display_overview_map && x > width - map_w) {
+        /* Store click Y - smooth scroll will happen in drag_end if no significant drag */
+        self->map_click_y = y;
         return;
     }
+    self->map_click_y = -1; /* Not a map click */
 
     size_t off;
     editor_widget_get_offset_at_point(self, x, y, &off);
@@ -1640,8 +1679,47 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     
     if (self->dragging_map) {
         self->dragging_map = FALSE;
+        
+        /* Check if it was a click (minimal movement) not a drag */
+        double drag_distance = sqrt(offset_x * offset_x + offset_y * offset_y);
+        if (drag_distance < 5 && self->map_click_y >= 0 && self->vadjustment && self->doc) {
+            /* This was a click, do smooth scroll */
+            double height = gtk_widget_get_height(GTK_WIDGET(self));
+            double upper = gtk_adjustment_get_upper(self->vadjustment);
+            double page = gtk_adjustment_get_page_size(self->vadjustment);
+            
+            double map_scale = 0.15;
+            double total_h = self->line_height * document_get_line_count(self->doc);
+            double map_total_h = total_h * map_scale;
+            
+            double map_scroll_y = 0;
+            if (map_total_h > height) {
+                double scroll_max = total_h - height;
+                if (scroll_max <= 0) scroll_max = 1;
+                double current_scroll_y = gtk_adjustment_get_value(self->vadjustment);
+                double map_scroll_max = map_total_h - height;
+                map_scroll_y = (current_scroll_y / scroll_max) * map_scroll_max;
+            }
+            
+            double click_line = (self->map_click_y + map_scroll_y) / (self->line_height * map_scale);
+            double target_scroll = (click_line * self->line_height) - (page / 2);
+            target_scroll = CLAMP(target_scroll, 0, upper - page);
+            
+            /* Start smooth scroll animation */
+            self->smooth_scroll_start = gtk_adjustment_get_value(self->vadjustment);
+            self->smooth_scroll_target = target_scroll;
+            self->smooth_scroll_start_time = g_get_monotonic_time();
+            self->smooth_scroll_active = TRUE;
+            
+            if (self->smooth_scroll_tick_id == 0) {
+                self->smooth_scroll_tick_id = gtk_widget_add_tick_callback(
+                    GTK_WIDGET(self), smooth_scroll_tick, self, NULL);
+            }
+        }
+        self->map_click_y = -1;
         return;
     }
+    self->map_click_y = -1; /* Reset for non-map drags */
     
     /* Always stop autoscroll when drag ends */
     stop_autoscroll(self);
