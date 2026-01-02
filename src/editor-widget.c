@@ -1187,6 +1187,7 @@ smooth_scroll_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
 }
 
 /* Mouse wheel scroll handler (works even when scrollbar is hidden) */
+/* Mouse wheel scroll handler (works even when scrollbar is hidden) */
 static gboolean
 on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer user_data)
 {
@@ -1197,9 +1198,11 @@ on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer u
     if (!self->vadjustment) return GDK_EVENT_PROPAGATE;
     
     double current = gtk_adjustment_get_value(self->vadjustment);
-    double step = self->line_height * 3; /* Scroll 3 lines per wheel tick */
     double upper = gtk_adjustment_get_upper(self->vadjustment);
     double page = gtk_adjustment_get_page_size(self->vadjustment);
+    
+    /* Reverted to line-based scrolling as per user request */
+    double step = self->line_height * 4; /* Scroll 4 lines per wheel tick */
     
     double new_val = current + (dy * step);
     new_val = CLAMP(new_val, 0, upper - page);
@@ -1611,6 +1614,7 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
             double scroll_delta = (offset_y / track) * scroll_max;
             
             double target_scroll = self->map_drag_start_scroll + scroll_delta;
+            /* Ensure we don't snap to integers */
             target_scroll = CLAMP(target_scroll, 0, upper - page);
             
             gtk_adjustment_set_value(self->vadjustment, target_scroll);
