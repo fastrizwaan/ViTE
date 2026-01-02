@@ -55,6 +55,15 @@ struct _EditorWidget {
     gboolean drag_copy_mode;
     PangoLayout *drag_ghost_layout;
     gboolean is_dnd_active; /* TRUE only after passing 8px threshold */
+    
+    /* Autoscroll timer for smooth edge scrolling */
+    guint autoscroll_timer_id;
+    int autoscroll_direction; /* -1 = up, 0 = none, 1 = down */
+    double autoscroll_speed;  /* Lines per tick */
+    
+    /* Viewport padding */
+    int padding_left;
+    int padding_top;
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
@@ -381,8 +390,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         pango_layout_set_font_description(layout, self->font_desc);
         pango_layout_set_text(layout, text, (int)len);
         
-        /* Word Wrap */
-        pango_layout_set_width(layout, width * PANGO_SCALE);
+        /* Word Wrap - account for left padding */
+        pango_layout_set_width(layout, (width - self->padding_left) * PANGO_SCALE);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         
         /* Syntax highlight */
@@ -391,7 +400,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         pango_attr_list_unref(attrs);
         
         gtk_snapshot_save(snapshot);
-        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(0, current_y_pos));
+        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(self->padding_left, current_y_pos + self->padding_top));
         
         /* Calculate height of this layout */
         int pixel_h;
@@ -536,6 +545,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                 int caret_x = (int)(pango_units_to_double(strong_pos.x) + 0.5);
                 int caret_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
                 int caret_h = (int)(pango_units_to_double(strong_pos.height) + 0.5);
+                
+                /* Use line_height as fallback for empty lines */
+                if (caret_h < 1) caret_h = (int)self->line_height;
 
                 gtk_snapshot_append_color(snapshot, 
                                           &caret_color,
@@ -555,7 +567,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         }
     }
 
-    /* Draw DnD Overlays (Border & Ghost) */
+    /* Draw DnD Overlays (Border only - ghost text disabled to prevent artifacts) */
     if (self->is_dnd_active) {
         /* 1. Viewport Border */
         GdkRGBA border_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){0.2, 0.5, 0.9, 1.0};
@@ -563,17 +575,6 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                                    &GSK_ROUNDED_RECT_INIT(0, 0, (float)width, (float)height),
                                    (float[4]){1, 1, 1, 1},
                                    (GdkRGBA[4]){border_color, border_color, border_color, border_color});
-
-        /* 2. Ghost Text Preview */
-        if (self->drag_ghost_layout) {
-            gtk_snapshot_save(snapshot);
-            gtk_snapshot_push_opacity(snapshot, 0.5);
-            /* Offset from mouse pointer slightly */
-            gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT((float)self->drag_x + 10, (float)self->drag_y + 10));
-            gtk_snapshot_append_layout(snapshot, self->drag_ghost_layout, &self->color_text);
-            gtk_snapshot_pop(snapshot);
-            gtk_snapshot_restore(snapshot);
-        }
     }
 }
 
@@ -635,7 +636,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         PangoLayout *layout = pango_layout_new(context);
         pango_layout_set_font_description(layout, self->font_desc);
         pango_layout_set_text(layout, text, len);
-        pango_layout_set_width(layout, width * PANGO_SCALE);
+        pango_layout_set_width(layout, (width - self->padding_left) * PANGO_SCALE);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         
         int pixel_h;
@@ -643,12 +644,15 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         double layout_h = (double)pixel_h;
         if (layout_h < self->line_height) layout_h = self->line_height;
         
-        if (y < current_y + layout_h) {
+        /* Account for padding when checking Y position */
+        double adjusted_y = y - self->padding_top;
+        if (adjusted_y < current_y + layout_h) {
             /* Found the line! */
             int index, trailing;
+            /* Subtract padding from x coordinate */
             pango_layout_xy_to_index(layout, 
-                                     (int)(x * PANGO_SCALE), 
-                                     (int)((y - current_y) * PANGO_SCALE), 
+                                     (int)((x - self->padding_left) * PANGO_SCALE), 
+                                     (int)((adjusted_y - current_y) * PANGO_SCALE), 
                                      &index, &trailing);
             
             /* Add trailing to handle clicks at end of characters/line */
@@ -887,6 +891,69 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
     }
 }
 
+/* Autoscroll timer callback for smooth edge scrolling */
+static gboolean
+autoscroll_tick(gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    
+    if (!self->vadjustment || self->autoscroll_direction == 0) {
+        self->autoscroll_timer_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    
+    double current_val = gtk_adjustment_get_value(self->vadjustment);
+    double upper = gtk_adjustment_get_upper(self->vadjustment);
+    double page_size = gtk_adjustment_get_page_size(self->vadjustment);
+    
+    double new_val = current_val + (self->autoscroll_direction * self->autoscroll_speed);
+    new_val = CLAMP(new_val, 0, upper - page_size);
+    
+    if (new_val != current_val) {
+        gtk_adjustment_set_value(self->vadjustment, new_val);
+        
+        /* Update drop offset based on new scroll position */
+        size_t drop_off;
+        editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &drop_off);
+        
+        size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
+        size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+        
+        if (drop_off >= sel_start && drop_off < sel_end) {
+            self->drag_drop_offset = (size_t)-1;
+        } else {
+            self->drag_drop_offset = drop_off;
+        }
+        
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+    }
+    
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+stop_autoscroll(EditorWidget *self)
+{
+    if (self->autoscroll_timer_id) {
+        g_source_remove(self->autoscroll_timer_id);
+        self->autoscroll_timer_id = 0;
+    }
+    self->autoscroll_direction = 0;
+    self->autoscroll_speed = 0;
+}
+
+static void
+start_autoscroll(EditorWidget *self, int direction, double speed)
+{
+    self->autoscroll_direction = direction;
+    self->autoscroll_speed = speed;
+    
+    if (!self->autoscroll_timer_id) {
+        /* Timer fires every 1ms (maximum rate for g_timeout) */
+        self->autoscroll_timer_id = g_timeout_add(1, autoscroll_tick, self);
+    }
+}
+
 static void
 on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data)
 {
@@ -952,10 +1019,32 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
             } else {
                 self->drag_drop_offset = drop_off;
             }
+            
+            /* Timer-based autoscroll when near edges */
+            int widget_height = gtk_widget_get_height(GTK_WIDGET(self));
+            int edge_zone = 100; /* Pixels from edge to trigger scroll */
+            
+            if (self->drag_y < edge_zone) {
+                /* Near top - scroll up, speed based on distance from edge */
+                double proximity = (edge_zone - self->drag_y) / (double)edge_zone;
+                /* Very slow speeds for 1ms timer: 0.001 to 0.02 lines/tick */
+                double speed = 0.001 + proximity * proximity * 0.02;
+                start_autoscroll(self, -1, speed);
+            } else if (self->drag_y > widget_height - edge_zone) {
+                /* Near bottom - scroll down, speed based on distance from edge */
+                double distance_from_edge = widget_height - self->drag_y;
+                double proximity = (edge_zone - distance_from_edge) / (double)edge_zone;
+                double speed = 0.001 + proximity * proximity * 0.02;
+                start_autoscroll(self, 1, speed);
+            } else {
+                /* Not in edge zone - stop autoscroll */
+                stop_autoscroll(self);
+            }
         } else {
             /* Not moved enough yet - suppress feedback */
             self->drag_drop_offset = (size_t)-1;
             self->is_dnd_active = FALSE;
+            stop_autoscroll(self);
         }
     } else {
         /* Normal drag selection - extend selection to current position */
@@ -964,7 +1053,10 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
         self->alt_word_mode = FALSE; /* Manual drag selection is character-based */
     }
     
-    scroll_to_cursor(self);
+    /* Only scroll to cursor for normal selection drag, not DnD */
+    if (!self->is_dnd_active) {
+        scroll_to_cursor(self);
+    }
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
@@ -973,6 +1065,9 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->doc) return;
+    
+    /* Always stop autoscroll when drag ends */
+    stop_autoscroll(self);
     
     /* If this was a multi-click selection (double/triple-click), 
        just clear the flag and preserve the selection */
@@ -1971,6 +2066,15 @@ editor_widget_init(EditorWidget *self)
     self->drag_drop_offset = (size_t)-1;
     self->drag_copy_mode = FALSE;
     self->drag_ghost_layout = NULL;
+    
+    /* Autoscroll timer initialization */
+    self->autoscroll_timer_id = 0;
+    self->autoscroll_direction = 0;
+    self->autoscroll_speed = 0;
+    
+    /* Viewport padding */
+    self->padding_left = 8;
+    self->padding_top = 8;
     
     GtkEventController *controller = gtk_event_controller_key_new();
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
