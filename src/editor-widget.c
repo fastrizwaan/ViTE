@@ -46,6 +46,8 @@ struct _EditorWidget {
 
     /* Visual navigation */
     double target_x;  /* Target X position for Up/Down navigation (in pixels) */
+
+    gboolean alt_word_mode; /* TRUE if selection was auto-created for word swapping */
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
@@ -98,72 +100,76 @@ editor_widget_update_adjustments(EditorWidget *self)
 
 /* Move cursor right by one grapheme cluster */
 static size_t
-utf8_next_grapheme(Document *doc, size_t offset)
+editor_widget_get_grapheme_boundary(EditorWidget *self, size_t offset, gboolean next)
 {
-    size_t total = document_get_length(doc);
-    if (offset >= total) return offset;
-    
-    /* Get a small chunk of text to analyze (UTF-8 max is 4 bytes, but grapheme clusters 
-       like emoji sequences can be longer - use 16 bytes for safety) */
-    size_t chunk_len = 16;
-    if (offset + chunk_len > total) chunk_len = total - offset;
-    
-    char *text = document_get_text_range(doc, offset, chunk_len);
-    if (!text) return offset + 1;
-    
-    if (!g_utf8_validate(text, chunk_len, NULL)) {
-        g_free(text);
-        return offset + 1; /* Fallback to byte movement for invalid UTF-8 */
+    if (!self || !self->doc) return offset;
+    size_t total = document_get_length(self->doc);
+    if (next && offset >= total) return total;
+    if (!next && offset == 0) return 0;
+
+    size_t line_idx = document_get_line_of_offset(self->doc, offset);
+    size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+    size_t byte_index = offset - line_start;
+
+    size_t line_len;
+    char *text = document_get_line(self->doc, line_idx, &line_len);
+    if (!text) return next ? MIN(offset + 1, total) : (offset > 0 ? offset - 1 : 0);
+
+    /* Clamp index to line bounds */
+    if (byte_index > line_len) byte_index = line_len;
+
+    size_t result_offset = offset;
+    if (next) {
+        if (byte_index < line_len) {
+            /* Move to next code point */
+            const char *p = text + byte_index;
+            const char *next_p = g_utf8_next_char(p);
+            result_offset = line_start + (next_p - text);
+        } else {
+            /* We are at the end of the line, move to next byte (newline or next line) */
+            result_offset = MIN(offset + 1, total);
+        }
+    } else {
+        if (byte_index > 0) {
+            /* Move to previous code point */
+            const char *p = text + byte_index;
+            const char *prev_p = g_utf8_find_prev_char(text, p);
+            if (prev_p) {
+                result_offset = line_start + (prev_p - text);
+            } else {
+                result_offset = offset - 1; /* Should not happen if start of line is handled */
+            }
+        } else {
+            /* We are at the start of the line, move to previous byte */
+            result_offset = offset - 1;
+        }
     }
-    
-    /* Get next character boundary */
-    char *next = g_utf8_next_char(text);
-    size_t bytes = next - text;
+
     g_free(text);
-    
-    return offset + bytes;
+    return result_offset;
 }
 
-/* Move cursor left by one grapheme cluster */
 static size_t
-utf8_prev_grapheme(Document *doc, size_t offset)
+utf8_next_grapheme(EditorWidget *self, size_t offset)
 {
-    if (offset == 0) return 0;
-    
-    /* Get text before cursor to find previous char start 
-       (16 bytes should be enough for any grapheme cluster) */
-    size_t start = (offset > 16) ? offset - 16 : 0;
-    size_t len = offset - start;
-    char *text = document_get_text_range(doc, start, len);
-    
-    if (!text) return (offset > 0) ? offset - 1 : 0;
-    
-    if (!g_utf8_validate(text, len, NULL)) {
-        g_free(text);
-        return (offset > 0) ? offset - 1 : 0; /* Fallback */
-    }
-    
-    /* Find the last character start */
-    char *prev = g_utf8_find_prev_char(text, text + len);
-    if (!prev) {
-        g_free(text);
-        return (offset > 0) ? offset - 1 : 0;
-    }
-    
-    size_t bytes = (text + len) - prev;
-    g_free(text);
-    
-    return offset - bytes;
+    return editor_widget_get_grapheme_boundary(self, offset, TRUE);
+}
+
+static size_t
+utf8_prev_grapheme(EditorWidget *self, size_t offset)
+{
+    return editor_widget_get_grapheme_boundary(self, offset, FALSE);
 }
 
 /* Helper: Check if character at offset is a word character */
 static gboolean
-is_word_char_at(Document *doc, size_t offset)
+is_word_char_at(EditorWidget *self, size_t offset)
 {
-    size_t total = document_get_length(doc);
+    if (!self->doc) return FALSE;
+    size_t total = document_get_length(self->doc);
     if (offset >= total) return FALSE;
     
-    char *text = document_get_text_range(doc, offset, 4); /* Max UTF-8 char */
+    char *text = document_get_text_range(self->doc, offset, 4); /* Max UTF-8 char */
     if (!text) return FALSE;
     
     gunichar ch = g_utf8_get_char_validated(text, -1);
@@ -252,38 +258,38 @@ find_line_at_offset(Document *doc, size_t offset, size_t *line_start, size_t *li
 
 /* Move to start of next word */
 static size_t
-word_next(Document *doc, size_t offset)
+word_next(EditorWidget *self, size_t offset)
 {
-    size_t total = document_get_length(doc);
+    size_t total = document_get_length(self->doc);
     
     /* Skip current word characters */
-    while (offset < total && is_word_char_at(doc, offset)) {
-        offset = utf8_next_grapheme(doc, offset);
+    while (offset < total && is_word_char_at(self, offset)) {
+        offset = utf8_next_grapheme(self, offset);
     }
     /* Skip whitespace/non-word to reach next word */
-    while (offset < total && !is_word_char_at(doc, offset)) {
-        offset = utf8_next_grapheme(doc, offset);
+    while (offset < total && !is_word_char_at(self, offset)) {
+        offset = utf8_next_grapheme(self, offset);
     }
     return offset;
 }
 
 /* Move to start of current/previous word */
 static size_t
-word_prev(Document *doc, size_t offset)
+word_prev(EditorWidget *self, size_t offset)
 {
     if (offset == 0) return 0;
     
     /* Move back one char first */
-    offset = utf8_prev_grapheme(doc, offset);
+    offset = utf8_prev_grapheme(self, offset);
     
     /* Skip non-word characters backwards */
-    while (offset > 0 && !is_word_char_at(doc, offset)) {
-        offset = utf8_prev_grapheme(doc, offset);
+    while (offset > 0 && !is_word_char_at(self, offset)) {
+        offset = utf8_prev_grapheme(self, offset);
     }
     /* Find start of current word */
     while (offset > 0) {
-        size_t prev = utf8_prev_grapheme(doc, offset);
-        if (!is_word_char_at(doc, prev)) break;
+        size_t prev = utf8_prev_grapheme(self, offset);
+        if (!is_word_char_at(self, prev)) break;
         offset = prev;
     }
     return offset;
@@ -664,7 +670,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
             self->selection_anchor = word_start;
             self->cursor_offset = word_end;
         }
-        
+        self->alt_word_mode = TRUE; /* Double click starts word mode */
         self->multi_click_selection = TRUE;
         self->multi_click_mode = 2;
         self->multi_click_start = self->selection_anchor;
@@ -675,6 +681,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         find_line_at_offset(self->doc, off, &line_start, &line_end);
         self->selection_anchor = line_start;
         self->cursor_offset = line_end;
+        self->alt_word_mode = TRUE; /* Triple click is also word-like */
         self->multi_click_selection = TRUE;
         self->multi_click_mode = 3;
         self->multi_click_start = line_start;  /* Store for drag extension */
@@ -702,6 +709,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
             /* Reset selection */
             self->cursor_offset = off;
             self->selection_anchor = off;
+            self->alt_word_mode = FALSE;
         }
 
         /* Middle click paste */
@@ -783,6 +791,7 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
             self->selection_anchor = self->multi_click_start;
             self->cursor_offset = self->multi_click_end;
         }
+        self->alt_word_mode = TRUE; /* Dragging a multi-click selection preserves word-like behavior */
     } else if (self->is_dragging_selection) {
         /* Dragging selection for DnD - visual feedback handled by cursor */
         /* We'll execute the move on drag_end */
@@ -790,6 +799,7 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
         /* Normal drag selection - extend selection to current position */
         /* Only update cursor, anchor was set by on_click_pressed */
         self->cursor_offset = off;
+        self->alt_word_mode = FALSE; /* Manual drag selection is character-based */
     }
     
     scroll_to_cursor(self);
@@ -839,6 +849,7 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
                 
                 self->selection_anchor = drop_off;
                 self->cursor_offset = drop_off + sel_len;
+                self->alt_word_mode = FALSE;
                 
                 g_free(text);
                 editor_widget_update_adjustments(self);
@@ -1147,25 +1158,57 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
     
     /* If no selection, auto-select word at caret precisely as in swap_words */
     if (s == e) {
+        self->alt_word_mode = TRUE;
         size_t off = self->cursor_offset;
-        if (off > 0 && !is_alt_word_char_at(self->doc, off) && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self->doc, off))) {
-            off = utf8_prev_grapheme(self->doc, off);
+        if (off > 0 && !is_alt_word_char_at(self->doc, off) && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self, off))) {
+            off = utf8_prev_grapheme(self, off);
         }
         if (!is_alt_word_char_at(self->doc, off)) {
             if (delta > 0) {
-                while (off < total && !is_alt_word_char_at(self->doc, off)) off = utf8_next_grapheme(self->doc, off);
+                while (off < total && !is_alt_word_char_at(self->doc, off)) off = utf8_next_grapheme(self, off);
             } else {
-                while (off > 0 && !is_alt_word_char_at(self->doc, off)) off = utf8_prev_grapheme(self->doc, off);
+                while (off > 0 && !is_alt_word_char_at(self->doc, off)) off = utf8_prev_grapheme(self, off);
             }
         }
         if (off >= total || !is_alt_word_char_at(self->doc, off)) return;
         
         s = off;
-        while (s > 0 && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self->doc, s)))
-            s = utf8_prev_grapheme(self->doc, s);
+        while (s > 0 && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self, s)))
+            s = utf8_prev_grapheme(self, s);
         e = off;
         while (e < total && is_alt_word_char_at(self->doc, e))
-            e = utf8_next_grapheme(self->doc, e);
+            e = utf8_next_grapheme(self, e);
+    } else if (!self->alt_word_mode) {
+        /* Manual selection: move by exactly one character (shift) */
+        char *sel_text = document_get_text_range(self->doc, s, e - s);
+        if (delta > 0) {
+            if (e < total) {
+                size_t next_gap = utf8_next_grapheme(self, e);
+                size_t gap_len = next_gap - e;
+                char *gap_text = document_get_text_range(self->doc, e, gap_len);
+                document_delete(self->doc, s, (e - s) + gap_len);
+                document_insert(self->doc, s, gap_text, gap_len);
+                document_insert(self->doc, s + gap_len, sel_text, e - s);
+                self->selection_anchor = s + gap_len;
+                self->cursor_offset = self->selection_anchor + (e - s);
+                g_free(gap_text);
+            }
+        } else {
+            if (s > 0) {
+                size_t prev_gap = utf8_prev_grapheme(self, s);
+                size_t gap_len = s - prev_gap;
+                char *gap_text = document_get_text_range(self->doc, prev_gap, gap_len);
+                document_delete(self->doc, prev_gap, gap_len + (e - s));
+                document_insert(self->doc, prev_gap, sel_text, e - s);
+                document_insert(self->doc, prev_gap + (e - s), gap_text, gap_len);
+                self->selection_anchor = prev_gap;
+                self->cursor_offset = self->selection_anchor + (e - s);
+                g_free(gap_text);
+            }
+        }
+        g_free(sel_text);
+        update_target_x(self);
+        return;
     }
     
     size_t sel_len = e - s;
@@ -1174,14 +1217,14 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         size_t sep_start = e;
         size_t sep_end = sep_start;
         while (sep_end < total && !is_alt_word_char_at(self->doc, sep_end))
-            sep_end = utf8_next_grapheme(self->doc, sep_end);
+            sep_end = utf8_next_grapheme(self, sep_end);
             
         if (sep_end >= total) return;
         
         size_t w2_start = sep_end;
         size_t w2_end = w2_start;
         while (w2_end < total && is_alt_word_char_at(self->doc, w2_end))
-            w2_end = utf8_next_grapheme(self->doc, w2_end);
+            w2_end = utf8_next_grapheme(self, w2_end);
             
         size_t w2_len = w2_end - w2_start;
         size_t sep_len = w2_start - e;
@@ -1203,15 +1246,15 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         /* Move Left: [W2][SEP][SEL] -> [SEL][SEP][W2] */
         size_t sep_end = s;
         size_t sep_start = sep_end;
-        while (sep_start > 0 && !is_alt_word_char_at(self->doc, utf8_prev_grapheme(self->doc, sep_start)))
-            sep_start = utf8_prev_grapheme(self->doc, sep_start);
+        while (sep_start > 0 && !is_alt_word_char_at(self->doc, utf8_prev_grapheme(self, sep_start)))
+            sep_start = utf8_prev_grapheme(self, sep_start);
             
         if (sep_start == 0 && !is_alt_word_char_at(self->doc, 0)) return;
         
         size_t w2_end = sep_start;
         size_t w2_start = w2_end;
-        while (w2_start > 0 && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self->doc, w2_start)))
-            w2_start = utf8_prev_grapheme(self->doc, w2_start);
+        while (w2_start > 0 && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self, w2_start)))
+            w2_start = utf8_prev_grapheme(self, w2_start);
             
         if (w2_start == w2_end) return;
         
@@ -1344,6 +1387,7 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (state & GDK_ALT_MASK) {
                 editor_widget_move_lines_vertically(self, -1);
             } else {
+                self->alt_word_mode = FALSE;
                 move_cursor(self, -1);
                 if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             }
@@ -1354,6 +1398,7 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (state & GDK_ALT_MASK) {
                 editor_widget_move_lines_vertically(self, 1);
             } else {
+                self->alt_word_mode = FALSE;
                 move_cursor(self, 1);
                 if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             }
@@ -1364,10 +1409,11 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (state & GDK_ALT_MASK) {
                 editor_widget_move_selection_horizontally(self, -1);
             } else {
+                self->alt_word_mode = FALSE;
                 if (state & GDK_CONTROL_MASK) {
-                    self->cursor_offset = word_prev(self->doc, self->cursor_offset);
+                    self->cursor_offset = word_prev(self, self->cursor_offset);
                 } else {
-                    self->cursor_offset = utf8_prev_grapheme(self->doc, self->cursor_offset);
+                    self->cursor_offset = utf8_prev_grapheme(self, self->cursor_offset);
                 }
                 if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
                 update_target_x(self);
@@ -1379,10 +1425,11 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (state & GDK_ALT_MASK) {
                 editor_widget_move_selection_horizontally(self, 1);
             } else {
+                self->alt_word_mode = FALSE;
                 if (state & GDK_CONTROL_MASK) {
-                    self->cursor_offset = word_next(self->doc, self->cursor_offset);
+                    self->cursor_offset = word_next(self, self->cursor_offset);
                 } else {
-                    self->cursor_offset = utf8_next_grapheme(self->doc, self->cursor_offset);
+                    self->cursor_offset = utf8_next_grapheme(self, self->cursor_offset);
                 }
                 if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
                 update_target_x(self);
@@ -1454,7 +1501,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                 editor_widget_update_adjustments(self);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             } else if (self->cursor_offset > 0) {
-                size_t prev = utf8_prev_grapheme(self->doc, self->cursor_offset);
+                size_t prev = utf8_prev_grapheme(self, self->cursor_offset);
                 size_t bytes_to_delete = self->cursor_offset - prev;
                 document_delete(self->doc, prev, bytes_to_delete);
                 self->cursor_offset = prev;
@@ -1470,7 +1517,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                 editor_widget_update_adjustments(self);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             } else if (self->cursor_offset < document_get_length(self->doc)) {
-                size_t next = utf8_next_grapheme(self->doc, self->cursor_offset);
+                size_t next = utf8_next_grapheme(self, self->cursor_offset);
                 size_t bytes_to_delete = next - self->cursor_offset;
                 document_delete(self->doc, self->cursor_offset, bytes_to_delete);
                 self->selection_anchor = self->cursor_offset;
@@ -1560,6 +1607,7 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
     document_insert(self->doc, self->cursor_offset, str, len);
     self->cursor_offset += len;
     self->selection_anchor = self->cursor_offset;
+    self->alt_word_mode = FALSE;
     
     editor_widget_update_im_cursor_location(self);
     editor_widget_reset_cursor_blink(self);  /* Keep cursor visible while typing */
