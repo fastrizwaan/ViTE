@@ -80,6 +80,36 @@ static void editor_widget_update_im_cursor_location(EditorWidget *self);
 static PangoLayout *create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len);
 static void update_selection_extension(EditorWidget *self, size_t off);
 
+static double
+get_gutter_width(EditorWidget *self)
+{
+    if (!self->doc) return 0;
+    size_t total_lines = document_get_line_count(self->doc);
+    /* Count digits */
+    int digits = 1;
+    size_t temp = total_lines;
+    while (temp >= 10) {
+        temp /= 10;
+        digits++;
+    }
+    
+    /* Minimum width for 2 digits to avoid jitter */
+    if (digits < 2) digits = 2;
+    
+    /* Calculate width: digits * char_width + padding */
+    /* Use '8' as a standard digit width approximation or measure '0' */
+    double digit_width = self->line_height * 0.5; /* Rough estimate if font is not monospaced, but we use monospace */
+    /* Better: measure '0' in ensure_metrics if possible, or just assume metric is set. */
+    /* self->line_height is set in ensure_metrics. Let's assume standard aspect ratio or use a fixed multiple? 
+       Actually, let's use a simpler approach: 
+       We really should measure '0' width. But for now, let's assume 0.6 * height (standard monospace ratio) or wait for ensure_metrics.
+    */
+    /* For simplicity in this step, let's just use a reasonable width logic if we can't measure purely yet.
+       However, we are inside snapshot/measure, so metrics exist.
+    */
+    return (digits * (self->line_height * 0.5)) + 4.0; /* 2px padding on each side */
+}
+
 G_DEFINE_TYPE_WITH_CODE (EditorWidget, editor_widget, GTK_TYPE_WIDGET,
                          G_IMPLEMENT_INTERFACE (GTK_TYPE_SCROLLABLE, editor_widget_scrollable_init))
 
@@ -103,8 +133,17 @@ editor_widget_update_adjustments(EditorWidget *self)
     int widget_height = gtk_widget_get_height(GTK_WIDGET(self));
     
     /* Pixel-based scrolling: upper = total content height in pixels */
-    double upper = (double)total_lines * self->line_height;
-    if (upper < widget_height) upper = widget_height;
+    /* Ensure we can scroll enough to see the last line at the bottom.
+       The max scroll value is (upper - page_size).
+       We want max_scroll to be at least (total_height - viewport_height) + padding? 
+       Actually, if we want the last line to be fully visible at the bottom:
+       Total content height = lines * line_height.
+       We should be able to scroll to: content_height - viewport_height + padding.
+       So upper = content_height + padding. 
+       If content_height < viewport_height, upper = viewport_height.
+    */
+    double content_height = (double)total_lines * self->line_height + self->padding_top * 2 + self->line_height; /* Extra line buffer */
+    double upper = MAX(content_height, widget_height);
 
     gtk_adjustment_configure(self->vadjustment,
                              gtk_adjustment_get_value(self->vadjustment),
@@ -350,6 +389,19 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     int width = gtk_widget_get_width(widget);
     int height = gtk_widget_get_height(widget);
     
+    /* Draw Gutter Background - Removed as per request */
+    double gutter_w = get_gutter_width(self);
+    /* dim background */
+    GdkRGBA gutter_bg = {0.95, 0.95, 0.95, 1.0}; /* Default light gray */
+    /* Check for dark theme approximation - if text is light */
+    if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
+         gutter_bg = (GdkRGBA){0.15, 0.15, 0.15, 1.0};
+    }
+    
+    gtk_snapshot_append_color(snapshot, &gutter_bg, &GRAPHENE_RECT_INIT(0, 0, (float)gutter_w, (float)height));
+
+    /* Pixel-based scrolling: start_y is in pixels */
+    
     /* Pixel-based scrolling: start_y is in pixels */
     double scroll_y = 0;
     if (self->vadjustment)
@@ -369,6 +421,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
 
     double current_y_pos = 0; /* Updated dynamically */
+    double text_start_x = gutter_w + self->padding_left;
 
     for (size_t i = 0; i < count_lines; ++i) {
         size_t line_idx = start_line + i;
@@ -394,8 +447,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         pango_layout_set_font_description(layout, self->font_desc);
         pango_layout_set_text(layout, text, (int)len);
         
-        /* Word Wrap - account for left padding */
-        pango_layout_set_width(layout, (width - self->padding_left) * PANGO_SCALE);
+        /* Word Wrap - account for gutter and padding */
+        pango_layout_set_width(layout, (width - text_start_x) * PANGO_SCALE);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         
         /* Syntax highlight */
@@ -416,8 +469,32 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
              current_y_pos = -pixel_offset;
         }
 
+        /* Draw Line Number */
+        {
+            char lnum_buf[32];
+            snprintf(lnum_buf, sizeof(lnum_buf), "%zu", line_idx + 1);
+            
+            PangoLayout *lnum_layout = pango_layout_new(context);
+            pango_layout_set_font_description(lnum_layout, self->font_desc);
+            
+            pango_layout_set_text(lnum_layout, lnum_buf, -1);
+            pango_layout_set_alignment(lnum_layout, PANGO_ALIGN_RIGHT);
+            pango_layout_set_width(lnum_layout, (int)((gutter_w - 8) * PANGO_SCALE));
+            
+            /* Gutter text color - dim it */
+            GdkRGBA gutter_fg = self->color_text;
+            gutter_fg.alpha = 0.5;
+            
+            gtk_snapshot_save(snapshot);
+            gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(4, current_y_pos + self->padding_top));
+            gtk_snapshot_append_layout(snapshot, lnum_layout, &gutter_fg);
+            gtk_snapshot_restore(snapshot);
+            
+            g_object_unref(lnum_layout);
+        }
+
         gtk_snapshot_save(snapshot);
-        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(self->padding_left, current_y_pos + self->padding_top));
+        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x, current_y_pos + self->padding_top));
         
         /* Draw Line Background if selected */
         /* Selection rendering across lines is complex. 
@@ -650,10 +727,13 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             len--;
         }
 
+        double gutter_w = get_gutter_width(self);
+        double text_start_x = gutter_w + self->padding_left;
+
         PangoLayout *layout = pango_layout_new(context);
         pango_layout_set_font_description(layout, self->font_desc);
         pango_layout_set_text(layout, text, len);
-        pango_layout_set_width(layout, (width - self->padding_left) * PANGO_SCALE);
+        pango_layout_set_width(layout, (width - text_start_x) * PANGO_SCALE);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         
         int pixel_h;
@@ -667,15 +747,18 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
              double pixel_offset = fraction * layout_h;
              current_y = -pixel_offset;
         }
-        
+
         /* Account for padding when checking Y position */
         double adjusted_y = y - self->padding_top;
         if (adjusted_y < current_y + layout_h) {
             /* Found the line! */
             int index, trailing;
-            /* Subtract padding from x coordinate */
+            /* Subtract padding and gutter from x coordinate */
+            double internal_x = x - text_start_x;
+            if (internal_x < 0) internal_x = 0; /* Clamp to start of line if clicked in gutter */
+            
             pango_layout_xy_to_index(layout, 
-                                     (int)((x - self->padding_left) * PANGO_SCALE), 
+                                     (int)(internal_x * PANGO_SCALE), 
                                      (int)((adjusted_y - current_y) * PANGO_SCALE), 
                                      &index, &trailing);
             
@@ -1410,7 +1493,8 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     pango_layout_set_text(layout, text, (int)len);
     
     int width = gtk_widget_get_width(GTK_WIDGET(self));
-    pango_layout_set_width(layout, (width - self->padding_left) * PANGO_SCALE);
+    double gutter_w = get_gutter_width(self);
+    pango_layout_set_width(layout, (width - (gutter_w + self->padding_left)) * PANGO_SCALE);
     pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
 
     if (out_text) *out_text = text;
@@ -2346,7 +2430,7 @@ editor_widget_init(EditorWidget *self)
     self->autoscroll_speed = 0;
     
     /* Viewport padding */
-    self->padding_left = 8;
+    self->padding_left = 4;
     self->padding_top = 8;
     
     GtkEventController *controller = gtk_event_controller_key_new();
