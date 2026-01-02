@@ -6,14 +6,16 @@
 
 typedef enum {
     UNDO_OP_INSERT,
-    UNDO_OP_DELETE
+    UNDO_OP_DELETE,
+    UNDO_OP_GROUP
 } UndoOpType;
 
-typedef struct {
+typedef struct _UndoCommand {
     UndoOpType type;
     size_t start;
-    char *text; /* For insert: text inserted (ref counting?? No. Copy.). For delete: text deleted. */
+    char *text;
     size_t length;
+    GList *group_commands; /* List of UndoCommand* if type == UNDO_OP_GROUP */
 } UndoCommand;
 
 typedef struct {
@@ -21,6 +23,7 @@ typedef struct {
     GList *redo_stack; /* List of UndoCommand* */
     
     gboolean in_undo_redo; /* Flag to prevent recording during undo/redo execution */
+    UndoCommand *current_group; /* Active group if any */
 } UndoStack;
 
 UndoStack *undo_stack_new(void);
@@ -28,6 +31,9 @@ void undo_stack_free(UndoStack *stack);
 
 void undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t len);
 void undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text, size_t len);
+
+void undo_stack_begin_group(UndoStack *stack);
+void undo_stack_end_group(UndoStack *stack);
 
 /* Returns command to execute (inverse of recorded) */
 gboolean undo_stack_undo(UndoStack *stack, PieceTable *pt);
