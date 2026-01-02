@@ -57,6 +57,8 @@ static void editor_widget_cut(EditorWidget *self);
 static void editor_widget_paste(EditorWidget *self);
 static void editor_widget_paste_primary(EditorWidget *self);
 static void move_cursor(EditorWidget *self, int visual_lines_delta);
+static void editor_widget_update_im_cursor_location(EditorWidget *self);
+static PangoLayout *create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len);
 
 G_DEFINE_TYPE_WITH_CODE (EditorWidget, editor_widget, GTK_TYPE_WIDGET,
                          G_IMPLEMENT_INTERFACE (GTK_TYPE_SCROLLABLE, editor_widget_scrollable_init))
@@ -168,37 +170,63 @@ is_word_char_at(Document *doc, size_t offset)
     g_free(text);
     
     if (ch == (gunichar)-1 || ch == (gunichar)-2) return FALSE;
-    return g_unichar_isalnum(ch) || ch == '_';
+    return g_unichar_isalnum(ch) || ch == '_' || (g_unichar_isgraph(ch) && !g_unichar_ispunct(ch));
 }
 
 /* Find word boundaries around offset */
 static void
-find_word_at_offset(Document *doc, size_t offset, size_t *word_start, size_t *word_end)
+editor_widget_find_word_boundary(EditorWidget *self, size_t offset, size_t *word_start, size_t *word_end)
 {
-    size_t total = document_get_length(doc);
+    size_t line_idx = document_get_line_of_offset(self->doc, offset);
+    size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+    size_t byte_index = offset - line_start;
+
+    char *text;
+    size_t len;
+    PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
+    if (!layout) {
+        *word_start = offset;
+        *word_end = offset;
+        return;
+    }
+
+    int n_attrs;
+    const PangoLogAttr *attrs = pango_layout_get_log_attrs_readonly(layout, &n_attrs);
     
-    /* Find start of word - go back while we're on word chars */
-    size_t start = offset;
-    while (start > 0) {
-        size_t prev = utf8_prev_grapheme(doc, start);
-        if (!is_word_char_at(doc, prev)) break;
-        start = prev;
+    /* Convert byte index to character index */
+    int char_index = 0;
+    const char *p = text;
+    const char *target = text + byte_index;
+    while (p < target && *p) {
+        p = g_utf8_next_char(p);
+        char_index++;
+    }
+
+    if (char_index >= n_attrs) char_index = n_attrs - 1;
+
+    /* Scan backwards for word start */
+    int start_idx = char_index;
+    while (start_idx > 0 && !attrs[start_idx].is_word_start) {
+        start_idx--;
+    }
+
+    /* Scan forwards for word end */
+    int end_idx = char_index;
+    while (end_idx < n_attrs && !attrs[end_idx].is_word_end) {
+        end_idx++;
     }
     
-    /* Find end of word - go forward while we're on word chars */
-    size_t end = offset;
-    while (end < total && is_word_char_at(doc, end)) {
-        end = utf8_next_grapheme(doc, end);
+    /* Fallback: if we are on a non-word segment, just select the grapheme */
+    if (start_idx > char_index || end_idx <= char_index) {
+        start_idx = char_index;
+        end_idx = char_index + 1;
     }
-    
-    /* If we started on non-word char, select just that char */
-    if (start == end && offset < total) {
-        end = utf8_next_grapheme(doc, offset);
-        start = offset;
-    }
-    
-    *word_start = start;
-    *word_end = end;
+
+    *word_start = line_start + g_utf8_offset_to_pointer(text, start_idx) - text;
+    *word_end = line_start + g_utf8_offset_to_pointer(text, end_idx) - text;
+
+    g_object_unref(layout);
+    g_free(text);
 }
 
 /* Find line boundaries (start and end of line, excluding trailing newline) */
@@ -404,27 +432,46 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                     pango_layout_iter_free(next_iter);
                     
                     if (sel_in_line_end >= (size_t)line_start_index && sel_in_line_start <= (size_t)line_end_index) {
-                        int x1, x2;
-                        pango_layout_line_index_to_x(p_line, (int)MAX(sel_in_line_start, (size_t)line_start_index), FALSE, &x1);
-                        pango_layout_line_index_to_x(p_line, (int)MIN(sel_in_line_end, (size_t)line_end_index), FALSE, &x2);
+                        int *ranges;
+                        int n_ranges;
+                        int range_start = (int)MAX(sel_in_line_start, (size_t)line_start_index);
+                        int range_end = (int)MIN(sel_in_line_end, (size_t)line_end_index);
                         
-                        double rx = pango_units_to_double(MIN(x1, x2));
-                        double rw = pango_units_to_double(abs(x2 - x1));
+                        pango_layout_line_get_x_ranges(p_line, range_start, range_end, &ranges, &n_ranges);
                         
-                        /* If selection extends beyond this visual line (wrap or logical end) */
-                        if (end_sel > line_start_off + line_end_index) {
-                            rw = width - rx;
-                        }
-                        
-                        if (rw > 0 || (sel_in_line_start == sel_in_line_end && end_sel > line_start_off + len)) {
-                            /* Even if rw is 0, if this is the last char and we select the newline, show something? 
-                               Actually rw > 0 is better, but for end-of-line we force rw to extend. */
-                            if (rw <= 0 && end_sel > line_start_off + line_end_index) rw = width - rx;
+                        for (int r = 0; r < n_ranges; r++) {
+                            double rx = pango_units_to_double(ranges[2 * r]);
+                            double rw = pango_units_to_double(ranges[2 * r + 1] - ranges[2 * r]);
                             
                             if (rw > 0) {
                                 gtk_snapshot_append_color(snapshot, 
                                                           &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
                                                           &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                            }
+                        }
+                        g_free(ranges);
+
+                        /* Selection extension for wrapped lines or newline */
+                        if (end_sel > line_start_off + (size_t)line_end_index) {
+                            /* Find the visual end of this line to extend to the widget edge */
+                            int x_pos;
+                            /* For the last char of the visual line, where would the cursor be? */
+                            pango_layout_line_index_to_x(p_line, line_end_index, FALSE, &x_pos);
+                            double dx = pango_units_to_double(x_pos);
+                            
+                            double ex, ew;
+                            if (p_line->resolved_dir == PANGO_DIRECTION_RTL) {
+                                ex = 0;
+                                ew = dx;
+                            } else {
+                                ex = dx;
+                                ew = width - dx;
+                            }
+                            
+                            if (ew > 0) {
+                                gtk_snapshot_append_color(snapshot, 
+                                                          &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
+                                                          &GRAPHENE_RECT_INIT((float)ex, (float)ry, (float)ew, (float)rh));
                             }
                         }
                     }
@@ -613,7 +660,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
             self->cursor_offset = sel_end;
         } else {
             size_t word_start, word_end;
-            find_word_at_offset(self->doc, off, &word_start, &word_end);
+            editor_widget_find_word_boundary(self, off, &word_start, &word_end);
             self->selection_anchor = word_start;
             self->cursor_offset = word_end;
         }
@@ -664,6 +711,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     }
     
     update_target_x(self);
+    editor_widget_update_im_cursor_location(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
@@ -716,7 +764,7 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
         
         if (self->multi_click_mode == 2) {
             /* Word mode */
-            find_word_at_offset(self->doc, off, &current_start, &current_end);
+            editor_widget_find_word_boundary(self, off, &current_start, &current_end);
         } else if (self->multi_click_mode == 3) {
             /* Line mode */
             find_line_at_offset(self->doc, off, &current_start, &current_end);
@@ -935,6 +983,8 @@ scroll_to_cursor(EditorWidget *self)
     } else if (line >= val + page - 1) {
         gtk_adjustment_set_value(self->vadjustment, (double)line - page + 1);
     }
+    
+    editor_widget_update_im_cursor_location(self);
 }
 
 static PangoLayout *
@@ -1065,6 +1115,7 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
 
     g_object_unref(layout);
     g_free(text);
+    editor_widget_update_im_cursor_location(self);
 }
 
 static gboolean
@@ -1510,10 +1561,50 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
     self->cursor_offset += len;
     self->selection_anchor = self->cursor_offset;
     
+    editor_widget_update_im_cursor_location(self);
     editor_widget_reset_cursor_blink(self);  /* Keep cursor visible while typing */
     editor_widget_update_adjustments(self);
     scroll_to_cursor(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static void
+editor_widget_update_im_cursor_location(EditorWidget *self)
+{
+    if (!self->im_context || !self->doc) return;
+
+    size_t line_idx = document_get_line_of_offset(self->doc, self->cursor_offset);
+    size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+    size_t index_in_line = self->cursor_offset - line_start;
+
+    char *text;
+    size_t len;
+    PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
+    if (!layout) return;
+
+    if (index_in_line > len) index_in_line = len;
+
+    PangoRectangle strong_pos;
+    pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
+
+    /* Fast approximation of Y offset. 
+       Full precision requires iterating layouts, which is too slow for large files.
+       Approx: line_idx * line_height. Subtract scroll position.
+    */
+    double y_off = (double)line_idx * self->line_height;
+    double start_y = 0;
+    if (self->vadjustment) start_y = gtk_adjustment_get_value(self->vadjustment);
+
+    GdkRectangle area;
+    area.x = (int)pango_units_to_double(strong_pos.x);
+    area.y = (int)(y_off - (start_y * self->line_height) + pango_units_to_double(strong_pos.y));
+    area.width = 1;
+    area.height = (int)pango_units_to_double(strong_pos.height);
+
+    gtk_im_context_set_cursor_location(self->im_context, &area);
+
+    g_object_unref(layout);
+    g_free(text);
 }
 
 /* Cursor blink animation using frame clock tick callback */
@@ -1587,7 +1678,7 @@ editor_widget_init(EditorWidget *self)
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
     gtk_widget_add_controller(GTK_WIDGET(self), controller);
     
-    self->im_context = gtk_im_context_simple_new();
+    self->im_context = gtk_im_multicontext_new();
     gtk_im_context_set_client_widget(self->im_context, GTK_WIDGET(self));
     g_signal_connect(self->im_context, "commit", G_CALLBACK(on_im_commit), self);
 
