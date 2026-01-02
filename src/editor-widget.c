@@ -712,14 +712,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                     Usually strong_pos.y is relative to the layout top (0).
                     If we force height, we should center it or align top?
                     For a single line layout, y is 0. */
-                 cursor_y = 0; /* Align to top of the line slot */
-                 
-                 /* Wait, 'strong_pos.y+current_y_pos' is where it goes?
-                    snapshot is translated to 'current_y_pos + self->padding_top'.
-                    Inside that, drawn at cursor_y. 
-                    If we force height to be the full line slot, y should be 0 relative to the line.
-                 */
-                 cursor_y = 0;
+
                  
                  gtk_snapshot_append_color(snapshot, 
                                            &cursor_color,
@@ -1994,6 +1987,7 @@ scroll_to_cursor(EditorWidget *self)
 }
 
 static PangoLayout *
+
 create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len)
 {
     size_t len;
@@ -2007,6 +2001,7 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
         len = strlen(text);
     }
 
+    /* Pango doesn't want the trailing newline */
     if (len > 0 && text[len-1] == '\n') {
         len--;
     }
@@ -2016,10 +2011,23 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     pango_layout_set_font_description(layout, self->font_desc);
     pango_layout_set_text(layout, text, (int)len);
     
+    /* Apply Syntax Highlighting for correct metrics (bold, etc) */
+    if (self->syntax_ctx) {
+        PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, line_idx, text);
+        if (attrs) {
+            pango_layout_set_attributes(layout, attrs);
+            pango_attr_list_unref(attrs);
+        }
+    }
+    
     int width = gtk_widget_get_width(GTK_WIDGET(self));
     double gutter_w = get_effective_gutter_width(self);
+    int map_w_reserved = self->display_overview_map ? 120 : 0;
+
     if (self->wrap_lines) {
-        pango_layout_set_width(layout, (width - (gutter_w + self->padding_left)) * PANGO_SCALE);
+        int available_w = width - (gutter_w + self->padding_left) - map_w_reserved;
+        if (available_w < 50) available_w = 50; /* Safe min width */
+        pango_layout_set_width(layout, available_w * PANGO_SCALE);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
     } else {
         pango_layout_set_width(layout, -1);
@@ -2077,16 +2085,32 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
     }
 
     /* Find current visual line index */
+    /* Find current visual line index based on cursor Y position */
+    PangoRectangle cursor_pos;
+    pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &cursor_pos, NULL);
+    
+    /* Use center of cursor line to check containment, safer against rounding */
+    int cursor_y_center = cursor_pos.y + (cursor_pos.height / 2);
+    
     PangoLayoutIter *iter = pango_layout_get_iter(layout);
     int current_v_line_idx = 0;
+    gboolean found_v_line = FALSE;
+    
     do {
-        PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
-        if (char_idx >= p_line->start_index && char_idx <= p_line->start_index + p_line->length) {
+        PangoRectangle line_extents;
+        pango_layout_iter_get_line_extents(iter, NULL, &line_extents);
+        
+        if (cursor_y_center >= line_extents.y && cursor_y_center < line_extents.y + line_extents.height) {
+            found_v_line = TRUE;
             break;
         }
         current_v_line_idx++;
     } while (pango_layout_iter_next_line(iter));
     pango_layout_iter_free(iter);
+    
+    if (!found_v_line) {
+        current_v_line_idx = MAX(0, pango_layout_get_line_count(layout) - 1);
+    }
 
     /* Loop to consume delta across logical lines */
     while (TRUE) {
