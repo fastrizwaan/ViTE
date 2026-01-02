@@ -1,4 +1,5 @@
 #include <gtk/gtk.h>
+#include <adwaita.h>
 #include "editor-widget.h"
 #include "document.h"
 
@@ -29,22 +30,29 @@ on_open_btn_clicked(GtkButton *btn, gpointer user_data)
 static void
 setup_window(GtkWindow *window)
 {
-    GtkWidget *header = gtk_header_bar_new();
+    GtkWidget *header = adw_header_bar_new();
     gtk_window_set_titlebar(window, header);
+    
+    GtkWidget *title = adw_window_title_new("Virtual Text Editor", NULL);
+    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title);
+    g_object_set_data(G_OBJECT(window), "window_title", title);
     
     GtkWidget *btn = gtk_button_new_with_label("Open");
     g_signal_connect(btn, "clicked", G_CALLBACK(on_open_btn_clicked), NULL);
-    gtk_header_bar_pack_start(GTK_HEADER_BAR(header), btn);
+    adw_header_bar_pack_start(ADW_HEADER_BAR(header), btn);
 }
 
 static void
 activate(GtkApplication *app, gpointer user_data)
 {
     GtkWidget *window = gtk_application_window_new(app);
-    gtk_window_set_title(GTK_WINDOW(window), "Untitled - Virtual Text Editor");
     gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
     
     setup_window(GTK_WINDOW(window));
+    
+    AdwWindowTitle *title = ADW_WINDOW_TITLE(g_object_get_data(G_OBJECT(window), "window_title"));
+    adw_window_title_set_title(title, "Untitled");
+    adw_window_title_set_subtitle(title, NULL);
 
     /* Create a new empty document */
     Document *doc = document_new(NULL);
@@ -78,9 +86,19 @@ open_file(GtkApplication *app, GFile *file)
     }
 
     GtkWidget *window = gtk_application_window_new(app);
-    gtk_window_set_title(GTK_WINDOW(window), path);
     gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
     setup_window(GTK_WINDOW(window));
+    
+    AdwWindowTitle *title = ADW_WINDOW_TITLE(g_object_get_data(G_OBJECT(window), "window_title"));
+    
+    char *name = g_file_get_basename(file);
+    char *dirname = g_path_get_dirname(path);
+    
+    adw_window_title_set_title(title, name);
+    adw_window_title_set_subtitle(title, dirname);
+    
+    g_free(name);
+    g_free(dirname);
 
     GtkWidget *scrolled = gtk_scrolled_window_new();
     gtk_window_set_child(GTK_WINDOW(window), scrolled);
@@ -116,6 +134,8 @@ main(int argc, char **argv)
 {
     GtkApplication *app;
     int status;
+
+    adw_init();
 
     app = gtk_application_new("io.github.fastrizwan.ViTE", G_APPLICATION_HANDLES_OPEN);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
