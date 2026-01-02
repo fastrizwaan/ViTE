@@ -88,3 +88,15 @@ document_redo(Document *doc)
 {
     undo_stack_redo(doc->undo_stack, doc->pt);
 }
+
+void
+document_begin_undo_group(Document *doc)
+{
+    undo_stack_begin_group(doc->undo_stack);
+}
+
+void
+document_end_undo_group(Document *doc)
+{
+    undo_stack_end_group(doc->undo_stack);
+}

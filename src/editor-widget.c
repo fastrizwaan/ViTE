@@ -52,6 +52,10 @@ static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
 static void editor_widget_ensure_metrics(EditorWidget *self);
 static void editor_widget_reset_cursor_blink(EditorWidget *self);
 static void update_target_x(EditorWidget *self);
+static void editor_widget_copy(EditorWidget *self);
+static void editor_widget_cut(EditorWidget *self);
+static void editor_widget_paste(EditorWidget *self);
+static void editor_widget_paste_primary(EditorWidget *self);
 static void move_cursor(EditorWidget *self, int visual_lines_delta);
 
 G_DEFINE_TYPE_WITH_CODE (EditorWidget, editor_widget, GTK_TYPE_WIDGET,
@@ -652,6 +656,11 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
             self->cursor_offset = off;
             self->selection_anchor = off;
         }
+
+        /* Middle click paste */
+        if (gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 2) {
+            editor_widget_paste_primary(self);
+        }
     }
     
     update_target_x(self);
@@ -798,10 +807,10 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     }
 }
 
-static gboolean
+static size_t
 editor_widget_delete_selection(EditorWidget *self)
 {
-    if (self->cursor_offset == self->selection_anchor) return FALSE;
+    if (self->cursor_offset == self->selection_anchor) return 0;
     
     size_t start = MIN(self->cursor_offset, self->selection_anchor);
     size_t end = MAX(self->cursor_offset, self->selection_anchor);
@@ -811,7 +820,105 @@ editor_widget_delete_selection(EditorWidget *self)
     self->cursor_offset = start;
     self->selection_anchor = start;
     
-    return TRUE;
+    return len;
+}
+
+static void
+editor_widget_copy(EditorWidget *self)
+{
+    if (self->cursor_offset == self->selection_anchor) return;
+    
+    size_t start = MIN(self->cursor_offset, self->selection_anchor);
+    size_t end = MAX(self->cursor_offset, self->selection_anchor);
+    size_t len = end - start;
+    
+    char *text = document_get_text_range(self->doc, start, len);
+    GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
+    gdk_clipboard_set_text(clipboard, text);
+    g_free(text);
+}
+
+static void
+editor_widget_cut(EditorWidget *self)
+{
+    if (self->cursor_offset == self->selection_anchor) return;
+    
+    document_begin_undo_group(self->doc);
+    editor_widget_copy(self);
+    editor_widget_delete_selection(self);
+    document_end_undo_group(self->doc);
+    
+    editor_widget_update_adjustments(self);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static void
+on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
+    char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
+    
+    if (text) {
+        document_begin_undo_group(self->doc);
+        editor_widget_delete_selection(self);
+        
+        size_t len = strlen(text);
+        document_insert(self->doc, self->cursor_offset, text, len);
+        self->cursor_offset += len;
+        self->selection_anchor = self->cursor_offset;
+        
+        document_end_undo_group(self->doc);
+        
+        editor_widget_reset_cursor_blink(self);
+        editor_widget_update_adjustments(self);
+        scroll_to_cursor(self);
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        g_free(text);
+    }
+}
+
+static void
+editor_widget_paste(EditorWidget *self)
+{
+    GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
+    gdk_clipboard_read_text_async(clipboard, NULL, on_paste_text_received, self);
+}
+
+static void
+on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
+    char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
+    
+    if (text) {
+        document_begin_undo_group(self->doc);
+        /* Middle click paste doesn't usually overwrite selection, it just inserts at click */
+        /* But user said "it should overwrite selection" for copy/paste support. */
+        /* Usually this means Ctrl+V overwrites. Middle click might be different, but let's follow the instruction literally. */
+        editor_widget_delete_selection(self);
+        
+        size_t len = strlen(text);
+        document_insert(self->doc, self->cursor_offset, text, len);
+        self->cursor_offset += len;
+        self->selection_anchor = self->cursor_offset;
+        
+        document_end_undo_group(self->doc);
+        
+        editor_widget_reset_cursor_blink(self);
+        editor_widget_update_adjustments(self);
+        scroll_to_cursor(self);
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        g_free(text);
+    }
+}
+
+static void
+editor_widget_paste_primary(EditorWidget *self)
+{
+    GdkClipboard *clipboard = gdk_display_get_primary_clipboard(gtk_widget_get_display(GTK_WIDGET(self)));
+    gdk_clipboard_read_text_async(clipboard, NULL, on_primary_paste_received, self);
 }
 
 static void
@@ -1092,14 +1199,14 @@ editor_widget_move_lines_vertically(EditorWidget *self, int delta)
     }
     
     size_t total_lines = document_get_line_count(self->doc);
+    document_begin_undo_group(self->doc);
     
     if (delta < 0 && start_line > 0) {
-        /* Move Up */
+        /* Move Up: Swap [prev_line] with [range] */
         size_t prev_line = start_line - 1;
         size_t prev_start = document_get_offset_of_line(self->doc, prev_line);
         size_t range_start = document_get_offset_of_line(self->doc, start_line);
-        size_t range_end = document_get_offset_of_line(self->doc, end_line + 1);
-        if (end_line + 1 == total_lines) range_end = document_get_length(self->doc);
+        size_t range_end = (end_line + 1 < total_lines) ? document_get_offset_of_line(self->doc, end_line + 1) : document_get_length(self->doc);
         
         size_t prev_len = range_start - prev_start;
         size_t range_len = range_end - range_start;
@@ -1107,26 +1214,31 @@ editor_widget_move_lines_vertically(EditorWidget *self, int delta)
         char *prev_text = document_get_text_range(self->doc, prev_start, prev_len);
         char *range_text = document_get_text_range(self->doc, range_start, range_len);
         
-        /* Swap: [prev][range] -> [range][prev] */
-        document_delete(self->doc, prev_start, prev_len + range_len);
-        document_insert(self->doc, prev_start, range_text, range_len);
-        document_insert(self->doc, prev_start + range_len, prev_text, prev_len);
+        /* If range is at EOF and has no newline, but will be moved up, it MUST have a newline */
+        gboolean range_needs_newline = (range_len > 0 && range_text[range_len-1] != '\n');
         
-        self->cursor_offset = prev_start + (start_off - range_start) + (self->cursor_offset > self->selection_anchor ? range_len : 0);
-        self->selection_anchor = prev_start + (start_off - range_start) + (self->selection_anchor > self->cursor_offset ? range_len : 0);
-        /* Simple re-select whole lines as requested */
+        document_delete(self->doc, prev_start, prev_len + range_len);
+        
+        size_t current_pos = prev_start;
+        document_insert(self->doc, current_pos, range_text, range_len);
+        current_pos += range_len;
+        if (range_needs_newline) {
+            document_insert(self->doc, current_pos, "\n", 1);
+            current_pos += 1;
+        }
+        document_insert(self->doc, current_pos, prev_text, prev_len);
+        
         self->selection_anchor = prev_start;
-        self->cursor_offset = prev_start + range_len;
+        self->cursor_offset = prev_start + range_len + (range_needs_newline ? 1 : 0);
         
         g_free(prev_text);
         g_free(range_text);
     } else if (delta > 0 && end_line + 1 < total_lines) {
-        /* Move Down */
+        /* Move Down: Swap [range] with [next_line] */
         size_t next_line = end_line + 1;
         size_t range_start = document_get_offset_of_line(self->doc, start_line);
         size_t range_end = document_get_offset_of_line(self->doc, next_line);
-        size_t next_end = document_get_offset_of_line(self->doc, next_line + 1);
-        if (next_line + 1 == total_lines) next_end = document_get_length(self->doc);
+        size_t next_end = (next_line + 1 < total_lines) ? document_get_offset_of_line(self->doc, next_line + 1) : document_get_length(self->doc);
         
         size_t range_len = range_end - range_start;
         size_t next_len = next_end - range_end;
@@ -1134,17 +1246,28 @@ editor_widget_move_lines_vertically(EditorWidget *self, int delta)
         char *range_text = document_get_text_range(self->doc, range_start, range_len);
         char *next_text = document_get_text_range(self->doc, range_end, next_len);
         
-        /* Swap: [range][next] -> [next][range] */
+        /* If next_line is at EOF and has no newline, but will be moved up, it MUST have a newline */
+        gboolean next_needs_newline = (next_len > 0 && next_text[next_len-1] != '\n');
+
         document_delete(self->doc, range_start, range_len + next_len);
-        document_insert(self->doc, range_start, next_text, next_len);
-        document_insert(self->doc, range_start + next_len, range_text, range_len);
         
-        self->selection_anchor = range_start + next_len;
-        self->cursor_offset = range_start + next_len + range_len;
+        size_t current_pos = range_start;
+        document_insert(self->doc, current_pos, next_text, next_len);
+        current_pos += next_len;
+        if (next_needs_newline) {
+            document_insert(self->doc, current_pos, "\n", 1);
+            current_pos += 1;
+        }
+        document_insert(self->doc, current_pos, range_text, range_len);
+        
+        self->selection_anchor = range_start + next_len + (next_needs_newline ? 1 : 0);
+        self->cursor_offset = self->selection_anchor + range_len;
         
         g_free(range_text);
         g_free(next_text);
     }
+    
+    document_end_undo_group(self->doc);
     update_target_x(self);
 }
 
@@ -1318,6 +1441,27 @@ on_key_pressed(GtkEventControllerKey *controller,
                  gtk_widget_queue_draw(GTK_WIDGET(self));
             }
             break;
+        case GDK_KEY_c:
+            if (state & GDK_CONTROL_MASK) {
+                editor_widget_copy(self);
+            } else {
+                handled = FALSE;
+            }
+            break;
+        case GDK_KEY_x:
+            if (state & GDK_CONTROL_MASK) {
+                editor_widget_cut(self);
+            } else {
+                handled = FALSE;
+            }
+            break;
+        case GDK_KEY_v:
+            if (state & GDK_CONTROL_MASK) {
+                editor_widget_paste(self);
+            } else {
+                handled = FALSE;
+            }
+            break;
         case GDK_KEY_a:
             if (state & GDK_CONTROL_MASK) {
                 /* Select all */
@@ -1455,6 +1599,7 @@ editor_widget_init(EditorWidget *self)
     self->syntax_ctx = syntax_context_new();
     
     GtkGesture *click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0); /* Listen to all buttons */
     g_signal_connect(click, "pressed", G_CALLBACK(on_click_pressed), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(click));
 
