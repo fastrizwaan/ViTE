@@ -1926,62 +1926,258 @@ editor_widget_paste_primary(EditorWidget *self)
     gdk_clipboard_read_text_async(clipboard, NULL, on_primary_paste_received, self);
 }
 
+/* Helper to calculate logical scroll change for a pixel delta */
+static double
+calculate_scroll_delta_for_pixels(EditorWidget *self, double current_scroll, double pixel_delta)
+{
+    /* If delta is 0, no change */
+    if (fabs(pixel_delta) < 0.5) return 0;
+
+    size_t start_line = (size_t)(current_scroll / self->line_height);
+    double partial_logical = fmod(current_scroll, self->line_height);
+    
+    char *text; size_t len;
+    
+    if (pixel_delta > 0) {
+        /* Scrolling DOWN: Consuming pixels from the top of the viewport */
+        double consumed = 0;
+        double new_scroll = current_scroll;
+        
+        /* First consume remainder of current partial line */
+        PangoLayout *layout = create_pango_layout_for_line(self, start_line, &text, &len);
+        if (!layout) return pixel_delta / self->line_height * self->line_height; /* Fallback */
+        
+        int h; pango_layout_get_pixel_size(layout, NULL, &h);
+        double line_h = (double)h;
+        if (line_h < self->line_height) line_h = self->line_height;
+        g_object_unref(layout); g_free(text);
+
+        double current_pixel_offset = (partial_logical / self->line_height) * line_h;
+        double remaining_in_line = line_h - current_pixel_offset;
+        
+        if (pixel_delta <= remaining_in_line) {
+            /* Still in same line */
+            double fraction = pixel_delta / line_h;
+            return fraction * self->line_height;
+        }
+        
+        consumed += remaining_in_line;
+        new_scroll += (self->line_height - partial_logical); /* Advance to next line start */
+        start_line++;
+        
+        /* Loop through subsequent lines */
+        while (consumed < pixel_delta) {
+             if (start_line >= document_get_line_count(self->doc)) break;
+             
+             layout = create_pango_layout_for_line(self, start_line, &text, &len);
+             if (!layout) break;
+             pango_layout_get_pixel_size(layout, NULL, &h);
+             line_h = (double)h;
+             if (line_h < self->line_height) line_h = self->line_height;
+             g_object_unref(layout); g_free(text);
+             
+             if (consumed + line_h > pixel_delta) {
+                 /* Target falls inside this line */
+                 double needed = pixel_delta - consumed;
+                 double fraction = needed / line_h;
+                 return (new_scroll + fraction * self->line_height) - current_scroll;
+             }
+             
+             consumed += line_h;
+             new_scroll += self->line_height;
+             start_line++;
+        }
+        return new_scroll - current_scroll;
+        
+    } else {
+        /* Scrolling UP: Adding pixels to top. We look backwards from start_line. */
+        double needed = -pixel_delta;
+        double consumed = 0;
+        double new_scroll = current_scroll;
+        
+        /* First back up within current partial line */
+        PangoLayout *layout = create_pango_layout_for_line(self, start_line, &text, &len);
+        if (!layout) return pixel_delta;
+        int h; pango_layout_get_pixel_size(layout, NULL, &h);
+        double line_h = (double)h;
+        if (line_h < self->line_height) line_h = self->line_height;
+        g_object_unref(layout); g_free(text);
+        
+        double current_pixel_offset = (partial_logical / self->line_height) * line_h;
+        
+        if (needed <= current_pixel_offset) {
+            /* Still in same line */
+            double fraction = needed / line_h;
+            return -(fraction * self->line_height);
+        }
+        
+        consumed += current_pixel_offset;
+        new_scroll -= partial_logical; /* Move to start of current line */
+        
+        /* Loop backwards */
+        while (consumed < needed) {
+            if (start_line == 0) break;
+            start_line--;
+            
+            layout = create_pango_layout_for_line(self, start_line, &text, &len);
+            if (!layout) break;
+            pango_layout_get_pixel_size(layout, NULL, &h);
+            line_h = (double)h;
+            if (line_h < self->line_height) line_h = self->line_height;
+            g_object_unref(layout); g_free(text);
+            
+            if (consumed + line_h > needed) {
+                /* Target falls inside this previous line */
+                double remain = needed - consumed;
+                /* We want to end up 'remain' pixels from the BOTTOM of this line? 
+                   No, 'remain' is how much we need to scroll UP into this line.
+                   So we are solving for a scroll position that is 'remain' pixels down from the bottom?
+                   Wait. New scroll will be (start_line * lh) + (line_h - remain expressed as fraction).
+                   Basically we are 'remain' pixels deep into this line from the bottom.
+                */
+                double offset_from_top = line_h - remain;
+                double fraction = offset_from_top / line_h;
+                double target_for_line = (double)start_line * self->line_height + (fraction * self->line_height);
+                return target_for_line - current_scroll;
+            }
+            
+            consumed += line_h;
+            new_scroll -= self->line_height;
+        }
+        return new_scroll - current_scroll;
+    }
+}
+
 static void
 scroll_to_cursor(EditorWidget *self)
 {
     if (!self->vadjustment || !self->doc) return;
     
-    size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
+    size_t cursor_line = document_get_line_of_offset(self->doc, self->cursor_offset);
     double scroll_y = gtk_adjustment_get_value(self->vadjustment);
     double page = gtk_adjustment_get_page_size(self->vadjustment);
     
-    /* Precise cursor scrolling accounting for word wrap height */
-    char *text = NULL;
-    size_t len;
-    PangoLayout *layout = create_pango_layout_for_line(self, line, &text, &len);
-    if (!layout) return;
+    /* Current view state */
+    size_t start_line = (size_t)(scroll_y / self->line_height);
+    
+    /* Optimization: If cursor is extremely far (>200 lines), just jump blindly first */
+    if ((cursor_line > start_line && cursor_line - start_line > 200) ||
+        (start_line > cursor_line && start_line - cursor_line > 200)) {
+         double jump = (double)cursor_line * self->line_height - (page / 2.0 / self->line_height * self->line_height); // approx center
+         if (jump < 0) jump = 0;
+         gtk_adjustment_set_value(self->vadjustment, jump);
+         /* Recalculate context after jump */
+         scroll_y = jump;
+         start_line = (size_t)(scroll_y / self->line_height);
+    }
 
-    size_t line_start = document_get_offset_of_line(self->doc, line);
-    size_t char_idx = self->cursor_offset - line_start;
+    double partial_logical = fmod(scroll_y, self->line_height);
     
-    PangoRectangle strong_pos;
-    pango_layout_get_cursor_pos(layout, MIN((int)char_idx, (int)len), &strong_pos, NULL);
+    /* Calculate Y position of cursor line relative to viewport top */
+    double current_y = 0;
     
-    double cursor_local_y = pango_units_to_double(strong_pos.y);
-    double cursor_h = pango_units_to_double(strong_pos.height);
-    if (cursor_h < 1.0) cursor_h = self->line_height;
+    char *text; size_t len;
     
-    /* Calculate real line total height */
-    int pixel_h;
-    pango_layout_get_pixel_size(layout, NULL, &pixel_h);
-    double real_line_height = (double)pixel_h;
-    if (real_line_height < self->line_height) real_line_height = self->line_height;
-    
-    /* Range of logical scroll values that keep cursor visible */
-    /* Min Scroll: Cursor at bottom of page */
-    /* Scroll Fraction = (cursor_local_y + cursor_h - PageSize) / RealH */
-    /* Fix: Account for padding_top and add a margin (line_height) so cursor isn't sitting on the very edge */
-    double min_visual_offset = cursor_local_y + cursor_h - page + self->padding_top + self->line_height;
-
-    
-    double min_fraction = min_visual_offset / real_line_height;
-    double min_scroll_val = (line * self->line_height) + (min_fraction * self->line_height);
-    
-    /* Max Scroll: Cursor at top of page */
-    /* Scroll Fraction = cursor_local_y / RealH */
-    double max_fraction = cursor_local_y / real_line_height;
-    double max_scroll_val = (line * self->line_height) + (max_fraction * self->line_height);
-
-    double current_val = scroll_y;
-    
-    if (current_val < min_scroll_val) {
-        gtk_adjustment_set_value(self->vadjustment, min_scroll_val);
-    } else if (current_val > max_scroll_val) {
-        gtk_adjustment_set_value(self->vadjustment, max_scroll_val);
+    /* Initial partial offset */
+    if (start_line < document_get_line_count(self->doc)) {
+         PangoLayout *layout = create_pango_layout_for_line(self, start_line, &text, &len);
+         if (layout) {
+             int h; pango_layout_get_pixel_size(layout, NULL, &h);
+             double line_h = (double)h;
+             if (line_h < self->line_height) line_h = self->line_height;
+             
+             double partial_pix = (partial_logical / self->line_height) * line_h;
+             current_y = -partial_pix; /* This is where the top of start_line is */
+             
+             g_object_unref(layout); g_free(text);
+         }
     }
     
-    g_object_unref(layout);
-    g_free(text);
+    /* Walk to cursor line */
+    double cursor_line_top_y = 0;
+    gboolean found = FALSE;
+    
+    if (cursor_line >= start_line) {
+        /* Cursor is below or at start */
+        size_t iter = start_line;
+        while (iter <= cursor_line) {
+            if (iter == cursor_line) {
+                cursor_line_top_y = current_y;
+                found = TRUE;
+                break;
+            }
+            
+            /* If we have exceeded page height significantly, we can stop early? 
+               No, we need to know exact Y to calculate delta. 
+               But if it's way off, we fallback to jump. We handled massive diffs above. 
+            */
+            
+            PangoLayout *layout = create_pango_layout_for_line(self, iter, &text, &len);
+            if (!layout) break;
+            int h; pango_layout_get_pixel_size(layout, NULL, &h);
+            double line_h = (double)h;
+            if (line_h < self->line_height) line_h = self->line_height;
+            g_object_unref(layout); g_free(text);
+            
+            current_y += line_h;
+            iter++;
+        }
+    } else {
+        /* Cursor is above start */
+        size_t iter = start_line;
+        /* current_y is top of start_line */
+        while (iter > cursor_line) {
+            iter--;
+            PangoLayout *layout = create_pango_layout_for_line(self, iter, &text, &len);
+            if (!layout) break;
+            int h; pango_layout_get_pixel_size(layout, NULL, &h);
+            double line_h = (double)h;
+            if (line_h < self->line_height) line_h = self->line_height;
+            g_object_unref(layout); g_free(text);
+            
+            current_y -= line_h; 
+        }
+         cursor_line_top_y = current_y;
+         found = TRUE;
+    }
+    
+    if (!found) return; /* Should not happen unless doc changed under feet */
+    
+    /* Now get local info */
+    PangoLayout *layout = create_pango_layout_for_line(self, cursor_line, &text, &len);
+    if (!layout) return;
+    
+    size_t line_start = document_get_offset_of_line(self->doc, cursor_line);
+    size_t idx = self->cursor_offset - line_start;
+    PangoRectangle pos;
+    pango_layout_get_cursor_pos(layout, MIN((int)idx, (int)len), &pos, NULL);
+    
+    double local_y = pango_units_to_double(pos.y);
+    double cursor_h = pango_units_to_double(pos.height);
+    if (cursor_h < 1) cursor_h = self->line_height;
+    
+    g_object_unref(layout); g_free(text);
+    
+    /* Absolute Y in viewport */
+    double abs_top = cursor_line_top_y + local_y;
+    double abs_bottom = abs_top + cursor_h;
+    
+    /* Visibility check with margins */
+    double top_margin = self->padding_top; 
+    double bottom_margin = page - self->padding_top; /* Maybe leave small gap for status bar? */
+    
+    if (abs_top < top_margin) {
+        /* Scroll UP */
+        double px_needed = abs_top - top_margin; /* Negative value */
+        double delta_logic = calculate_scroll_delta_for_pixels(self, scroll_y, px_needed);
+        gtk_adjustment_set_value(self->vadjustment, scroll_y + delta_logic);
+        
+    } else if (abs_bottom > bottom_margin) {
+        /* Scroll DOWN */
+        double px_needed = abs_bottom - bottom_margin; /* Positive value */
+        double delta_logic = calculate_scroll_delta_for_pixels(self, scroll_y, px_needed);
+        gtk_adjustment_set_value(self->vadjustment, scroll_y + delta_logic);
+    }
     
     editor_widget_update_im_cursor_location(self);
 }
