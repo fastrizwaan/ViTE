@@ -389,6 +389,14 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     int width = gtk_widget_get_width(widget);
     int height = gtk_widget_get_height(widget);
     
+    /* Ensure background is cleared/drawn to prevent drag artifacts */
+    GdkRGBA bg_color = {1, 1, 1, 1}; /* Default white */
+    if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
+         /* Text is light -> Background should be dark */
+         bg_color = (GdkRGBA){0.11, 0.11, 0.11, 1.0}; /* #1e1e1e approx */
+    }
+    gtk_snapshot_append_color(snapshot, &bg_color, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)height));
+    
     /* Draw Gutter Background - Removed as per request */
     double gutter_w = get_gutter_width(self);
     /* dim background */
@@ -629,9 +637,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                 PangoRectangle strong_pos;
                 pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
 
-                GdkRGBA caret_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){0.2, 0.5, 0.9, 1.0};
+                GdkRGBA caret_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){1.0, 0.647, 0.0, 1.0};
                 /* Smooth pixel-based drop caret: follow mouse X exactly instead of snapping to char */
-                int caret_x = (int)(self->drag_x - self->padding_left);
+                int caret_x = (int)(self->drag_x - text_start_x);
                 if (caret_x < 0) caret_x = 0;
                 
                 int caret_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
@@ -658,10 +666,22 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         }
     }
 
-    /* Draw DnD Overlays (Border only - ghost text disabled to prevent artifacts) */
+    /* Draw DnD Overlays */
     if (self->is_dnd_active) {
-        /* 1. Viewport Border */
-        GdkRGBA border_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){0.2, 0.5, 0.9, 1.0};
+        /* 1. Ghost Text (Cursor Follower) */
+        if (self->drag_ghost_layout) {
+            gtk_snapshot_save(snapshot);
+            gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT((float)self->drag_x, (float)self->drag_y));
+            
+            GdkRGBA ghost_color = self->color_text;
+            ghost_color.alpha = 0.5;
+            
+            gtk_snapshot_append_layout(snapshot, self->drag_ghost_layout, &ghost_color);
+            gtk_snapshot_restore(snapshot);
+        }
+
+        /* 2. Viewport Border */
+        GdkRGBA border_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){1.0, 0.647, 0.0, 1.0};
         gtk_snapshot_append_border(snapshot, 
                                    &GSK_ROUNDED_RECT_INIT(0, 0, (float)width, (float)height),
                                    (float[4]){1, 1, 1, 1},
