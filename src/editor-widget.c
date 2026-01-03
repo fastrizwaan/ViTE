@@ -140,17 +140,10 @@ get_gutter_width(EditorWidget *self)
     if (digits < 2) digits = 2;
     
     /* Calculate width: digits * char_width + padding */
-    /* Use '8' as a standard digit width approximation or measure '0' */
-    double digit_width = self->line_height * 0.5; /* Rough estimate if font is not monospaced, but we use monospace */
-    /* Better: measure '0' in ensure_metrics if possible, or just assume metric is set. */
-    /* self->line_height is set in ensure_metrics. Let's assume standard aspect ratio or use a fixed multiple? 
-       Actually, let's use a simpler approach: 
-       We really should measure '0' width. But for now, let's assume 0.6 * height (standard monospace ratio) or wait for ensure_metrics.
-    */
-    /* For simplicity in this step, let's just use a reasonable width logic if we can't measure purely yet.
-       However, we are inside snapshot/measure, so metrics exist.
-    */
-    return (digits * (self->line_height * 0.5)) + 4.0; /* 2px padding on each side */
+    double char_w = self->cached_char_width;
+    if (char_w < 1.0) char_w = self->line_height * 0.5; /* Fallback */
+
+    return (digits * char_w) + 8.0; /* 4px left + 4px right */
 }
 
 /* Helper to get gutter width based on settings */
@@ -730,6 +723,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             
             pango_layout_set_text(lnum_layout, lnum_buf, -1);
             pango_layout_set_alignment(lnum_layout, PANGO_ALIGN_RIGHT);
+            /* Width = gutter_w - right_padding(4) - left_padding(4) */
             pango_layout_set_width(lnum_layout, (int)((gutter_w - 8) * PANGO_SCALE));
             
             /* Gutter text color - dim it */
@@ -737,6 +731,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             gutter_fg.alpha = 0.5;
             
             gtk_snapshot_save(snapshot);
+            /* Translate X=4 for 4px left padding */
             gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(4, current_y_pos + self->padding_top));
             gtk_snapshot_append_layout(snapshot, lnum_layout, &gutter_fg);
             gtk_snapshot_restore(snapshot);
