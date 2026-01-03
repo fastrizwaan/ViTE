@@ -285,6 +285,12 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
             /* O(N) Linear Scan using Piece Table Traversal */
             document_foreach_line(self->doc, calculate_line_height_cb, &state);
             
+            /* Backfill any missed lines (e.g. trailing empty line "A\n" counts as 2 lines but callback only runs once) */
+            while (self->line_y_offsets->len < total_lines) {
+                g_array_append_val(self->line_y_offsets, state.current_y);
+                state.current_y += self->line_height;
+            }
+            
             g_array_append_val(self->line_y_offsets, state.current_y);
             content_height = state.current_y + self->padding_top * 2;
         }
@@ -297,7 +303,9 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
        If content_height > widget_height, we can scroll until bottom of content aligns with bottom of viewport.
     */
 
-    double upper = MAX(content_height, widget_height);
+    /* Allow overscroll: let user scroll past the end so last line is at top */
+    double overscroll = widget_height * 0.1;
+    double upper = MAX(content_height + overscroll, widget_height);
 
     gtk_adjustment_configure(self->vadjustment,
                              gtk_adjustment_get_value(self->vadjustment),
@@ -542,11 +550,9 @@ editor_widget_ensure_metrics(EditorWidget *self)
     self->cached_char_width = (double)logical_rect.width / PANGO_SCALE;
     if (self->cached_char_width < 1.0) self->cached_char_width = 1.0;
     
-    /* Add a tiny bit of breathing room? 
-       Standard editors often add a small leading. 
-       Let's stick to exact metrics first as requested, but ensure integer alignment?
-       Ceiling it is safer to avoid clipping. */
-    self->line_height = ceil(self->line_height);
+    /* Add line spacing (leading) for readability */
+    /* 1.15x is compact but comfortable */
+    self->line_height = ceil(self->line_height * 1.15);
 
     pango_font_metrics_unref(metrics);
 }
@@ -651,7 +657,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     size_t anchor_line = document_get_line_of_offset(self->doc, self->selection_anchor);
 
 
-    double current_y_pos = 0; /* Updated dynamically */
+    double current_y_pos = -partial_y; /* Start with calculated offset */
     double text_start_x = gutter_w + self->padding_left;
 
     for (size_t i = 0; i < count_lines; ++i) {
@@ -703,12 +709,6 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         if (layout_h < self->line_height) layout_h = self->line_height; /* Min height */
         
         /* Apply start offset if first line */
-        if (i == 0) {
-             double fraction = fmod(scroll_y, self->line_height) / self->line_height;
-             double pixel_offset = fraction * layout_h;
-             current_y_pos = -pixel_offset;
-        }
-
         /* Draw Current Line Highlight */
         if (self->highlight_current_line && line_idx == cursor_line) {
              GdkRGBA hl_color = self->color_text;
