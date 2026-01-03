@@ -91,16 +91,20 @@ document_delete(Document *doc, size_t offset, size_t len)
     piece_table_delete(doc->pt, offset, len);
 }
 
-void
+/* Proxy UndoInfo type manually to avoid cyclic dep header hell if needed, 
+   but we can include undo.h in document.h or forward declare. 
+   For now, strictly include undo.h in document.h */
+
+UndoInfo
 document_undo(Document *doc)
 {
-    undo_stack_undo(doc->undo_stack, doc->pt);
+    return undo_stack_undo(doc->undo_stack, doc->pt);
 }
 
-void
+UndoInfo
 document_redo(Document *doc)
 {
-    undo_stack_redo(doc->undo_stack, doc->pt);
+    return undo_stack_redo(doc->undo_stack, doc->pt);
 }
 
 void

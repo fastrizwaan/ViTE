@@ -25,8 +25,8 @@ void document_insert(Document *doc, size_t offset, const char *text, size_t len)
 void document_delete(Document *doc, size_t offset, size_t len);
 
 /* Undo/Redo */
-void document_undo(Document *doc);
-void document_redo(Document *doc);
+UndoInfo document_undo(Document *doc);
+UndoInfo document_redo(Document *doc);
 void document_begin_undo_group(Document *doc);
 void document_end_undo_group(Document *doc);
 

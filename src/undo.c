@@ -127,10 +127,52 @@ execute_command(UndoCommand *cmd, PieceTable *pt, gboolean undo)
     }
 }
 
-gboolean
+/* Helper to extract info from a command (or the relevant sub-command in a group) */
+static void
+get_command_info(UndoCommand *cmd, gboolean undo, UndoInfo *info)
+{
+    info->success = TRUE;
+    
+    if (cmd->type == UNDO_OP_GROUP) {
+        /* For Group Undo: The "primary" location is usually the INITIAL action of the group
+           (e.g., Drag Source). However, we iterate in reverse. 
+           We likely want the location of the *last* command executed during undo 
+           (which is the *first* command in the group's list). */
+        if (undo) {
+             /* Last executed is the first in list */
+             GList *first = cmd->group_commands;
+             if (first) get_command_info((UndoCommand*)first->data, undo, info);
+        } else {
+             /* Redo: Last executed is last in list? 
+                Actually for Drag Drop Redo: Delete A, Insert B. 
+                We probably want to end up at B. 
+                Last executed is Insert B. */
+             GList *last = g_list_last(cmd->group_commands);
+             if (last) get_command_info((UndoCommand*)last->data, undo, info);
+        }
+        return;
+    }
+    
+    /* Single Command */
+    info->start = cmd->start;
+    info->length = cmd->length;
+    
+    if (cmd->type == UNDO_OP_INSERT) {
+        /* Undo Insert -> Delete. is_insert = FALSE. */
+        /* Redo Insert -> Insert. is_insert = TRUE. */
+        info->is_insert = !undo;
+    } else if (cmd->type == UNDO_OP_DELETE) {
+        /* Undo Delete -> Insert. is_insert = TRUE. */
+        /* Redo Delete -> Delete. is_insert = FALSE. */
+        info->is_insert = undo;
+    }
+}
+
+UndoInfo
 undo_stack_undo(UndoStack *stack, PieceTable *pt)
 {
-    if (!stack->undo_stack) return FALSE;
+    UndoInfo info = {0};
+    if (!stack->undo_stack) return info;
     
     UndoCommand *cmd = stack->undo_stack->data;
     stack->undo_stack = g_list_remove(stack->undo_stack, cmd);
@@ -140,13 +182,15 @@ undo_stack_undo(UndoStack *stack, PieceTable *pt)
     execute_command(cmd, pt, TRUE);
     stack->in_undo_redo = FALSE;
     
-    return TRUE;
+    get_command_info(cmd, TRUE, &info);
+    return info;
 }
 
-gboolean
+UndoInfo
 undo_stack_redo(UndoStack *stack, PieceTable *pt)
 {
-    if (!stack->redo_stack) return FALSE;
+    UndoInfo info = {0};
+    if (!stack->redo_stack) return info;
     
     UndoCommand *cmd = stack->redo_stack->data;
     stack->redo_stack = g_list_remove(stack->redo_stack, cmd);
@@ -156,5 +200,6 @@ undo_stack_redo(UndoStack *stack, PieceTable *pt)
     execute_command(cmd, pt, FALSE);
     stack->in_undo_redo = FALSE;
     
-    return TRUE;
+    get_command_info(cmd, FALSE, &info);
+    return info;
 }

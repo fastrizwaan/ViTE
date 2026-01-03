@@ -3241,14 +3241,41 @@ on_key_pressed(GtkEventControllerKey *controller,
             break;
         case GDK_KEY_z:
             if (state & GDK_CONTROL_MASK) {
-                 document_undo(self->doc);
-                 /* Should handle cursor update after undo/redo? */
+                 UndoInfo info = document_undo(self->doc);
+                 if (info.success) {
+                     if (info.is_insert) {
+                         /* Text restored/inserted: Select it */
+                         self->cursor_offset = info.start + info.length;
+                         self->selection_anchor = info.start;
+                     } else {
+                         /* Text deleted: Place cursor at start */
+                         self->cursor_offset = info.start;
+                         self->selection_anchor = info.start;
+                     }
+                     
+                     editor_widget_reset_cursor_blink(self);
+                     editor_widget_update_adjustments(self, -1, -1);
+                     scroll_to_cursor(self);
+                 }
                  gtk_widget_queue_draw(GTK_WIDGET(self));
             }
             break;
         case GDK_KEY_y:
             if (state & GDK_CONTROL_MASK) {
-                 document_redo(self->doc);
+                 UndoInfo info = document_redo(self->doc);
+                 if (info.success) {
+                     if (info.is_insert) {
+                         self->cursor_offset = info.start + info.length;
+                         self->selection_anchor = info.start;
+                     } else {
+                         self->cursor_offset = info.start;
+                         self->selection_anchor = info.start;
+                     }
+                     
+                     editor_widget_reset_cursor_blink(self);
+                     editor_widget_update_adjustments(self, -1, -1);
+                     scroll_to_cursor(self);
+                 }
                  gtk_widget_queue_draw(GTK_WIDGET(self));
             }
             break;
