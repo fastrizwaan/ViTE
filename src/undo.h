@@ -35,8 +35,15 @@ void undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_
 void undo_stack_begin_group(UndoStack *stack);
 void undo_stack_end_group(UndoStack *stack);
 
-/* Returns command to execute (inverse of recorded) */
-gboolean undo_stack_undo(UndoStack *stack, PieceTable *pt);
-gboolean undo_stack_redo(UndoStack *stack, PieceTable *pt);
+typedef struct {
+    gboolean success;
+    size_t start;
+    size_t length;
+    gboolean is_insert; /* If true, text was inserted by the operation */
+} UndoInfo;
+
+/* Returns info about the executed operation */
+UndoInfo undo_stack_undo(UndoStack *stack, PieceTable *pt);
+UndoInfo undo_stack_redo(UndoStack *stack, PieceTable *pt);
 
 #endif
