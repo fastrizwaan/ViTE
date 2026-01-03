@@ -654,32 +654,7 @@ piece_table_delete(PieceTable *pt, size_t offset, size_t len)
            Root->Left->Right ... this is getting complicated.
         */
         /* Let's try simpler:
-           Splay left_anchor (Offset-1).
-           Splay end_node (Offset+Len).
-           
-           If we splay left_anchor, it is Root.
-           end_node is in Root->Right branch.
-           We can splay end_node *relative* to Root->Right?
-        */
-        
-        /* Just use global splay.
            Splay(left_anchor). Root = left_anchor.
-           Splay(end_node). Root = end_node.
-           end_node > left_anchor.
-           So left_anchor must be in end_node->left.
-           
-           Because end_node is the node immmediately following the deleted range,
-           and left_anchor is immmediately preceding.
-           
-           After Splay(end_node):
-           Root = end_node.
-           Root->Left contains [0...offset+len-1].
-           
-           Splay(left_anchor) inside Root->Left?
-           If we Splay(left_anchor), it becomes Root of the Left Subtree? 
-           Eventually left_anchor becomes child of Root.
-           
-           Let's just Splay(left_anchor). Root = left_anchor.
            Expose Right child.
            The node `end_node` is in Right child.
            Splay `end_node`. Root = end_node.
@@ -781,54 +756,6 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
        We need to consume characters until we hit a newline or EOF.
     */
     
-    /* We need to find "how many newlines inside this node are BEFORE our line?"
-       node->left->lf_subtree gives logical start LF of node.
-       So line_index - start_lf is the index of the newline INSIDE this node (0-based) that starts our line?
-       Wait.
-       If start_lf = 10 (lines 0-9 are before).
-       We want line 10.
-       Line 10 starts at... beginning of node if previous node ended with newline?
-       
-       Let's refine 'find_node_for_line'.
-       It returns the node containing the Nth newline?
-       No, line N usually means the text AFTER the (N-1)th newline.
-    */
-    
-    /* Let's simplify: Get byte offset of Line N.
-       If we know Byte Offset of Line N, we can just read until \n.
-    */
-    
-    /* Problem: Splay tree tracks count(LF).
-       It doesn't map "Line Index -> Byte Offset" directly unless we search.
-    */
-    
-    /* Searching for Line N:
-       We descend.
-       If target < left->lf, go left.
-       If target < left->lf + node->lf, we found the node.
-       
-       Which newline in this node ends the PREVIOUS line?
-       We want to start AFTER (target - left->lf - 1)-th newline in this node?
-       
-       Example: Node has "A\nB\nC". LF=2.
-       If we want line corresponding to 'B'.
-       Line 0: "A". (ENDS at 0th newline).
-       Line 1: "B". (Starts after 0th newline).
-       
-       If global line index is say 100.
-       We arrive at node with 'seen_lf'=100.
-       That means lines 0-99 are to the left.
-       Line 100 starts at the beginning of this node? Yes.
-       
-       But if node is "A\nB".
-       Left has 100 lines.
-       We want line 101.
-       Target 101.
-       101 > 100.
-       Inside node: we skip 101-100 = 1 newline.
-       "A\n" is skipped. We start at "B".
-    */
-    
     size_t relative_lf = line_index - start_lf;
     
     /* Find byte offset of 'relative_lf'-th newline in this piece */
@@ -863,8 +790,7 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
     
     const char *eol = memchr(ptr, '\n', rem);
     if (eol) {
-        g_string_append_len(res, ptr, eol - ptr + 1); /* Include newline? GtkTextView includes it. user asked for mmap backend. */
-        /* Let's include it. */
+        g_string_append_len(res, ptr, eol - ptr + 1); 
         *out_len = res->len;
         return g_string_free(res, FALSE);
     }
@@ -872,16 +798,6 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
     g_string_append_len(res, ptr, rem);
     
     /* Continue to next pieces (successor) until newline found */
-    /* Inorder successor */
-    /* Since we splayed 'node', it is root.
-       Successor is right child -> min.
-    */
-    /* But we need to traverse efficiently. */
-    /* Hack: Just assume line doesn't span too many pieces? 
-       Yes, for now. 
-    */
-    /* Real splay traversal is complex without parent pointers, but we have them. */
-    
     PieceNode *curr = node;
     /* Successor logic */
     while (1) {
@@ -915,6 +831,84 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
     
     *out_len = res->len;
     return g_string_free(res, FALSE);
+}
+
+size_t
+piece_table_get_line_length(PieceTable *pt, size_t line_index)
+{
+    size_t start_lf, start_byte;
+    PieceNode *node = find_node_for_line(pt, line_index, &start_lf, &start_byte);
+    
+    if (!node) return 0;
+    
+    /* Calculate relative line index within this start node */
+    size_t relative_lf = line_index - start_lf;
+    
+    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    data += node->piece.start;
+    size_t len = node->piece.length;
+    
+    size_t internal_offset = 0;
+    if (relative_lf > 0) {
+        size_t found = 0;
+        const char *ptr = data;
+        const char *end = data + len;
+        while (ptr < end && found < relative_lf) {
+            void *p = memchr(ptr, '\n', end - ptr);
+            if (!p) break;
+            ptr = (char*)p + 1;
+            found++;
+        }
+        internal_offset = ptr - data;
+    }
+    
+    /* Sum length until newline */
+    size_t total_len = 0;
+    
+    /* Check remainder of first node */
+    const char *ptr = data + internal_offset;
+    size_t rem = len - internal_offset;
+    
+    const char *eol = memchr(ptr, '\n', rem);
+    if (eol) {
+        /* Include newline to match get_line behavior for consistency, 
+           though strictly length might exclude it? 
+           get_line includes it. Let's include it. */
+        return (eol - ptr + 1);
+    }
+    total_len += rem;
+    
+    /* Traversal */
+    PieceNode *curr = node;
+    while (1) {
+        if (curr->right) {
+            curr = curr->right;
+            while (curr->left) curr = curr->left;
+        } else {
+            PieceNode *p = curr->parent;
+            while (p && curr == p->right) {
+                curr = p;
+                p = p->parent;
+            }
+            curr = p;
+        }
+        
+        if (!curr) break;
+        
+        const char *cdata = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+        cdata += curr->piece.start;
+        size_t clen = curr->piece.length;
+        
+        const char *ceol = memchr(cdata, '\n', clen);
+        if (ceol) {
+            total_len += (ceol - cdata + 1);
+            break;
+        } else {
+            total_len += clen;
+        }
+    }
+    
+    return total_len;
 }
 
 size_t
@@ -986,4 +980,60 @@ piece_table_get_offset_of_line(PieceTable *pt, size_t line_index)
     }
     
     return start_byte + internal_offset;
+}
+
+/* -- Traversal -- */
+
+static void
+traverse_node_for_lines(PieceTable *pt, PieceNode *node, void (*func)(size_t len, void *user_data), void *user_data, size_t *acc_len)
+{
+    if (!node) return;
+    
+    traverse_node_for_lines(pt, node->left, func, user_data, acc_len);
+    
+    /* Process current piece */
+    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *ptr = data + node->piece.start;
+    const char *end = ptr + node->piece.length;
+    
+    const char *scan = ptr;
+    while (scan < end) {
+        const char *nl = memchr(scan, '\n', end - scan);
+        if (nl) {
+            /* Found a newline */
+            size_t seg_len = nl - scan;
+            size_t full_len = *acc_len + seg_len + 1; /* +1 for newline */
+            
+            func(full_len, user_data);
+            
+            *acc_len = 0;
+            scan = nl + 1;
+        } else {
+            /* No more newlines in this piece, accumulate rest */
+            *acc_len += (end - scan);
+            break;
+        }
+    }
+    
+    traverse_node_for_lines(pt, node->right, func, user_data, acc_len);
+}
+
+void
+piece_table_foreach_line(PieceTable *pt, void (*func)(size_t line_len, void *user_data), void *user_data)
+{
+    if (!pt || !pt->root) return;
+    
+    size_t acc_len = 0;
+    traverse_node_for_lines(pt, pt->root, func, user_data, &acc_len);
+    
+    /* If there is leftover text (file doesn't end in newline), emit it as final line */
+    if (acc_len > 0) {
+        func(acc_len, user_data);
+    }
+    /* Note: If file ends in newline, we don't emit an empty line here to avoid confusing line counting
+       unless the editor logic specifically expects it. 
+       Usually "A\n" -> 2 lines. 
+       If we iterate, we emit 1 for "A\n". The second line is empty and implicit.
+       Our loop in editor_widget expects total_lines.
+       If total_lines > emitted_lines, we know the last one is empty. */
 }

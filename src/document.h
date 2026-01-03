@@ -12,6 +12,8 @@ void document_free(Document *doc);
 
 /* Content Access */
 char *document_get_line(Document *doc, size_t line_index, size_t *len);
+size_t document_get_line_length(Document *doc, size_t line_index);
+void document_foreach_line(Document *doc, void (*func)(size_t line_len, void *user_data), void *user_data);
 size_t document_get_line_count(Document *doc);
 size_t document_get_length(Document *doc);
 char *document_get_text_range(Document *doc, size_t offset, size_t len);
