@@ -147,5 +147,6 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_spin_row("Spaces Per Tab", editor, "tab-width", 1, 16, 1));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_spin_row("Spaces Per Indent", editor, "indent-width", 1, 16, 1));
 
+    g_signal_connect_swapped(dialog, "closed", G_CALLBACK(gtk_widget_grab_focus), editor);
     adw_dialog_present(dialog, GTK_WIDGET(parent));
 }
