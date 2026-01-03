@@ -993,12 +993,13 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* Calculate Map Scroll Offset */
         /* If map fits, offset is 0. If map > widget, scroll proportionally */
         double map_scroll_y = 0;
-        if (map_total_h > height) {
-            double scroll_max = total_h - height; /* Approx max scroll of viewport */
+        if (map_total_h > height && self->vadjustment) {
+            double upper = gtk_adjustment_get_upper(self->vadjustment);
+            double page = gtk_adjustment_get_page_size(self->vadjustment);
+            double scroll_max = upper - page;
             if (scroll_max <= 0) scroll_max = 1;
             
-            double current_scroll_y = 0;
-            if (self->vadjustment) current_scroll_y = gtk_adjustment_get_value(self->vadjustment);
+            double current_scroll_y = gtk_adjustment_get_value(self->vadjustment);
             
             double map_scroll_max = map_total_h - height;
             map_scroll_y = (current_scroll_y / scroll_max) * map_scroll_max;
@@ -1122,31 +1123,38 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             g_free(text);
         }
         
-        /* Viewport Indicator - Use scrollbar-thumb formula */
-        /* This ensures the indicator stays under the mouse during drag */
+        /* Viewport Indicator - GtkSourceMap proportional mapping */
+        /* slider_y = (scroll_y / total_content_height) * map_visible_height */
+        /* slider_h = (viewport_height / total_content_height) * map_visible_height */
         double scroll_y = 0;
-        double upper = 1, page = 1;
+        double page = height;
         if (self->vadjustment) {
             scroll_y = gtk_adjustment_get_value(self->vadjustment);
-            upper = gtk_adjustment_get_upper(self->vadjustment);
             page = gtk_adjustment_get_page_size(self->vadjustment);
         }
         
-        double scroll_max = upper - page;
-        if (scroll_max <= 0) scroll_max = 1;
+        /* Use the same total_h as map content */
+        /* total_h = line_height * line_count (defined earlier at line 990) */
         
-        /* Thumb height: based on viewport height at map_scale (dynamic, larger for short files) */
-        double thumb_h = height * map_scale; /* Viewport height scaled down */
-        if (thumb_h < 20) thumb_h = 20;
-        if (thumb_h > height) thumb_h = height;
+        /* Map the visible area to map coordinates */
+        /* The slider should show exactly which portion of the document is visible */
+        double slider_y_in_map = 0;
+        double slider_h_in_map = height;
         
-        /* Track available for thumb movement */
-        double track = height - thumb_h;
+        if (total_h > 0) {
+            /* Slider top: where does the visible area start in the document? */
+            /* Map that to map coordinates, then subtract map_scroll_y to get screen position */
+            slider_y_in_map = (scroll_y / total_h) * map_total_h - map_scroll_y;
+            
+            /* Slider height: what portion of the total is visible? */
+            slider_h_in_map = (page / total_h) * map_total_h;
+        }
         
-        /* Thumb position: proportional to scroll position */
-        double thumb_y = (scroll_y / scroll_max) * track;
-        if (thumb_y < 0) thumb_y = 0;
-        if (thumb_y > track) thumb_y = track;
+        /* Clamp to reasonable bounds */
+        if (slider_h_in_map < 20) slider_h_in_map = 20;
+        if (slider_h_in_map > height) slider_h_in_map = height;
+        if (slider_y_in_map < 0) slider_y_in_map = 0;
+        if (slider_y_in_map + slider_h_in_map > height) slider_y_in_map = height - slider_h_in_map;
         
         GdkRGBA vp_col = {1.0, 1.0, 1.0, 0.12}; 
         if (!is_dark) {
@@ -1154,15 +1162,15 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         }
         
         gtk_snapshot_append_color(snapshot, &vp_col,
-            &GRAPHENE_RECT_INIT(width - map_w, (float)thumb_y, map_w, (float)thumb_h));
+            &GRAPHENE_RECT_INIT(width - map_w, (float)slider_y_in_map, map_w, (float)slider_h_in_map));
         
         GdkRGBA vp_border = {1.0, 1.0, 1.0, 0.2};
         if (!is_dark) { vp_border.red=0; vp_border.green=0; vp_border.blue=0; }
         
         gtk_snapshot_append_color(snapshot, &vp_border,
-             &GRAPHENE_RECT_INIT(width - map_w, (float)thumb_y, map_w, 1));
+             &GRAPHENE_RECT_INIT(width - map_w, (float)slider_y_in_map, map_w, 1));
         gtk_snapshot_append_color(snapshot, &vp_border,
-             &GRAPHENE_RECT_INIT(width - map_w, (float)(thumb_y + thumb_h - 1), map_w, 1));
+             &GRAPHENE_RECT_INIT(width - map_w, (float)(slider_y_in_map + slider_h_in_map - 1), map_w, 1));
     }
     }
 
@@ -1785,30 +1793,23 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
     
     /* Handle Overview Map Drag */
     if (self->dragging_map) {
-        if (self->vadjustment) {
-            double height = gtk_widget_get_height(GTK_WIDGET(self));
+        if (self->vadjustment && self->doc) {
+            double widget_height = gtk_widget_get_height(GTK_WIDGET(self));
             double upper = gtk_adjustment_get_upper(self->vadjustment);
             double page = gtk_adjustment_get_page_size(self->vadjustment);
             
-            /* Scrollbar-thumb inverse formula (matches rendering) */
-            /* Rendering: thumb_y = (scroll / scroll_max) * track */
-            /* Inverse: scroll = (thumb_y / track) * scroll_max */
-            /* For delta: delta_scroll = (delta_y / track) * scroll_max */
+            /* GtkSourceMap proportional inverse formula */
+            /* Rendering: slider_y = (scroll_y / total_h) * map_total_h - map_scroll_y */
+            /* Inverse for delta: delta_scroll = (delta_y / map_total_h) * total_h */
             
-            double scroll_max = upper - page;
-            if (scroll_max <= 0) scroll_max = 1;
-            
-            /* Calculate thumb height using same formula as rendering */
             double map_scale = 0.15;
-            double thumb_h = height * map_scale;
-            if (thumb_h < 20) thumb_h = 20;
-            if (thumb_h > height) thumb_h = height;
+            double total_h = self->line_height * document_get_line_count(self->doc);
+            double map_total_h = total_h * map_scale;
             
-            double track = height - thumb_h;
-            if (track <= 0) track = 1;
+            if (map_total_h <= 0) map_total_h = 1;
             
-            /* Convert mouse delta to scroll delta */
-            double scroll_delta = (offset_y / track) * scroll_max;
+            /* Convert mouse delta to scroll delta using inverse mapping */
+            double scroll_delta = (offset_y / map_total_h) * total_h;
             
             double target_scroll = self->map_drag_start_scroll + scroll_delta;
             target_scroll = CLAMP(target_scroll, 0, upper - page);
@@ -1945,25 +1946,32 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
         double drag_distance = sqrt(offset_x * offset_x + offset_y * offset_y);
         if (drag_distance < 5 && self->map_click_y >= 0 && self->vadjustment && self->doc) {
             /* This was a click, do smooth scroll */
-            double height = gtk_widget_get_height(GTK_WIDGET(self));
+            double widget_height = gtk_widget_get_height(GTK_WIDGET(self));
             double upper = gtk_adjustment_get_upper(self->vadjustment);
             double page = gtk_adjustment_get_page_size(self->vadjustment);
             
+            /* GtkSourceMap proportional mapping inverse */
             double map_scale = 0.15;
             double total_h = self->line_height * document_get_line_count(self->doc);
             double map_total_h = total_h * map_scale;
             
+            /* Calculate map_scroll_y the same way as rendering */
             double map_scroll_y = 0;
-            if (map_total_h > height) {
-                double scroll_max = total_h - height;
+            if (map_total_h > widget_height) {
+                double scroll_max = upper - page;
                 if (scroll_max <= 0) scroll_max = 1;
                 double current_scroll_y = gtk_adjustment_get_value(self->vadjustment);
-                double map_scroll_max = map_total_h - height;
+                double map_scroll_max = map_total_h - widget_height;
                 map_scroll_y = (current_scroll_y / scroll_max) * map_scroll_max;
             }
             
-            double click_line = (self->map_click_y + map_scroll_y) / (self->line_height * map_scale);
-            double target_scroll = (click_line * self->line_height) - (page / 2);
+            /* Convert click Y to document scroll position */
+            /* Inverse of: slider_y = (scroll_y / total_h) * map_total_h - map_scroll_y */
+            /* scroll_y = ((slider_y + map_scroll_y) / map_total_h) * total_h */
+            double click_doc_y = ((self->map_click_y + map_scroll_y) / map_total_h) * total_h;
+            
+            /* Center the clicked position in the viewport */
+            double target_scroll = click_doc_y - (page / 2);
             target_scroll = CLAMP(target_scroll, 0, upper - page);
             
             /* Start smooth scroll animation */
