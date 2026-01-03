@@ -19,6 +19,7 @@ struct _EditorWidget {
     GdkRGBA color_cursor;
 
     double line_height;
+    double cached_char_width;
     PangoFontDescription *font_desc;
     
     /* State */
@@ -96,11 +97,22 @@ struct _EditorWidget {
     int cached_width;
     int cached_height;
     size_t cached_line_count;
+    
+    /* Cache for Y positions of all lines (accumulated height) */
+    GArray *line_y_offsets;
+    
+    /* Idle resize handler to prevent blocking UI on every frame */
+    guint idle_resize_id;
+    
+    /* Statistical Scroll for Large Files */
+    double avg_visual_lines;
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
 static void editor_widget_ensure_metrics(EditorWidget *self);
 static void editor_widget_reset_cursor_blink(EditorWidget *self);
+static double get_effective_gutter_width(EditorWidget *self);
+static void editor_widget_drag_drop_finish(EditorWidget *self, size_t drop_off);
 static void update_target_x(EditorWidget *self);
 static void editor_widget_copy(EditorWidget *self);
 static void editor_widget_cut(EditorWidget *self);
@@ -173,18 +185,118 @@ enum {
     N_PROPS
 };
 
+/* Scroll Calculation Helper */
+typedef struct {
+    double current_y;
+    GArray *offsets;
+    int chars_per_line;
+    double line_height;
+} ScrollCalcState;
+
 static void
-editor_widget_update_adjustments(EditorWidget *self)
+calculate_line_height_cb(size_t len, void *user_data)
+{
+    ScrollCalcState *state = (ScrollCalcState*)user_data;
+    
+    size_t effective_len = len;
+    if (effective_len > 0) effective_len--; /* approximate removing newline */
+    
+    size_t visual_lines = 1;
+    if (state->chars_per_line > 0 && effective_len > 0) {
+        visual_lines = (effective_len + state->chars_per_line - 1) / state->chars_per_line;
+        if (visual_lines == 0) visual_lines = 1;
+    }
+    
+    g_array_append_val(state->offsets, state->current_y);
+    state->current_y += (double)visual_lines * state->line_height;
+}
+
+static void
+editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widget_height)
 {
     if (!self->vadjustment || !self->doc) return;
+    
+    /* If called with -1, use current */
+    if (widget_width < 0) widget_width = gtk_widget_get_width(GTK_WIDGET(self));
+    if (widget_height < 0) widget_height = gtk_widget_get_height(GTK_WIDGET(self));
 
     editor_widget_ensure_metrics(self);
 
     size_t total_lines = document_get_line_count(self->doc);
-    int widget_height = gtk_widget_get_height(GTK_WIDGET(self));
     
-    /* Simple calculation: total_lines * line_height */
-    double content_height = (double)total_lines * self->line_height + self->padding_top * 2;
+    double content_height = 0;
+
+    if (!self->wrap_lines || total_lines == 0) {
+        /* Simple calculation for no-wrap mode or empty doc */
+        content_height = (double)total_lines * self->line_height + self->padding_top * 2;
+        
+        /* Optimization: For linear files, clear the offset cache to save memory and time O(1).
+           Snapshot and scroll_to_cursor will fallback to arithmetic. */
+        if (self->line_y_offsets) {
+             g_array_set_size(self->line_y_offsets, 0);
+        }
+    } else {
+        /* Accurate calculation for wrapped lines */
+        double text_start_x = get_effective_gutter_width(self) + self->padding_left;
+        double wrap_width = (double)widget_width - text_start_x;
+        
+        if (wrap_width < 1.0) wrap_width = 1.0;
+        
+        /* Estimate chars per line using cached char width */
+        int chars_per_line = (int)(wrap_width / self->cached_char_width);
+        if (chars_per_line < 1) chars_per_line = 1;
+
+
+        /* Prepare offsets array */
+        g_array_set_size(self->line_y_offsets, 0);
+        
+        /* Strategy Switch: Exact vs Statistical */
+        if (total_lines > 50000) {
+            /* Statistical Scroll Mode (O(1)) */
+            /* Do not populate line_y_offsets. Estimate avg visual lines. */
+            size_t total_bytes = document_get_length(self->doc);
+            double avg_bytes = (total_lines > 0) ? (double)total_bytes / total_lines : 0;
+            
+            /* Estimate visual lines per logical line */
+            // average bytes / chars_per_line gives raw rows.
+            // But real text isn't a solid block. 
+            // Factor of 1.0 is safe lower bound.
+            double est_rows = avg_bytes / (double)chars_per_line;
+            if (est_rows < 1.0) est_rows = 1.0;
+            
+            self->avg_visual_lines = est_rows;
+            
+            /* Calculate total height estimate */
+            content_height = (double)total_lines * self->avg_visual_lines * self->line_height + self->padding_top * 2;
+             
+        } else {
+            /* Exact Scan Mode (O(N)) */
+            self->avg_visual_lines = 1.0; /* Reset */
+            
+            /* Pre-allocate estimation? total_lines is known, but exact count not strict req for GArray */
+            /* g_array_set_size handles growth, no manual pre-alloc needed */
+            
+            ScrollCalcState state;
+            state.current_y = 0;
+            state.offsets = self->line_y_offsets;
+            state.chars_per_line = chars_per_line;
+            state.line_height = self->line_height;
+            
+            /* O(N) Linear Scan using Piece Table Traversal */
+            document_foreach_line(self->doc, calculate_line_height_cb, &state);
+            
+            g_array_append_val(self->line_y_offsets, state.current_y);
+            content_height = state.current_y + self->padding_top * 2;
+        }
+    }
+    
+    /* Ensure we can scroll enough to show the last line at the bottom? 
+       Actually, standard is: upper = content_height. 
+       Max scroll = upper - page_size.
+       If content_height < widget_height, max scroll = 0.
+       If content_height > widget_height, we can scroll until bottom of content aligns with bottom of viewport.
+    */
+
     double upper = MAX(content_height, widget_height);
 
     gtk_adjustment_configure(self->vadjustment,
@@ -416,6 +528,19 @@ editor_widget_ensure_metrics(EditorWidget *self)
     
     /* Calculate line height from metrics ensuring space for all scripts */
     self->line_height = (double)(ascent + descent) / PANGO_SCALE;
+
+    /* Measure '0' for more accurate char width in code/monospace scenarios */
+    /* Use logical extents to avoid HiDPI scaling issues with get_pixel_size */
+    PangoLayout *layout = pango_layout_new(context);
+    pango_layout_set_font_description(layout, self->font_desc);
+    pango_layout_set_text(layout, "0", 1);
+    
+    PangoRectangle logical_rect;
+    pango_layout_get_extents(layout, NULL, &logical_rect);
+    g_object_unref(layout);
+    
+    self->cached_char_width = (double)logical_rect.width / PANGO_SCALE;
+    if (self->cached_char_width < 1.0) self->cached_char_width = 1.0;
     
     /* Add a tiny bit of breathing room? 
        Standard editors often add a small leading. 
@@ -475,9 +600,47 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     if (self->vadjustment)
         scroll_y = gtk_adjustment_get_value(self->vadjustment);
 
-    /* Simple fast calculation for start_line */
-    size_t start_line = (size_t)(scroll_y / self->line_height);
-    double partial_y = fmod(scroll_y, self->line_height);
+    /* Find start_line using binary search on line_y_offsets */
+    size_t start_line = 0;
+    double partial_y = 0;
+    size_t total_lines = document_get_line_count(self->doc);
+    
+    if (self->line_y_offsets && self->line_y_offsets->len > 0) {
+        double *offsets = (double*)self->line_y_offsets->data;
+        size_t low = 0;
+        size_t high = self->line_y_offsets->len - 1;
+        
+        /* We want index i such that offsets[i] <= scroll_y < offsets[i+1] */
+        /* Upper bound search */
+        
+        while (low < high) {
+            size_t mid = low + (high - low + 1) / 2;
+            if (offsets[mid] <= scroll_y) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        start_line = low;
+        if (start_line >= total_lines) start_line = total_lines - 1; /* clamp */
+        
+        partial_y = scroll_y - offsets[start_line];
+    } else {
+        /* Fallback: Arithmetic estimation using avg visual lines */
+        double multiplier = (self->wrap_lines) ? self->avg_visual_lines : 1.0;
+        if (multiplier < 1.0) multiplier = 1.0;
+        start_line = (size_t)(scroll_y / (self->line_height * multiplier));
+        
+        /* Approximate partial Y? */
+        /* If we are deep in a statistical zone, partial pixel alignment isn't perfect locally
+           because the local lines are measured exactly. 
+           We just want to find the rough start line. 
+           Pango will layout start_line and we draw it at -partial_y.
+        */
+        partial_y = fmod(scroll_y, self->line_height * multiplier);
+        /* Clamp partial_y to valid range if multiplier > 1? */
+        if (partial_y > self->line_height * 20) partial_y = 0; // Avoid huge offset
+    }
     
     size_t count_lines = (size_t)(height / self->line_height) + 2;
     size_t max_lines = document_get_line_count(self->doc);
@@ -1023,11 +1186,38 @@ editor_widget_measure (GtkWidget      *widget,
     if (natural) *natural = 800;
 }
 
+static gboolean
+resize_idle_cb(gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    self->idle_resize_id = 0;
+    
+    /* Pass -1, -1 to use current size */
+    editor_widget_update_adjustments(self, -1, -1);
+    
+    return G_SOURCE_REMOVE;
+}
+
 static void
 editor_widget_size_allocate(GtkWidget *widget, int width, int height, int baseline)
 {
     EditorWidget *self = EDITOR_WIDGET(widget);
-    editor_widget_update_adjustments(self);
+    
+    // Check if size actually changed to avoid redundant work (though GTK usually handles this)
+    if (width == self->cached_width && height == self->cached_height) {
+        GTK_WIDGET_CLASS(editor_widget_parent_class)->size_allocate(widget, width, height, baseline);
+        return; 
+    }
+    
+    self->cached_width = width;
+    self->cached_height = height;
+
+    /* Schedule update on idle if not already scheduled */
+    if (self->idle_resize_id == 0) {
+        self->idle_resize_id = g_idle_add(resize_idle_cb, self);
+    }
+    
+    GTK_WIDGET_CLASS(editor_widget_parent_class)->size_allocate(widget, width, height, baseline);
 }
 
 static void scroll_to_cursor(EditorWidget *self);
@@ -1039,101 +1229,125 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     
     /* Pixel-based scrolling */
     double scroll_y = (self->vadjustment) ? gtk_adjustment_get_value(self->vadjustment) : 0;
-    size_t line_idx = (size_t)(scroll_y / self->line_height);
-    /* double partial_y = fmod(scroll_y, self->line_height); -- replaced by fraction */
-    size_t start_scan_line = line_idx;
+    
+    /* 1. Calculate Start Line (Same as Snapshot) */
+    size_t start_line = 0;
+    double partial_y = 0;
     size_t count = document_get_line_count(self->doc);
     
+    if (self->line_y_offsets && self->line_y_offsets->len > 0) {
+        guint low = 0;
+        guint high = self->line_y_offsets->len - 1;
+        double *offsets = (double*)self->line_y_offsets->data;
+        while (low < high) {
+            guint mid = low + (high - low + 1) / 2;
+            if (offsets[mid] <= scroll_y) low = mid;
+            else high = mid - 1;
+        }
+        start_line = low;
+        if (start_line >= count) start_line = count - 1;
+        partial_y = scroll_y - offsets[start_line];
+    } else {
+        /* Fallback: Statistical */
+        double multiplier = (self->wrap_lines) ? self->avg_visual_lines : 1.0;
+        if (multiplier < 1.0) multiplier = 1.0;
+        start_line = (size_t)(scroll_y / (self->line_height * multiplier));
+        /* partial_y calculation removed - we calculate it per-line in loop */
+    }
+
+    /* 2. Scan forward visually to find the line at 'y' */
+    double current_y = 0; /* Will be adjusted by start-line offset inside loop */
+    double click_y = y - self->padding_top; /* Adjust for padding in click space */
+    size_t max_lines = document_get_line_count(self->doc);
     PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
     int width = gtk_widget_get_width(GTK_WIDGET(self));
     double gutter_w = get_effective_gutter_width(self);
     double text_start_x = gutter_w + self->padding_left;
-    
-    double current_y = 0; /* Updated dynamically */
-    
-    /* Iterate from top of viewport until we find the clicked line */
-    while (line_idx < count) {
+    int map_w_reserved = self->display_overview_map ? 120 : 0;
+
+    size_t line_idx = start_line;
+    /* Limit scan to reasonable screen height + buffer */
+    while (line_idx < max_lines) {
         size_t len;
         char *text = document_get_line(self->doc, line_idx, &len);
         
-        /* Validation needed as in render loop ? */
         if (!g_utf8_validate(text, len, NULL)) {
-             char *safe_text = g_utf8_make_valid(text, len);
-             g_free(text);
-             text = safe_text;
-             len = strlen(text);
+             char *safe = g_utf8_make_valid(text, len);
+             g_free(text); text = safe; len = strlen(text);
         }
-
-        /* Strip trailing newline for hit test matching render */
-        if (len > 0 && text[len-1] == '\n') {
-            len--;
-        }
-
+        if (len > 0 && text[len-1] == '\n') len--;
+        
         PangoLayout *layout = pango_layout_new(context);
         pango_layout_set_font_description(layout, self->font_desc);
         pango_layout_set_text(layout, text, (int)len);
         
         if (self->wrap_lines) {
-            pango_layout_set_width(layout, (width - text_start_x) * PANGO_SCALE);
+            int available_w = width - text_start_x - map_w_reserved;
+            if (available_w < 50) available_w = 50; 
+            pango_layout_set_width(layout, available_w * PANGO_SCALE);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         } else {
             pango_layout_set_width(layout, -1);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         }
         
-        int pixel_h;
-        pango_layout_get_pixel_size(layout, NULL, &pixel_h);
-        double layout_h = (double)pixel_h;
-        if (layout_h < self->line_height) layout_h = self->line_height;
+        int h;
+        pango_layout_get_pixel_size(layout, NULL, &h);
+        double line_h = (double)h;
+        if (line_h < self->line_height) line_h = self->line_height;
         
-        /* Apply start offset if first line */
-        if (line_idx == start_scan_line) {
+        /* Apply start offset if first line (Matching snapshot logic) */
+        if (line_idx == start_line) {
              double fraction = fmod(scroll_y, self->line_height) / self->line_height;
-             double pixel_offset = fraction * layout_h;
-             current_y = -pixel_offset;
+             double pixel_offset = fraction * line_h;
+             current_y -= pixel_offset;
         }
-
-        /* Account for padding when checking Y position */
-        double adjusted_y = y - self->padding_top;
-        if (adjusted_y < current_y + layout_h) {
-            /* Found the line! */
-            int index, trailing;
-            /* Subtract padding and gutter from x coordinate */
-            double internal_x = x - text_start_x;
-            if (internal_x < 0) internal_x = 0; /* Clamp to start of line if clicked in gutter */
+        
+        /* Check if click falls within this line */
+        if (click_y >= current_y && click_y < current_y + line_h) {
+            /* Found it! */
+            int idx, trailing;
+            double local_x = x - text_start_x;
+            if (local_x < 0) local_x = 0;
             
             pango_layout_xy_to_index(layout, 
-                                     (int)(internal_x * PANGO_SCALE), 
-                                     (int)((adjusted_y - current_y) * PANGO_SCALE), 
-                                     &index, &trailing);
+                                     (int)(local_x * PANGO_SCALE), 
+                                     (int)((click_y - current_y) * PANGO_SCALE), 
+                                     &idx, &trailing);
             
-            /* Add trailing to handle clicks at end of characters/line */
-            size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
-            *out_offset = line_start_off + index + trailing;
+            size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+            *out_offset = line_start + idx;
+            
+             /* Move forward if trailing */
+            if (trailing > 0) {
+                const char *ptr = text + idx;
+                if ((size_t)idx < len) {
+                   ptr = g_utf8_next_char(ptr);
+                   *out_offset = line_start + (ptr - text);
+                }
+            }
+            if (*out_offset > document_get_length(self->doc)) *out_offset = document_get_length(self->doc);
             
             g_object_unref(layout);
             g_free(text);
             return;
         }
         
-        current_y += layout_h;
-        line_idx++;
+        current_y += line_h;
         g_object_unref(layout);
         g_free(text);
+        line_idx++;
         
-        /* Optimization: if we went way past Y (should be caught by if), or screen height? */
-        /* If user clicked way below last line? */
-        if (current_y > y + 500) break; /* Safety break? */
+         /* Safety break if we scanned way past screen */
+        if (current_y > click_y + 1000) break;
     }
     
-    /* Fallback: end of file or end of specific line loop */
-    size_t max = document_get_line_count(self->doc);
-    if (line_idx >= max) line_idx = max - 1;
-    *out_offset = document_get_offset_of_line(self->doc, line_idx); 
+    /* Fallback if not found (clicked below content?): return end of last scanned line */
+    if (line_idx > 0) line_idx--;
+    *out_offset = document_get_offset_of_line(self->doc, line_idx);
     size_t last_len;
     char *ltext = document_get_line(self->doc, line_idx, &last_len);
     g_free(ltext);
-    /* Maybe end of line? */
     *out_offset += last_len;
 }
 
@@ -1471,33 +1685,36 @@ autoscroll_tick(gpointer user_data)
     
     if (new_val != current_val) {
         gtk_adjustment_set_value(self->vadjustment, new_val);
-        
-        /* Throttle hit-testing to ~15ms (60fps) to avoid freezing on long lines */
-        /* Timer fires every 1ms. 15 ticks = 15ms */
-        if (self->autoscroll_tick_count % 15 == 0) {
-            if (self->is_dnd_active) {
-                /* Update drop offset based on new scroll position */
-                size_t drop_off;
-                editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &drop_off);
-                
-                size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
-                size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
-                
-                if (drop_off >= sel_start && drop_off < sel_end) {
-                    self->drag_drop_offset = (size_t)-1;
-                } else {
-                    self->drag_drop_offset = drop_off;
-                }
-            } else {
-                 /* Update selection extension based on new scroll position */
-                 size_t off;
-                 editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &off);
-                 update_selection_extension(self, off);
-            }
-        }
-        
-        gtk_widget_queue_draw(GTK_WIDGET(self));
+    } else {
+        /* Ensure adjustments are consistent anyway */
+        editor_widget_update_adjustments(self, -1, -1);
     }
+    
+    /* Throttle hit-testing to ~15ms (60fps) to avoid freezing on long lines */
+    /* Timer fires every 1ms. 15 ticks = 15ms */
+    if (self->autoscroll_tick_count % 15 == 0) {
+        if (self->is_dnd_active) {
+            /* Update drop offset based on new scroll position */
+            size_t drop_off;
+            editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &drop_off);
+            
+            size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
+            size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+            
+            if (drop_off >= sel_start && drop_off < sel_end) {
+                self->drag_drop_offset = (size_t)-1;
+            } else {
+                self->drag_drop_offset = drop_off;
+            }
+        } else {
+             /* Update selection extension based on new scroll position */
+             size_t off;
+             editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &off);
+             update_selection_extension(self, off);
+        }
+    }
+    
+    gtk_widget_queue_draw(GTK_WIDGET(self));
     
     return G_SOURCE_CONTINUE;
 }
@@ -1688,6 +1905,45 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
 }
 
 static void
+editor_widget_drag_drop_finish(EditorWidget *self, size_t drop_off)
+{
+    if (drop_off == (size_t)-1 || !self->doc) return;
+
+    size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
+    size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+    size_t sel_len = sel_end - sel_start;
+    
+    char *text = document_get_text_range(self->doc, sel_start, sel_len);
+    if (!text) return;
+    
+    document_begin_undo_group(self->doc);
+    
+    /* If moving, delete original first */
+    /* Be careful if drop_off is after delete point, it shifts */
+    if (!self->drag_copy_mode) {
+        document_delete(self->doc, sel_start, sel_len);
+        if (drop_off > sel_end) {
+            drop_off -= sel_len;
+        }
+    }
+    
+    document_insert(self->doc, drop_off, text, sel_len);
+    
+    /* Select dropped text */
+    self->selection_anchor = drop_off;
+    self->cursor_offset = drop_off + sel_len;
+    self->alt_word_mode = FALSE;
+    
+    document_end_undo_group(self->doc);
+    
+    g_free(text);
+    
+    /* Force update */
+    editor_widget_update_adjustments(self, -1, -1);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static void
 on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -1695,44 +1951,10 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     
     if (self->dragging_map) {
         self->dragging_map = FALSE;
-        
-        /* Check if it was a click (minimal movement) not a drag */
-        double drag_distance = sqrt(offset_x * offset_x + offset_y * offset_y);
-        if (drag_distance < 5 && self->map_click_y >= 0 && self->vadjustment && self->doc) {
-            /* This was a click, do smooth scroll */
-            double height = gtk_widget_get_height(GTK_WIDGET(self));
-            double upper = gtk_adjustment_get_upper(self->vadjustment);
-            double page = gtk_adjustment_get_page_size(self->vadjustment);
-            
-            double map_scale = 0.15;
-            double total_h = self->line_height * document_get_line_count(self->doc);
-            double map_total_h = total_h * map_scale;
-            
-            double map_scroll_y = 0;
-            if (map_total_h > height) {
-                double scroll_max = total_h - height;
-                if (scroll_max <= 0) scroll_max = 1;
-                double current_scroll_y = gtk_adjustment_get_value(self->vadjustment);
-                double map_scroll_max = map_total_h - height;
-                map_scroll_y = (current_scroll_y / scroll_max) * map_scroll_max;
-            }
-            
-            double click_line = (self->map_click_y + map_scroll_y) / (self->line_height * map_scale);
-            double target_scroll = (click_line * self->line_height) - (page / 2);
-            target_scroll = CLAMP(target_scroll, 0, upper - page);
-            
-            /* Start smooth scroll animation */
-            self->smooth_scroll_start = gtk_adjustment_get_value(self->vadjustment);
-            self->smooth_scroll_target = target_scroll;
-            self->smooth_scroll_start_time = g_get_monotonic_time();
-            self->smooth_scroll_active = TRUE;
-            
-            if (self->smooth_scroll_tick_id == 0) {
-                self->smooth_scroll_tick_id = gtk_widget_add_tick_callback(
-                    GTK_WIDGET(self), smooth_scroll_tick, self, NULL);
-            }
-        }
-        self->map_click_y = -1;
+        /* Trigger smooth scroll if it was just a click (no significant drag) is handled in on_click_released/pressed? No. */
+        /* If we stored a click Y but didn't drag much, maybe animate? 
+           Actually click logic is in on_click_pressed. 
+           If we dragged map, we are done. */
         return;
     }
     self->map_click_y = -1; /* Reset for non-map drags */
@@ -1749,63 +1971,23 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     }
     
     if (self->is_dragging_selection) {
-        size_t drop_off = self->drag_drop_offset;
-        
-        size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
-        size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
-        
-        /* Check if there was actual movement (not just a click) - use flag set in update */
-        gboolean dnd_was_active = self->is_dnd_active;
-        
-        if (dnd_was_active && drop_off != (size_t)-1) {
-            /* Move or Copy selection to new location */
-            size_t sel_len = sel_end - sel_start;
-            char *text = document_get_text_range(self->doc, sel_start, sel_len);
-            
-            if (text) {
-                if (!self->drag_copy_mode) {
-                    /* Move mode: delete original */
-                    document_delete(self->doc, sel_start, sel_len);
-                    if (drop_off > sel_end) {
-                        drop_off -= sel_len;
-                    }
-                }
-                
-                document_insert(self->doc, drop_off, text, sel_len);
-                
-                self->selection_anchor = drop_off;
-                self->cursor_offset = drop_off + sel_len;
-                self->alt_word_mode = FALSE;
-                
-                g_free(text);
-                editor_widget_update_adjustments(self);
-            }
-        } else if (!dnd_was_active) {
-            /* Just a click inside selection - check if Shift was held */
-            GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
-            if (!(state & GDK_SHIFT_MASK)) {
-                /* Non-Shift click inside selection - place cursor there (clear selection) */
-                double start_x, start_y;
-                gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
-                size_t click_off;
-                editor_widget_get_offset_at_point(self, start_x, start_y, &click_off);
-                
-                self->cursor_offset = click_off;
-                self->selection_anchor = click_off;
-            }
-            /* If Shift was held, on_click_pressed already handled the selection correctly */
+        self->is_dragging_selection = FALSE;
+        /* Finalize drag drop? handled in drag_drop signal usually? 
+           Local DnD is simulated here. */
+        if (self->is_dnd_active && self->drag_drop_offset != (size_t)-1) {
+            /* Perform move/copy */
+            editor_widget_drag_drop_finish(self, self->drag_drop_offset);
         }
-
-        /* Cleanup DnD state */
+        self->is_dnd_active = FALSE;
         if (self->drag_ghost_layout) {
             g_object_unref(self->drag_ghost_layout);
             self->drag_ghost_layout = NULL;
         }
-        self->is_dragging_selection = FALSE;
-        self->is_dnd_active = FALSE;
-        self->drag_drop_offset = (size_t)-1;
         gtk_widget_queue_draw(GTK_WIDGET(self));
     }
+    
+    stop_autoscroll(self);
+    editor_widget_update_adjustments(self, -1, -1);
 }
 
 static size_t
@@ -1842,15 +2024,15 @@ editor_widget_copy(EditorWidget *self)
 static void
 editor_widget_cut(EditorWidget *self)
 {
-    if (self->cursor_offset == self->selection_anchor) return;
+    if (!self->doc) return;
     
-    document_begin_undo_group(self->doc);
+    /* Copy selection then delete it */
     editor_widget_copy(self);
-    editor_widget_delete_selection(self);
-    document_end_undo_group(self->doc);
-    
-    editor_widget_update_adjustments(self);
-    gtk_widget_queue_draw(GTK_WIDGET(self));
+    if (editor_widget_delete_selection(self)) {
+        editor_widget_reset_cursor_blink(self);
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        editor_widget_update_adjustments(self, -1, -1);
+    }
 }
 
 static void
@@ -1859,24 +2041,27 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
     EditorWidget *self = EDITOR_WIDGET(user_data);
     GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
-    
-    if (text) {
+    size_t len = strlen(text);
+    if (len > 0) {
         document_begin_undo_group(self->doc);
+        /* If we have a selection, delete it first */
         editor_widget_delete_selection(self);
         
-        size_t len = strlen(text);
         document_insert(self->doc, self->cursor_offset, text, len);
-        self->cursor_offset += len;
-        self->selection_anchor = self->cursor_offset;
+        
+        /* Move cursor to end of inserted text */
+        size_t new_off = self->cursor_offset + len;
+        self->cursor_offset = new_off;
+        self->selection_anchor = new_off;
         
         document_end_undo_group(self->doc);
         
         editor_widget_reset_cursor_blink(self);
-        editor_widget_update_adjustments(self);
+        editor_widget_update_adjustments(self, -1, -1);
         scroll_to_cursor(self);
         gtk_widget_queue_draw(GTK_WIDGET(self));
-        g_free(text);
     }
+    g_free(text);
 }
 
 static void
@@ -1894,23 +2079,28 @@ on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer us
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
     
     if (text) {
-        document_begin_undo_group(self->doc);
-        /* Middle click paste doesn't usually overwrite selection, it just inserts at click */
-        /* But user said "it should overwrite selection" for copy/paste support. */
-        /* Usually this means Ctrl+V overwrites. Middle click might be different, but let's follow the instruction literally. */
-        editor_widget_delete_selection(self);
-        
         size_t len = strlen(text);
-        document_insert(self->doc, self->cursor_offset, text, len);
-        self->cursor_offset += len;
-        self->selection_anchor = self->cursor_offset;
-        
-        document_end_undo_group(self->doc);
-        
-        editor_widget_reset_cursor_blink(self);
-        editor_widget_update_adjustments(self);
-        scroll_to_cursor(self);
-        gtk_widget_queue_draw(GTK_WIDGET(self));
+        if (len > 0) {
+            /* Simple insert at cursor (or should it respect primary selection rules? Standard is insert at click? 
+               But this is usually called by middle click logic which sets cursor first) */
+            
+            /* Wait, middle click sets cursor_offset in on_click_pressed. 
+               So we insert at cursor_offset. */
+               
+            document_begin_undo_group(self->doc);
+            document_insert(self->doc, self->cursor_offset, text, len);
+            
+            /* Advance cursor */
+            self->cursor_offset += len;
+            self->selection_anchor = self->cursor_offset;
+            
+            document_end_undo_group(self->doc);
+            
+            editor_widget_reset_cursor_blink(self);
+            editor_widget_update_adjustments(self, -1, -1);
+            scroll_to_cursor(self);
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+        }
         g_free(text);
     }
 }
@@ -2050,96 +2240,21 @@ scroll_to_cursor(EditorWidget *self)
     if (!self->vadjustment || !self->doc) return;
     
     size_t cursor_line = document_get_line_of_offset(self->doc, self->cursor_offset);
-    double scroll_y = gtk_adjustment_get_value(self->vadjustment);
-    double page = gtk_adjustment_get_page_size(self->vadjustment);
-    
-    /* Current view state */
-    size_t start_line = (size_t)(scroll_y / self->line_height);
-    
-    /* Optimization: If cursor is extremely far (>200 lines), just jump blindly first */
-    if ((cursor_line > start_line && cursor_line - start_line > 200) ||
-        (start_line > cursor_line && start_line - cursor_line > 200)) {
-         double jump = (double)cursor_line * self->line_height - (page / 2.0 / self->line_height * self->line_height); // approx center
-         if (jump < 0) jump = 0;
-         gtk_adjustment_set_value(self->vadjustment, jump);
-         /* Recalculate context after jump */
-         scroll_y = jump;
-         start_line = (size_t)(scroll_y / self->line_height);
-    }
+    double cursor_line_y;
 
-    double partial_logical = fmod(scroll_y, self->line_height);
-    
-    /* Calculate Y position of cursor line relative to viewport top */
-    double current_y = 0;
-    
-    char *text; size_t len;
-    
-    /* Initial partial offset */
-    if (start_line < document_get_line_count(self->doc)) {
-         PangoLayout *layout = create_pango_layout_for_line(self, start_line, &text, &len);
-         if (layout) {
-             int h; pango_layout_get_pixel_size(layout, NULL, &h);
-             double line_h = (double)h;
-             if (line_h < self->line_height) line_h = self->line_height;
-             
-             double partial_pix = (partial_logical / self->line_height) * line_h;
-             current_y = -partial_pix; /* This is where the top of start_line is */
-             
-             g_object_unref(layout); g_free(text);
-         }
-    }
-    
-    /* Walk to cursor line */
-    double cursor_line_top_y = 0;
-    gboolean found = FALSE;
-    
-    if (cursor_line >= start_line) {
-        /* Cursor is below or at start */
-        size_t iter = start_line;
-        while (iter <= cursor_line) {
-            if (iter == cursor_line) {
-                cursor_line_top_y = current_y;
-                found = TRUE;
-                break;
-            }
-            
-            /* If we have exceeded page height significantly, we can stop early? 
-               No, we need to know exact Y to calculate delta. 
-               But if it's way off, we fallback to jump. We handled massive diffs above. 
-            */
-            
-            PangoLayout *layout = create_pango_layout_for_line(self, iter, &text, &len);
-            if (!layout) break;
-            int h; pango_layout_get_pixel_size(layout, NULL, &h);
-            double line_h = (double)h;
-            if (line_h < self->line_height) line_h = self->line_height;
-            g_object_unref(layout); g_free(text);
-            
-            current_y += line_h;
-            iter++;
-        }
+    /* Get Y of cursor line */
+    if (self->line_y_offsets && self->line_y_offsets->len > cursor_line) {
+        double *offsets = (double*)self->line_y_offsets->data;
+        cursor_line_y = offsets[cursor_line];
     } else {
-        /* Cursor is above start */
-        size_t iter = start_line;
-        /* current_y is top of start_line */
-        while (iter > cursor_line) {
-            iter--;
-            PangoLayout *layout = create_pango_layout_for_line(self, iter, &text, &len);
-            if (!layout) break;
-            int h; pango_layout_get_pixel_size(layout, NULL, &h);
-            double line_h = (double)h;
-            if (line_h < self->line_height) line_h = self->line_height;
-            g_object_unref(layout); g_free(text);
-            
-            current_y -= line_h; 
-        }
-         cursor_line_top_y = current_y;
-         found = TRUE;
+        /* Fallback: use average visual line height */
+        double multiplier = (self->wrap_lines) ? self->avg_visual_lines : 1.0;
+        if (multiplier < 1.0) multiplier = 1.0;
+        cursor_line_y = (double)cursor_line * multiplier * self->line_height;
     }
     
-    if (!found) return; /* Should not happen unless doc changed under feet */
-    
-    /* Now get local info */
+    /* Calculate precise local Y of cursor within the line */
+    char *text; size_t len;
     PangoLayout *layout = create_pango_layout_for_line(self, cursor_line, &text, &len);
     if (!layout) return;
     
@@ -2154,40 +2269,26 @@ scroll_to_cursor(EditorWidget *self)
     
     g_object_unref(layout); g_free(text);
     
-    /* Absolute Y in viewport */
-    double abs_top = cursor_line_top_y + local_y;
+    /* Absolute Y in document space */
+    double abs_top = cursor_line_y + local_y;
     double abs_bottom = abs_top + cursor_h;
     
-    /* Visibility check with margins */
+    double scroll_y = gtk_adjustment_get_value(self->vadjustment);
+    double page = gtk_adjustment_get_page_size(self->vadjustment);
+    
     double top_margin = self->padding_top; 
-    double bottom_margin = page - self->padding_top; /* Maybe leave small gap for status bar? */
+    double bottom_margin = page - self->padding_top; 
     
-    if (abs_top < top_margin) {
-        /* Scroll UP */
-        double px_needed = abs_top - top_margin; /* Negative value */
-        double delta_logic = calculate_scroll_delta_for_pixels(self, scroll_y, px_needed);
-        gtk_adjustment_set_value(self->vadjustment, scroll_y + delta_logic);
-        
-    } else if (abs_bottom > bottom_margin) {
-        /* Scroll DOWN */
-        double px_needed = abs_bottom - bottom_margin; /* Positive value */
-        double delta_logic = calculate_scroll_delta_for_pixels(self, scroll_y, px_needed);
-        gtk_adjustment_set_value(self->vadjustment, scroll_y + delta_logic);
-    }
+    /* Calculate visible viewport Y range */
+    double viewport_top = scroll_y + top_margin;
+    double viewport_bottom = scroll_y + bottom_margin;
     
-    /* Capture the max scroll value when cursor is at last line */
-    if (cursor_line == document_get_line_count(self->doc) - 1) {
-        double current_scroll = gtk_adjustment_get_value(self->vadjustment);
-        double needed_upper = current_scroll + page;
-        
-        
-        /* Update cached upper if this is larger (accounts for word wrap) */
-        if (needed_upper > self->cached_scroll_upper) {
-            self->cached_scroll_upper = needed_upper;
-
-            /* Immediately update the adjustment with new upper */
-            editor_widget_update_adjustments(self);
-        }
+    if (abs_top < viewport_top) {
+        /* Scroll UP to make abs_top visible */
+        gtk_adjustment_set_value(self->vadjustment, abs_top - top_margin);
+    } else if (abs_bottom > viewport_bottom) {
+        /* Scroll DOWN to make abs_bottom visible */
+        gtk_adjustment_set_value(self->vadjustment, abs_bottom - bottom_margin);
     }
     
     editor_widget_update_im_cursor_location(self);
@@ -3050,7 +3151,7 @@ on_key_pressed(GtkEventControllerKey *controller,
             
             self->selection_anchor = self->cursor_offset;
             editor_widget_reset_cursor_blink(self);
-            editor_widget_update_adjustments(self);
+            editor_widget_update_adjustments(self, -1, -1);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
@@ -3102,7 +3203,7 @@ on_key_pressed(GtkEventControllerKey *controller,
             }
             
             editor_widget_reset_cursor_blink(self);
-            editor_widget_update_adjustments(self);
+            editor_widget_update_adjustments(self, -1, -1);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
@@ -3110,7 +3211,7 @@ on_key_pressed(GtkEventControllerKey *controller,
         case GDK_KEY_BackSpace:
             if (editor_widget_delete_selection(self)) {
                 editor_widget_reset_cursor_blink(self);
-                editor_widget_update_adjustments(self);
+                editor_widget_update_adjustments(self, -1, -1);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             } else if (self->cursor_offset > 0) {
                 size_t prev = utf8_prev_grapheme(self, self->cursor_offset);
@@ -3119,14 +3220,14 @@ on_key_pressed(GtkEventControllerKey *controller,
                 self->cursor_offset = prev;
                 self->selection_anchor = self->cursor_offset;
                 editor_widget_reset_cursor_blink(self);
-                editor_widget_update_adjustments(self);
+                editor_widget_update_adjustments(self, -1, -1);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             }
             break;
         case GDK_KEY_Delete:
             if (editor_widget_delete_selection(self)) {
                 editor_widget_reset_cursor_blink(self);
-                editor_widget_update_adjustments(self);
+                editor_widget_update_adjustments(self, -1, -1);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             } else if (self->cursor_offset < document_get_length(self->doc)) {
                 size_t next = utf8_next_grapheme(self, self->cursor_offset);
@@ -3134,7 +3235,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                 document_delete(self->doc, self->cursor_offset, bytes_to_delete);
                 self->selection_anchor = self->cursor_offset;
                 editor_widget_reset_cursor_blink(self);
-                editor_widget_update_adjustments(self);
+                editor_widget_update_adjustments(self, -1, -1);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             }
             break;
@@ -3242,7 +3343,7 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
     
     editor_widget_update_im_cursor_location(self);
     editor_widget_reset_cursor_blink(self);  /* Keep cursor visible while typing */
-    editor_widget_update_adjustments(self);
+    editor_widget_update_adjustments(self, -1, -1);
     scroll_to_cursor(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
@@ -3384,6 +3485,11 @@ editor_widget_dispose(GObject *object)
     if (self->im_context) g_object_unref(self->im_context);
     if (self->syntax_ctx) syntax_context_free(self->syntax_ctx);
     if (self->font_name) g_free(self->font_name);
+    if (self->line_y_offsets) g_array_free(self->line_y_offsets, TRUE);
+    if (self->idle_resize_id) {
+        g_source_remove(self->idle_resize_id);
+        self->idle_resize_id = 0;
+    }
     
     G_OBJECT_CLASS(editor_widget_parent_class)->dispose(object);
 }
@@ -3393,6 +3499,8 @@ editor_widget_init(EditorWidget *self)
 {
     self->font_desc = pango_font_description_from_string("Monospace 12");
     self->font_name = g_strdup("Monospace 12");
+    
+    self->line_y_offsets = g_array_new(FALSE, FALSE, sizeof(double));
     
     /* Initialize cursor blink animation */
     self->cursor_alpha = 1.0;
@@ -3481,7 +3589,8 @@ editor_widget_set_property (GObject      *object,
             self->vadjustment = g_value_dup_object(value);
             if (self->vadjustment) {
                  g_signal_connect_swapped(self->vadjustment, "value-changed", G_CALLBACK(gtk_widget_queue_draw), self);
-                 editor_widget_update_adjustments(self);
+                 /* Update adjustments (with current size) */
+    editor_widget_update_adjustments(self, -1, -1);
             }
             break;
         case PROP_HSCROLL_POLICY:
@@ -3695,7 +3804,11 @@ editor_widget_set_document(EditorWidget *self, Document *doc)
     self->doc = doc;
     self->cursor_offset = 0;
     self->selection_anchor = 0;
-    editor_widget_update_adjustments(self);
+    
+    /* Removed large file auto-disable. Relying on efficient O(N) linear scan now. */
+    
+    /* Update adjustments (with current size) */
+    editor_widget_update_adjustments(self, -1, -1);
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 

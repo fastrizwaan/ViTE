@@ -55,6 +55,8 @@ size_t piece_table_get_offset_of_line(PieceTable *pt, size_t line_index);
    Getting a "line" pointer is hard because a line might be fragmented across pieces.
    We will return a freshly allocated string for the line. */
 char *piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len);
+size_t piece_table_get_line_length(PieceTable *pt, size_t line_index);
+void piece_table_foreach_line(PieceTable *pt, void (*func)(size_t line_len, void *user_data), void *user_data);
 
 /* New: Get line info without allocating if possible? 
    No, since we need to concatenate pieces. 

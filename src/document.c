@@ -29,6 +29,20 @@ document_get_line(Document *doc, size_t line_index, size_t *len)
 }
 
 size_t
+document_get_line_length(Document *doc, size_t line_index)
+{
+    if (!doc) return 0;
+    return piece_table_get_line_length(doc->pt, line_index);
+}
+
+void
+document_foreach_line(Document *doc, void (*func)(size_t line_len, void *user_data), void *user_data)
+{
+    if (!doc) return;
+    piece_table_foreach_line(doc->pt, func, user_data);
+}
+
+size_t
 document_get_line_count(Document *doc)
 {
     return piece_table_get_line_count(doc->pt);
