@@ -3,6 +3,7 @@
 struct _Document {
     PieceTable *pt;
     UndoStack *undo_stack;
+    char *file_path;
 };
 
 Document *
@@ -11,6 +12,7 @@ document_new(const char *filename)
     Document *doc = malloc(sizeof(Document));
     doc->pt = piece_table_new(filename);
     doc->undo_stack = undo_stack_new();
+    doc->file_path = filename ? g_strdup(filename) : NULL;
     return doc;
 }
 
@@ -19,7 +21,14 @@ document_free(Document *doc)
 {
     piece_table_free(doc->pt);
     undo_stack_free(doc->undo_stack);
+    g_free(doc->file_path);
     free(doc);
+}
+
+const char *
+document_get_file_path(Document *doc)
+{
+    return doc->file_path;
 }
 
 char *
