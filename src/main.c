@@ -55,6 +55,9 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
     if (page) {
         gtk_stack_set_visible_child(main_stack, page);
         vite_tab_bar_set_active_tab(main_tab_bar, tab);
+        
+        GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
+        if (editor) gtk_widget_grab_focus(editor);
     }
 }
 
@@ -202,6 +205,7 @@ create_new_tab (GtkApplication *app, const char *title, Document *doc)
     vite_tab_bar_set_active_tab(main_tab_bar, VITE_TAB(tab));
     
     gtk_stack_set_visible_child(main_stack, scrolled);
+    gtk_widget_grab_focus(editor);
 }
 
 static void
