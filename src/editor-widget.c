@@ -106,6 +106,9 @@ struct _EditorWidget {
     
     /* Statistical Scroll for Large Files */
     double avg_visual_lines;
+    
+    /* System font monitoring */
+    GSettings *interface_settings;
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
@@ -507,21 +510,54 @@ word_prev(EditorWidget *self, size_t offset)
     }
     return offset;
 }
+/* Callback for system font changes from GNOME settings */
+static void
+on_system_font_changed(GSettings *settings, const char *key, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    if (!self->use_custom_font) {
+        /* Force update */
+        self->line_height = 0;
+        editor_widget_ensure_metrics(self);
+        gtk_widget_queue_resize(GTK_WIDGET(self));
+    }
+}
+
 static void
 editor_widget_ensure_metrics(EditorWidget *self)
 {
     if (self->line_height > 0) return;
 
-    /* Force re-eval if line_height check is used for caching, 
-       but simplified here we might want to check dirty flags. 
-       For now, let's just re-apply font. */
-       
     PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
     
-    if (self->use_custom_font && self->font_name) {
-        if (self->font_desc) pango_font_description_free(self->font_desc);
-        self->font_desc = pango_font_description_from_string(self->font_name);
+    /* Free existing font description */
+    if (self->font_desc) {
+        pango_font_description_free(self->font_desc);
+        self->font_desc = NULL;
     }
+    
+    if (self->use_custom_font) {
+        /* Use custom font, default to Monospace 11 if name is NULL */
+        const char *name = self->font_name ? self->font_name : "Monospace 11";
+        self->font_desc = pango_font_description_from_string(name);
+    } else {
+        /* Use system monospace font from GNOME settings */
+        if (self->interface_settings) {
+            char *sys_font = g_settings_get_string(self->interface_settings, "monospace-font-name");
+            if (sys_font && *sys_font) {
+                self->font_desc = pango_font_description_from_string(sys_font);
+                g_free(sys_font);
+            } else {
+                g_free(sys_font);
+                self->font_desc = pango_font_description_from_string("Monospace 11");
+            }
+        } else {
+            self->font_desc = pango_font_description_from_string("Monospace 11");
+        }
+    }
+    
+    /* Set font on context for measurements */
+    pango_context_set_font_description(context, self->font_desc);
     
     PangoFontMetrics *metrics = pango_context_get_metrics(context, self->font_desc, pango_context_get_language(context));
     int ascent = pango_font_metrics_get_ascent(metrics);
@@ -3546,7 +3582,10 @@ editor_widget_dispose(GObject *object)
     
     if (self->hadjustment) g_clear_object(&self->hadjustment);
     if (self->vadjustment) g_clear_object(&self->vadjustment);
-    if (self->font_desc) pango_font_description_free(self->font_desc);
+    if (self->font_desc) {
+        pango_font_description_free(self->font_desc);
+        self->font_desc = NULL;
+    }
     if (self->im_context) g_object_unref(self->im_context);
     if (self->syntax_ctx) syntax_context_free(self->syntax_ctx);
     if (self->font_name) g_free(self->font_name);
@@ -3556,14 +3595,29 @@ editor_widget_dispose(GObject *object)
         self->idle_resize_id = 0;
     }
     
+    /* Disconnect GSettings signal and cleanup */
+    if (self->interface_settings) {
+        g_signal_handlers_disconnect_by_func(self->interface_settings, on_system_font_changed, self);
+        g_clear_object(&self->interface_settings);
+    }
+    
     G_OBJECT_CLASS(editor_widget_parent_class)->dispose(object);
 }
 
 static void
 editor_widget_init(EditorWidget *self)
 {
-    self->font_desc = pango_font_description_from_string("Monospace 12");
-    self->font_name = g_strdup("Monospace 12");
+    /* Initialize custom font name to default (used when custom font is enabled) */
+    self->font_name = g_strdup("Monospace 11");
+    self->use_custom_font = FALSE;
+    
+    /* Monitor system font changes from GNOME settings */
+    self->interface_settings = g_settings_new("org.gnome.desktop.interface");
+    g_signal_connect(self->interface_settings, "changed::monospace-font-name", 
+                     G_CALLBACK(on_system_font_changed), self);
+    
+    /* Initialize font_desc to NULL; ensure_metrics will set it based on use_custom_font */
+    self->font_desc = NULL;
     
     self->line_y_offsets = g_array_new(FALSE, FALSE, sizeof(double));
     
@@ -3597,7 +3651,6 @@ editor_widget_init(EditorWidget *self)
     self->indent_style = 0; /* Space */
     self->tab_width = 4;
     self->indent_width = 4;
-    self->use_custom_font = FALSE;
     
     GtkEventController *controller = gtk_event_controller_key_new();
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
