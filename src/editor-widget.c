@@ -1247,11 +1247,13 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         double multiplier = (self->wrap_lines) ? self->avg_visual_lines : 1.0;
         if (multiplier < 1.0) multiplier = 1.0;
         start_line = (size_t)(scroll_y / (self->line_height * multiplier));
-        /* partial_y calculation removed - we calculate it per-line in loop */
+        
+        /* Calculate partial_y for statistical mode as well */
+        partial_y = fmod(scroll_y, self->line_height);
     }
 
     /* 2. Scan forward visually to find the line at 'y' */
-    double current_y = 0; /* Will be adjusted by start-line offset inside loop */
+    double current_y = -partial_y; /* Start with calculated offset, matching snapshot logic */
     double click_y = y - self->padding_top; /* Adjust for padding in click space */
     size_t max_lines = document_get_line_count(self->doc);
     PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
@@ -1290,13 +1292,6 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         pango_layout_get_pixel_size(layout, NULL, &h);
         double line_h = (double)h;
         if (line_h < self->line_height) line_h = self->line_height;
-        
-        /* Apply start offset if first line (Matching snapshot logic) */
-        if (line_idx == start_line) {
-             double fraction = fmod(scroll_y, self->line_height) / self->line_height;
-             double pixel_offset = fraction * line_h;
-             current_y -= pixel_offset;
-        }
         
         /* Check if click falls within this line */
         if (click_y >= current_y && click_y < current_y + line_h) {
