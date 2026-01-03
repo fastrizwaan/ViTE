@@ -90,6 +90,12 @@ struct _EditorWidget {
     double smooth_scroll_start;
     gint64 smooth_scroll_start_time;
     guint smooth_scroll_tick_id;
+    
+    /* Cached scroll upper bound (recalculated only when dimensions change) */
+    double cached_scroll_upper;
+    int cached_width;
+    int cached_height;
+    size_t cached_line_count;
 };
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
@@ -177,18 +183,8 @@ editor_widget_update_adjustments(EditorWidget *self)
     size_t total_lines = document_get_line_count(self->doc);
     int widget_height = gtk_widget_get_height(GTK_WIDGET(self));
     
-    /* Pixel-based scrolling: upper = total content height in pixels */
-    /* Ensure we can scroll enough to see the last line at the bottom.
-       The max scroll value is (upper - page_size).
-       We want max_scroll to be at least (total_height - viewport_height) + padding? 
-       Actually, if we want the last line to be fully visible at the bottom:
-       Total content height = lines * line_height.
-       We should be able to scroll to: content_height - viewport_height + padding.
-       So upper = content_height + padding. 
-       If content_height < viewport_height, upper = viewport_height.
-    */
-    /* Fix: Add extra buffer (5 lines) to allow comfortable scrolling past the end */
-    double content_height = (double)total_lines * self->line_height + self->padding_top * 2 + (self->line_height * 5); 
+    /* Simple calculation: total_lines * line_height */
+    double content_height = (double)total_lines * self->line_height + self->padding_top * 2;
     double upper = MAX(content_height, widget_height);
 
     gtk_adjustment_configure(self->vadjustment,
@@ -479,9 +475,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     if (self->vadjustment)
         scroll_y = gtk_adjustment_get_value(self->vadjustment);
 
-    /* Calculate first visible line and sub-line pixel offset */
+    /* Simple fast calculation for start_line */
     size_t start_line = (size_t)(scroll_y / self->line_height);
-    double partial_y = fmod(scroll_y, self->line_height); /* Pixel offset within first line */
+    double partial_y = fmod(scroll_y, self->line_height);
     
     size_t count_lines = (size_t)(height / self->line_height) + 2;
     size_t max_lines = document_get_line_count(self->doc);
@@ -2177,6 +2173,21 @@ scroll_to_cursor(EditorWidget *self)
         double px_needed = abs_bottom - bottom_margin; /* Positive value */
         double delta_logic = calculate_scroll_delta_for_pixels(self, scroll_y, px_needed);
         gtk_adjustment_set_value(self->vadjustment, scroll_y + delta_logic);
+    }
+    
+    /* Capture the max scroll value when cursor is at last line */
+    if (cursor_line == document_get_line_count(self->doc) - 1) {
+        double current_scroll = gtk_adjustment_get_value(self->vadjustment);
+        double needed_upper = current_scroll + page;
+        
+        
+        /* Update cached upper if this is larger (accounts for word wrap) */
+        if (needed_upper > self->cached_scroll_upper) {
+            self->cached_scroll_upper = needed_upper;
+
+            /* Immediately update the adjustment with new upper */
+            editor_widget_update_adjustments(self);
+        }
     }
     
     editor_widget_update_im_cursor_location(self);
