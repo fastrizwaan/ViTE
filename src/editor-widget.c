@@ -1977,6 +1977,11 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
         if (self->is_dnd_active && self->drag_drop_offset != (size_t)-1) {
             /* Perform move/copy */
             editor_widget_drag_drop_finish(self, self->drag_drop_offset);
+        } else if (!self->is_dnd_active) {
+            /* Clicked inside selection without dragging -> Clear selection */
+            self->cursor_offset = self->drag_start_offset;
+            self->selection_anchor = self->drag_start_offset;
+            self->alt_word_mode = FALSE;
         }
         self->is_dnd_active = FALSE;
         if (self->drag_ghost_layout) {
