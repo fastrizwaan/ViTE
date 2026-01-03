@@ -137,7 +137,12 @@ on_drag_prepare (GtkDragSource *source, double x, double y, ViteTab *self)
        This passes the object pointer. */
     return gdk_content_provider_new_typed(VITE_TYPE_TAB, self);
 }
-
+void
+vite_tab_set_tab_bar (ViteTab *self, gpointer tab_bar)
+{
+    /* Store tab bar reference if needed, or just use it for dnd/signals */
+    g_object_set_data(G_OBJECT(self), "tab-bar", tab_bar);
+}
 
 static void
 on_drag_begin (GtkDragSource *source, GdkDrag *drag, ViteTab *self)

@@ -19,8 +19,9 @@ G_DEFINE_TYPE(ViteTabBar, vite_tab_bar, GTK_TYPE_BOX)
 
 static const char *TAB_BAR_CSS = 
 ".chrome-tab-bar-container {"
-"    margin-top: -3px;"
+"    margin-top: 1px;"
 "    padding: 0;"
+"    margin-bottom: 0px;"
 "}"
 ".chrome-tab-bar {"
 "    padding-left: 6px;"
@@ -244,8 +245,8 @@ vite_tab_bar_init (ViteTabBar *self)
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(self->flowbox), GTK_SELECTION_NONE);
     gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(self->flowbox), 1);
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(self->flowbox), 1000);
-    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(self->flowbox), 1);
-    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(self->flowbox), 1);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(self->flowbox), 3);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(self->flowbox), 3);
     gtk_widget_set_hexpand(self->flowbox, TRUE);
     gtk_box_append(GTK_BOX(self), self->flowbox);
     
@@ -286,30 +287,35 @@ vite_tab_bar_new (void)
 void
 vite_tab_bar_add_tab (ViteTabBar *self, ViteTab *tab)
 {
+    vite_tab_set_tab_bar(tab, self);
     gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), -1);
     self->tabs = g_list_append(self->tabs, tab);
     update_tab_sizes(self, -1);
+    
+    update_separators(self);
+    
+    gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
 }
-
-/* ... */
 
 void
 vite_tab_bar_remove_tab (ViteTabBar *self, ViteTab *tab)
 {
     if (!G_IS_OBJECT(tab)) return;
-    if (!g_list_find(self->tabs, tab)) {
-        g_print("Tab not found in list\n");
-        return;
-    }
+    GList *l = g_list_find(self->tabs, tab);
+    if (!l) return;
     
-    self->tabs = g_list_remove(self->tabs, tab);
+    self->tabs = g_list_delete_link(self->tabs, l);
     
-    g_object_ref(tab);
     gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab));
-    g_object_unref(tab);
     
-    update_tab_sizes(self, -1);
+    update_separators(self);
+    
+    gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
 }
+
+/* ... */
+
+
 
 void
 vite_tab_bar_set_active_tab (ViteTabBar *self, ViteTab *tab)
