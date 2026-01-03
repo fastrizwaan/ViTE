@@ -9,6 +9,7 @@ typedef struct _Document Document;
 
 Document *document_new(const char *filename);
 void document_free(Document *doc);
+const char *document_get_file_path(Document *doc);
 
 /* Content Access */
 char *document_get_line(Document *doc, size_t line_index, size_t *len);

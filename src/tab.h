@@ -1,0 +1,17 @@
+#pragma once
+
+#include <gtk/gtk.h>
+#include <adwaita.h>
+
+G_BEGIN_DECLS
+
+#define VITE_TYPE_TAB (vite_tab_get_type())
+G_DECLARE_FINAL_TYPE(ViteTab, vite_tab, VITE, TAB, GtkBox)
+
+GtkWidget *vite_tab_new(const char *title);
+const char *vite_tab_get_title(ViteTab *self);
+void vite_tab_set_title(ViteTab *self, const char *title);
+void vite_tab_set_active (ViteTab *self, gboolean active);
+void vite_tab_set_separator_visible (ViteTab *self, gboolean visible);
+
+G_END_DECLS
