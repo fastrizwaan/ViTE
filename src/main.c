@@ -118,7 +118,7 @@ load_css(void)
     "    background: none;"
     "    border: none;"
     "    box-shadow: none;"
-    "    margin-bottom: 0;"
+    "    margin-bottom: -4px;"
     "    padding-top: 0px;"
     "    padding-bottom: 0px;"
     "    min-height: 0px;"
