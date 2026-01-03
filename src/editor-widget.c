@@ -1811,7 +1811,6 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
             double scroll_delta = (offset_y / track) * scroll_max;
             
             double target_scroll = self->map_drag_start_scroll + scroll_delta;
-            /* Ensure we don't snap to integers */
             target_scroll = CLAMP(target_scroll, 0, upper - page);
             
             gtk_adjustment_set_value(self->vadjustment, target_scroll);
@@ -1941,10 +1940,44 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     
     if (self->dragging_map) {
         self->dragging_map = FALSE;
-        /* Trigger smooth scroll if it was just a click (no significant drag) is handled in on_click_released/pressed? No. */
-        /* If we stored a click Y but didn't drag much, maybe animate? 
-           Actually click logic is in on_click_pressed. 
-           If we dragged map, we are done. */
+        
+        /* Check if it was a click (minimal movement) not a drag */
+        double drag_distance = sqrt(offset_x * offset_x + offset_y * offset_y);
+        if (drag_distance < 5 && self->map_click_y >= 0 && self->vadjustment && self->doc) {
+            /* This was a click, do smooth scroll */
+            double height = gtk_widget_get_height(GTK_WIDGET(self));
+            double upper = gtk_adjustment_get_upper(self->vadjustment);
+            double page = gtk_adjustment_get_page_size(self->vadjustment);
+            
+            double map_scale = 0.15;
+            double total_h = self->line_height * document_get_line_count(self->doc);
+            double map_total_h = total_h * map_scale;
+            
+            double map_scroll_y = 0;
+            if (map_total_h > height) {
+                double scroll_max = total_h - height;
+                if (scroll_max <= 0) scroll_max = 1;
+                double current_scroll_y = gtk_adjustment_get_value(self->vadjustment);
+                double map_scroll_max = map_total_h - height;
+                map_scroll_y = (current_scroll_y / scroll_max) * map_scroll_max;
+            }
+            
+            double click_line = (self->map_click_y + map_scroll_y) / (self->line_height * map_scale);
+            double target_scroll = (click_line * self->line_height) - (page / 2);
+            target_scroll = CLAMP(target_scroll, 0, upper - page);
+            
+            /* Start smooth scroll animation */
+            self->smooth_scroll_start = gtk_adjustment_get_value(self->vadjustment);
+            self->smooth_scroll_target = target_scroll;
+            self->smooth_scroll_start_time = g_get_monotonic_time();
+            self->smooth_scroll_active = TRUE;
+            
+            if (self->smooth_scroll_tick_id == 0) {
+                self->smooth_scroll_tick_id = gtk_widget_add_tick_callback(
+                    GTK_WIDGET(self), smooth_scroll_tick, self, NULL);
+            }
+        }
+        self->map_click_y = -1;
         return;
     }
     self->map_click_y = -1; /* Reset for non-map drags */
