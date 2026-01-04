@@ -359,6 +359,12 @@ vite_tab_set_title (ViteTab *self, const char *title)
     gtk_label_set_text(GTK_LABEL(self->label), title);
 }
 
+gboolean
+vite_tab_is_active (ViteTab *self)
+{
+    return self->is_active;
+}
+
 void
 vite_tab_set_active (ViteTab *self, gboolean active)
 {

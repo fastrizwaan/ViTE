@@ -331,12 +331,23 @@ vite_tab_bar_remove_tab (ViteTabBar *self, ViteTab *tab)
     GList *l = g_list_find(self->tabs, tab);
     if (!l) return;
     
-    self->tabs = g_list_delete_link(self->tabs, l);
+    gboolean was_active = vite_tab_is_active(tab);
+    GList *sibling = NULL;
     
+    if (was_active) {
+        if (l->next) sibling = l->next;
+        else if (l->prev) sibling = l->prev;
+    }
+    
+    self->tabs = g_list_delete_link(self->tabs, l);
     gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab));
     
-    update_separators(self);
+    if (was_active && sibling) {
+        ViteTab *next_tab = VITE_TAB(sibling->data);
+        g_signal_emit_by_name(next_tab, "clicked");
+    }
     
+    update_separators(self);
     gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
 }
 
@@ -363,5 +374,12 @@ vite_tab_bar_get_n_tabs (ViteTabBar *self)
 ViteTab *
 vite_tab_bar_get_active_tab (ViteTabBar *self)
 {
+    GList *l;
+    for (l = self->tabs; l != NULL; l = l->next) {
+        ViteTab *t = VITE_TAB(l->data);
+        if (vite_tab_is_active(t)) {
+            return t;
+        }
+    }
     return NULL;
 }
