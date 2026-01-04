@@ -118,6 +118,16 @@ static const char *TAB_CSS =
 "    background-color: alpha(@window_fg_color, 0.3);"
 "    margin-top: 4px;"
 "    margin-bottom: 4px;"
+"}"
+".chrome-tab-separator.drop-target {"
+"    min-width: 4px;"
+"    background: linear-gradient(to bottom, transparent, #3584e4 20%, #3584e4 80%, transparent);"
+"    margin-top: 0px;"
+"    margin-bottom: 0px;"
+"}"
+".chrome-tab.drop-target-end {"
+"    border-right: 4px solid #3584e4;"
+"    border-radius: 0 8px 8px 0;"
 "}";
 
 
@@ -369,5 +379,19 @@ vite_tab_set_separator_visible (ViteTab *self, gboolean visible)
     if (self->separator) {
         gtk_widget_set_visible(self->separator, visible);
         gtk_widget_set_opacity(self->separator, visible ? 1.0 : 0.0);
+    }
+}
+
+void
+vite_tab_set_separator_drop_target (ViteTab *self, gboolean is_target)
+{
+    if (self->separator) {
+        if (is_target) {
+            gtk_widget_add_css_class(self->separator, "drop-target");
+            gtk_widget_set_visible(self->separator, TRUE);
+            gtk_widget_set_opacity(self->separator, 1.0);
+        } else {
+            gtk_widget_remove_css_class(self->separator, "drop-target");
+        }
     }
 }

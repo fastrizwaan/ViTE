@@ -3,12 +3,10 @@
 struct _ViteTabBar {
     GtkBox parent_instance;
     GtkWidget *flowbox;
-    /* No internal new_tab_button (moved to header) */
     
     GList *tabs;
     
     GtkDropTarget *drop_target;
-    GtkWidget *drop_indicator;
     int drop_indicator_position;
     
     int last_allocated_width;
@@ -43,7 +41,17 @@ static const char *TAB_BAR_CSS =
 "    min-height: 24px;"
 "    border-radius: 2px;"
 "    margin: 0;"
+"}"
+".end-drop-zone {"
+"    min-width: 4px;"
+"    min-height: 28px;"
+"    background: linear-gradient(to bottom, transparent, #3584e4 20%, #3584e4 80%, transparent);"
+"    border-radius: 2px;"
+"    margin-left: 0px;"
+"    margin-right: 0px;"
 "}";
+
+
 
 
 static void
@@ -75,6 +83,8 @@ update_separators (ViteTabBar *self)
     idx = 0;
     for (GList *l = self->tabs; l != NULL; l = l->next) {
         ViteTab *t = VITE_TAB(l->data);
+        if (!GTK_IS_WIDGET(t)) { idx++; continue; }
+        
         gboolean visible = TRUE;
         
         if (idx % cols == 0) visible = FALSE;
@@ -113,6 +123,7 @@ update_tab_sizes (ViteTabBar *self, int allocated_width)
     
     for (GList *l = self->tabs; l != NULL; l = l->next) {
         GtkWidget *tab = GTK_WIDGET(l->data);
+        if (!GTK_IS_WIDGET(tab)) continue;
         gtk_widget_set_size_request(tab, final_tab_width, 32);
     }
     
@@ -162,32 +173,42 @@ calculate_drop_position (ViteTabBar *self, double x, double y)
     return g_list_length(self->tabs);
 }
 
+
 static void
-show_drop_indicator (ViteTabBar *self, int position)
+clear_drop_targets (ViteTabBar *self)
 {
-    if (position == self->drop_indicator_position) return;
-    self->drop_indicator_position = position;
-    
-    GtkWidget *parent = gtk_widget_get_parent(self->drop_indicator);
-    if (parent) {
-        gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), self->drop_indicator);
+    for (GList *l = self->tabs; l != NULL; l = l->next) {
+        ViteTab *t = VITE_TAB(l->data);
+        if (!GTK_IS_WIDGET(t)) continue;
+        vite_tab_set_separator_drop_target(t, FALSE);
+        gtk_widget_remove_css_class(GTK_WIDGET(t), "drop-target-end");
     }
-    
-    gtk_widget_set_visible(self->drop_indicator, TRUE);
-    
-    /* Indices in FlowBox == Tabs indices because only tabs are children. */
-    gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), self->drop_indicator, position);
+    self->drop_indicator_position = -1;
 }
 
 static void
-hide_drop_indicator (ViteTabBar *self)
+set_drop_target_at (ViteTabBar *self, int position)
 {
-    gtk_widget_set_visible(self->drop_indicator, FALSE);
-    GtkWidget *parent = gtk_widget_get_parent(self->drop_indicator);
-    if (parent) {
-        gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), self->drop_indicator);
+    if (position == self->drop_indicator_position) return;
+    
+    clear_drop_targets(self);
+    self->drop_indicator_position = position;
+    
+    int num_tabs = g_list_length(self->tabs);
+    
+    if (position >= num_tabs) {
+        /* Dropping at the end - highlight right edge of last tab */
+        ViteTab *last_tab = g_list_nth_data(self->tabs, num_tabs - 1);
+        if (last_tab && GTK_IS_WIDGET(last_tab)) {
+            gtk_widget_add_css_class(GTK_WIDGET(last_tab), "drop-target-end");
+        }
+    } else {
+        /* Highlight separator of the tab at the drop position */
+        ViteTab *target_tab = g_list_nth_data(self->tabs, position);
+        if (target_tab) {
+            vite_tab_set_separator_drop_target(target_tab, TRUE);
+        }
     }
-    self->drop_indicator_position = -1;
 }
 
 static GdkDragAction
@@ -197,35 +218,51 @@ on_drag_motion (GtkDropTarget *target, double x, double y, ViteTabBar *self)
     if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return 0;
     
     int pos = calculate_drop_position(self, x, y);
-    show_drop_indicator(self, pos);
+    set_drop_target_at(self, pos);
     return GDK_ACTION_MOVE;
 }
 
-static void on_drag_leave (GtkDropTarget *t, ViteTabBar *self) { hide_drop_indicator(self); }
+static void on_drag_leave (GtkDropTarget *t, ViteTabBar *self)
+{
+    clear_drop_targets(self);
+}
 
 static gboolean
 on_drag_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTabBar *self)
 {
-    hide_drop_indicator(self);
+    clear_drop_targets(self);
     if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return FALSE;
     
     ViteTab *tab = VITE_TAB(g_value_get_object(value));
-    if (!G_IS_OBJECT(tab)) return FALSE; /* Safety check */
+    if (!GTK_IS_WIDGET(tab)) return FALSE;
     
     int pos = calculate_drop_position(self, x, y);
-    
     int old_pos = g_list_index(self->tabs, tab);
-    g_print("Drag Drop: old=%d new=%d\n", old_pos, pos);
     
-    if (old_pos != -1 && old_pos != pos) {
+    /* Calculate the actual insertion position after removal */
+    int actual_new_pos = pos;
+    if (old_pos != -1 && old_pos < pos) {
+        actual_new_pos = pos - 1;
+    }
+    
+    g_print("Drag Drop: old=%d new=%d (actual=%d)\n", old_pos, pos, actual_new_pos);
+    
+    /* Only move if position actually changes */
+    if (old_pos != -1 && old_pos != actual_new_pos) {
+        /* Update internal list */
         self->tabs = g_list_remove(self->tabs, tab);
-        if (old_pos < pos) pos--; /* Adjustable because removal shifts later indices */
+        self->tabs = g_list_insert(self->tabs, tab, actual_new_pos);
         
-        self->tabs = g_list_insert(self->tabs, tab, pos);
-        
+        /* Safely move tab in flowbox */
         g_object_ref(tab);
-        gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab));
-        gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), pos);
+        
+        GtkWidget *parent = gtk_widget_get_parent(GTK_WIDGET(tab));
+        if (parent && GTK_IS_FLOW_BOX_CHILD(parent)) {
+            gtk_widget_unparent(GTK_WIDGET(tab));
+            gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), parent);
+        }
+        
+        gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), actual_new_pos);
         g_object_unref(tab);
         
         update_separators(self);
@@ -251,14 +288,13 @@ vite_tab_bar_init (ViteTabBar *self)
     gtk_box_append(GTK_BOX(self), self->flowbox);
     
     self->drop_target = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
+    gtk_drop_target_set_preload(self->drop_target, TRUE);
     g_signal_connect(self->drop_target, "motion", G_CALLBACK(on_drag_motion), self);
     g_signal_connect(self->drop_target, "leave", G_CALLBACK(on_drag_leave), self);
     g_signal_connect(self->drop_target, "drop", G_CALLBACK(on_drag_drop), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(self->drop_target));
     
-    self->drop_indicator = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(self->drop_indicator, "tab-drop-indicator");
-    gtk_widget_set_visible(self->drop_indicator, FALSE);
+    /* Legacy drop indicator - not used anymore */
     
     g_signal_connect(self, "notify::width", G_CALLBACK(on_notify_width), NULL);
     g_signal_connect(self, "map", G_CALLBACK(on_notify_width), NULL);
