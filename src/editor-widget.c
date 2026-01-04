@@ -704,8 +704,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
              len = strlen(text);
         }
         
-        /* Strip trailing newline for Pango render */
-        if (len > 0 && text[len-1] == '\n') {
+        /* Strip trailing newlines for Pango render (\n, \r\n, \r) */
+        while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r')) {
             len--;
         }
 
@@ -1310,7 +1310,9 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
              char *safe = g_utf8_make_valid(text, len);
              g_free(text); text = safe; len = strlen(text);
         }
-        if (len > 0 && text[len-1] == '\n') len--;
+        while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r')) {
+            len--;
+        }
         
         PangoLayout *layout = pango_layout_new(context);
         pango_layout_set_font_description(layout, self->font_desc);
@@ -2384,7 +2386,7 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     }
 
     /* Pango doesn't want the trailing newline */
-    if (len > 0 && text[len-1] == '\n') {
+    while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r')) {
         len--;
     }
 

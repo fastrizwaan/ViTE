@@ -9,16 +9,107 @@
 
 /* -- Utils -- */
 
-/* Count newlines in a wrapper to handle split sources */
+static void
+detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_bom, size_t *bom_len)
+{
+    *enc = ENCODING_UTF8;
+    *has_bom = FALSE;
+    *bom_len = 0;
+
+    if (size >= 3 && (unsigned char)data[0] == 0xEF && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) {
+        *enc = ENCODING_UTF8;
+        *has_bom = TRUE;
+        *bom_len = 3;
+        return;
+    } else if (size >= 2 && (unsigned char)data[0] == 0xFF && (unsigned char)data[1] == 0xFE) {
+        *enc = ENCODING_UTF16LE;
+        *has_bom = TRUE;
+        *bom_len = 2;
+        return;
+    } else if (size >= 2 && (unsigned char)data[0] == 0xFE && (unsigned char)data[1] == 0xFF) {
+        *enc = ENCODING_UTF16BE;
+        *has_bom = TRUE;
+        *bom_len = 2;
+        return;
+    }
+
+    /* Heuristic: Check for UTF-16 without BOM */
+    if (size >= 4) {
+        /* Check if it's valid UTF-8 first */
+        if (!g_utf8_validate(data, size, NULL)) {
+            size_t check_len = (size > 1024) ? 1024 : size;
+            size_t le_count = 0;
+            size_t be_count = 0;
+            
+            for (size_t i = 0; i < check_len - 1; i += 2) {
+                if (data[i+1] == 0 && data[i] != 0) le_count++;
+                if (data[i] == 0 && data[i+1] != 0) be_count++;
+            }
+            
+            if (le_count > check_len / 4) {
+                *enc = ENCODING_UTF16LE;
+            } else if (be_count > check_len / 4) {
+                *enc = ENCODING_UTF16BE;
+            }
+        }
+    }
+}
+
+static void
+detect_newline_style(const char *data, size_t size, NewlineType *style)
+{
+    *style = NEWLINE_LF; // Default
+    const char *ptr = data;
+    const char *end = data + size;
+    while (ptr < end) {
+        if (*ptr == '\n') {
+            *style = NEWLINE_LF;
+            return;
+        } else if (*ptr == '\r') {
+            if (ptr + 1 < end && *(ptr + 1) == '\n') {
+                *style = NEWLINE_CRLF;
+                return;
+            } else {
+                *style = NEWLINE_CR;
+                return;
+            }
+        }
+        ptr++;
+    }
+}
+
+/* Robust newline finder that handles \n, \r\n, and \r */
+static const char *
+find_next_newline(const char *ptr, const char *end, int *nl_len)
+{
+    while (ptr < end) {
+        if (*ptr == '\n') {
+            if (nl_len) *nl_len = 1;
+            return ptr;
+        } else if (*ptr == '\r') {
+            if (ptr + 1 < end && *(ptr + 1) == '\n') {
+                if (nl_len) *nl_len = 2;
+                return ptr;
+            } else {
+                if (nl_len) *nl_len = 1;
+                return ptr;
+            }
+        }
+        ptr++;
+    }
+    return NULL;
+}
+
 static size_t
 count_newlines(const char *data, size_t len)
 {
     size_t count = 0;
     const char *ptr = data;
     const char *end = data + len;
-    while ((ptr = memchr(ptr, '\n', end - ptr))) {
+    int nl_len;
+    while ((ptr = find_next_newline(ptr, end, &nl_len))) {
         count++;
-        ptr++;
+        ptr += nl_len;
     }
     return count;
 }
@@ -221,17 +312,18 @@ find_node_for_line(PieceTable *pt, size_t line_index, size_t *out_node_start_lf,
                  const char *ptr = data + curr->piece.start;
                  const char *end = ptr + curr->piece.length;
                  const char *p_ptr = ptr;
+                 int nl_len;
                  
                  while (ptr < end && found < internal_idx) {
-                     ptr = memchr(ptr, '\n', end - ptr);
-                     ptr++;
+                     ptr = find_next_newline(ptr, end, &nl_len);
+                     ptr += nl_len;
                      found++;
                  }
-                 char *lf_pos = memchr(ptr, '\n', end - ptr);
+                 const char *lf_pos = find_next_newline(ptr, end, &nl_len);
                  
                  if (lf_pos) {
                      size_t lf_off = lf_pos - p_ptr;
-                     target_byte = seen_byte + left_size + lf_off + 1;
+                     target_byte = seen_byte + left_size + lf_off + nl_len;
                      found_target = 1;
                      break; 
                  }
@@ -279,7 +371,7 @@ PieceTable *
 piece_table_new(const char *filename)
 {
     int fd = open(filename, O_RDONLY);
-    char *data = NULL;
+    char *mmap_ptr = NULL;
     size_t size = 0;
     
     if (fd != -1) {
@@ -287,30 +379,65 @@ piece_table_new(const char *filename)
         fstat(fd, &sb);
         size = sb.st_size;
         if (size > 0)
-            data = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
-        else 
-            data = NULL;
+            mmap_ptr = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
         close(fd);
     }
 
-    PieceTable *pt = malloc(sizeof(PieceTable));
-    pt->orig_data = data;
-    pt->orig_size = size; /* Treat size=0 as empty */
-    if (pt->orig_data == MAP_FAILED) pt->orig_data = NULL;
+    PieceTable *pt = g_new0(PieceTable, 1);
+    pt->mmap_base = mmap_ptr;
+    pt->mmap_size = size;
+    pt->is_mmapped = TRUE;
+    pt->orig_data = mmap_ptr;
+    pt->orig_size = size;
+
+    if (mmap_ptr == MAP_FAILED) {
+        pt->mmap_base = NULL;
+        pt->orig_data = NULL;
+        pt->orig_size = 0;
+        pt->is_mmapped = FALSE;
+    }
+
+    size_t bom_len = 0;
+    if (pt->orig_data) {
+        detect_encoding(pt->orig_data, pt->orig_size, &pt->encoding, &pt->has_bom, &bom_len);
+        
+        if (pt->encoding != ENCODING_UTF8) {
+            const char *from_codeset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
+            gsize bytes_read, bytes_written;
+            GError *error = NULL;
+            char *utf8_data = g_convert(pt->orig_data + bom_len, pt->orig_size - bom_len, "UTF-8", from_codeset, &bytes_read, &bytes_written, &error);
+            if (utf8_data) {
+                pt->orig_data = utf8_data;
+                pt->orig_size = bytes_written;
+                pt->is_mmapped = FALSE;
+            } else {
+                g_warning("Failed to convert file: %s", error->message);
+                g_clear_error(&error);
+                pt->orig_data = g_strdup("");
+                pt->orig_size = 0;
+                pt->is_mmapped = FALSE;
+            }
+        } else if (bom_len > 0) {
+            pt->orig_data += bom_len;
+            pt->orig_size -= bom_len;
+        }
+        
+        detect_newline_style(pt->orig_data, pt->orig_size, &pt->newline_style);
+    }
 
     pt->add_buffer = g_byte_array_new();
     
-    if (size > 0 && data != MAP_FAILED) {
+    if (pt->orig_size > 0) {
         /* Chunking strategy */
         size_t chunk_size = 16 * 1024; /* 16KB */
-        size_t count = (size + chunk_size - 1) / chunk_size;
+        size_t count = (pt->orig_size + chunk_size - 1) / chunk_size;
         
         PieceNode **nodes = malloc(count * sizeof(PieceNode*));
         
         for (size_t i = 0; i < count; i++) {
             size_t start = i * chunk_size;
             size_t len = chunk_size;
-            if (start + len > size) len = size - start;
+            if (start + len > pt->orig_size) len = pt->orig_size - start;
             
             Piece p = { SOURCE_ORIGINAL, start, len };
             nodes[i] = node_new(p);
@@ -330,7 +457,11 @@ piece_table_free(PieceTable *pt)
 {
     /* Should free tree nodes recursively */
     /* ... skipped for brevity in this step, but needed */
-    if (pt->orig_data && pt->orig_size > 0) munmap(pt->orig_data, pt->orig_size);
+    if (pt->is_mmapped) {
+        if (pt->mmap_base && pt->mmap_size > 0) munmap(pt->mmap_base, pt->mmap_size);
+    } else {
+        g_free(pt->orig_data);
+    }
     g_byte_array_unref(pt->add_buffer);
     free(pt);
 }
@@ -752,54 +883,40 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
         return g_strdup("");
     }
     
-    /* Found the node containing the START of the line.
-       We need to consume characters until we hit a newline or EOF.
-    */
-    
     size_t relative_lf = line_index - start_lf;
-    
-    /* Find byte offset of 'relative_lf'-th newline in this piece */
     const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
     data += node->piece.start;
     size_t len = node->piece.length;
     
     size_t internal_offset = 0;
+    int nl_len;
     if (relative_lf > 0) {
-        /* Scan for Nth newline */
         size_t found = 0;
         const char *ptr = data;
         const char *end = data + len;
         while (ptr < end && found < relative_lf) {
-            void *p = memchr(ptr, '\n', end - ptr);
-            if (!p) break; /* Should not happen if logic correct */
-            ptr = (char*)p + 1;
+            const char *p = find_next_newline(ptr, end, &nl_len);
+            if (!p) break;
+            ptr = p + nl_len;
             found++;
         }
         internal_offset = ptr - data;
     }
     
-    /* Now we are at the start of the line.
-       Read until newline or end of usage pieces.
-    */
-    
     GString *res = g_string_new("");
-    
-    /* Current piece remainder */
     const char *ptr = data + internal_offset;
-    size_t rem = len - internal_offset;
+    const char *node_end = data + len;
     
-    const char *eol = memchr(ptr, '\n', rem);
+    const char *eol = find_next_newline(ptr, node_end, &nl_len);
     if (eol) {
-        g_string_append_len(res, ptr, eol - ptr + 1); 
+        g_string_append_len(res, ptr, eol - ptr + nl_len); 
         *out_len = res->len;
         return g_string_free(res, FALSE);
     }
     
-    g_string_append_len(res, ptr, rem);
+    g_string_append_len(res, ptr, node_end - ptr);
     
-    /* Continue to next pieces (successor) until newline found */
     PieceNode *curr = node;
-    /* Successor logic */
     while (1) {
         if (curr->right) {
             curr = curr->right;
@@ -813,16 +930,16 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
             curr = p;
         }
         
-        if (!curr) break; /* EOF */
+        if (!curr) break; 
         
-        /* curr is next piece */
         const char *cdata = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
         cdata += curr->piece.start;
         size_t clen = curr->piece.length;
+        const char *cend = cdata + clen;
         
-        const char *ceol = memchr(cdata, '\n', clen);
+        const char *ceol = find_next_newline(cdata, cend, &nl_len);
         if (ceol) {
-            g_string_append_len(res, cdata, ceol - cdata + 1);
+            g_string_append_len(res, cdata, ceol - cdata + nl_len);
             break;
         } else {
             g_string_append_len(res, cdata, clen);
@@ -841,44 +958,36 @@ piece_table_get_line_length(PieceTable *pt, size_t line_index)
     
     if (!node) return 0;
     
-    /* Calculate relative line index within this start node */
     size_t relative_lf = line_index - start_lf;
-    
     const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
     data += node->piece.start;
     size_t len = node->piece.length;
     
     size_t internal_offset = 0;
+    int nl_len;
     if (relative_lf > 0) {
         size_t found = 0;
         const char *ptr = data;
         const char *end = data + len;
         while (ptr < end && found < relative_lf) {
-            void *p = memchr(ptr, '\n', end - ptr);
+            const char *p = find_next_newline(ptr, end, &nl_len);
             if (!p) break;
-            ptr = (char*)p + 1;
+            ptr = p + nl_len;
             found++;
         }
         internal_offset = ptr - data;
     }
     
-    /* Sum length until newline */
     size_t total_len = 0;
-    
-    /* Check remainder of first node */
     const char *ptr = data + internal_offset;
-    size_t rem = len - internal_offset;
+    const char *node_end = data + len;
     
-    const char *eol = memchr(ptr, '\n', rem);
+    const char *eol = find_next_newline(ptr, node_end, &nl_len);
     if (eol) {
-        /* Include newline to match get_line behavior for consistency, 
-           though strictly length might exclude it? 
-           get_line includes it. Let's include it. */
-        return (eol - ptr + 1);
+        return (eol - ptr + nl_len);
     }
-    total_len += rem;
+    total_len += (node_end - ptr);
     
-    /* Traversal */
     PieceNode *curr = node;
     while (1) {
         if (curr->right) {
@@ -898,10 +1007,11 @@ piece_table_get_line_length(PieceTable *pt, size_t line_index)
         const char *cdata = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
         cdata += curr->piece.start;
         size_t clen = curr->piece.length;
+        const char *cend = cdata + clen;
         
-        const char *ceol = memchr(cdata, '\n', clen);
+        const char *ceol = find_next_newline(cdata, cend, &nl_len);
         if (ceol) {
-            total_len += (ceol - cdata + 1);
+            total_len += (ceol - cdata + nl_len);
             break;
         } else {
             total_len += clen;
@@ -970,10 +1080,11 @@ piece_table_get_offset_of_line(PieceTable *pt, size_t line_index)
         size_t found = 0;
         const char *ptr = p_data;
         const char *end = p_data + len;
+        int nl_len;
         while (ptr < end && found < relative_lf) {
-            void *p = memchr(ptr, '\n', end - ptr);
+            const char *p = find_next_newline(ptr, end, &nl_len);
             if (!p) break;
-            ptr = (char*)p + 1;
+            ptr = p + nl_len;
             found++;
         }
         internal_offset = ptr - p_data;
@@ -997,19 +1108,18 @@ traverse_node_for_lines(PieceTable *pt, PieceNode *node, void (*func)(size_t len
     const char *end = ptr + node->piece.length;
     
     const char *scan = ptr;
+    int nl_len;
     while (scan < end) {
-        const char *nl = memchr(scan, '\n', end - scan);
+        const char *nl = find_next_newline(scan, end, &nl_len);
         if (nl) {
-            /* Found a newline */
             size_t seg_len = nl - scan;
-            size_t full_len = *acc_len + seg_len + 1; /* +1 for newline */
+            size_t full_len = *acc_len + seg_len + nl_len;
             
             func(full_len, user_data);
             
             *acc_len = 0;
-            scan = nl + 1;
+            scan = nl + nl_len;
         } else {
-            /* No more newlines in this piece, accumulate rest */
             *acc_len += (end - scan);
             break;
         }
