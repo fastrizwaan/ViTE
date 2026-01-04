@@ -27,6 +27,18 @@ struct _PieceNode {
     size_t lf_subtree;   /* Total newlines */
 };
 
+typedef enum {
+    ENCODING_UTF8,
+    ENCODING_UTF16LE,
+    ENCODING_UTF16BE,
+} FileEncoding;
+
+typedef enum {
+    NEWLINE_LF,
+    NEWLINE_CRLF,
+    NEWLINE_CR
+} NewlineType;
+
 typedef struct {
     char *orig_data;
     size_t orig_size;
@@ -35,8 +47,12 @@ typedef struct {
     
     PieceNode *root;
     
-    /* Cache for iteration/access */
-    // PieceNode *cached_node; // Optimization for sequential access
+    FileEncoding encoding;
+    NewlineType newline_style;
+    gboolean has_bom;
+    gboolean is_mmapped;
+    char *mmap_base;
+    size_t mmap_size;
 } PieceTable;
 
 PieceTable *piece_table_new(const char *filename);
