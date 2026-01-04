@@ -14,6 +14,6 @@ void vite_tab_set_title(ViteTab *self, const char *title);
 void vite_tab_set_active (ViteTab *self, gboolean active);
 void vite_tab_set_tab_bar (ViteTab *self, gpointer tab_bar);
 void vite_tab_set_separator_visible (ViteTab *self, gboolean visible);
-void vite_tab_set_separator_drop_target (ViteTab *self, gboolean is_target);
+void vite_tab_set_drop_indicator (ViteTab *self, gboolean is_target);
 
 G_END_DECLS
