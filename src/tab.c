@@ -49,10 +49,10 @@ static const char *TAB_CSS =
 "}"
 "box.chrome-tab:hover {"
 "    color: @window_fg_color;"
-"    background: alpha(@window_fg_color, 0.1);"
+"    background: mix(@headerbar_bg_color, @window_fg_color, 0.1);"
 "}"
 "box.chrome-tab.active {"
-"    background: alpha(@window_fg_color, 0.1);"
+"    background: mix(@headerbar_bg_color, @window_fg_color, 0.15);"
 "    color: @window_fg_color;"
 "}"
 "box.chrome-tab.active label {"
@@ -72,7 +72,7 @@ static const char *TAB_CSS =
 "    background: linear-gradient(to right, transparent 0%, mix(@headerbar_bg_color, @window_fg_color, 0.1) 60%, mix(@headerbar_bg_color, @window_fg_color, 0.1) 100%);"
 "}"
 "box.chrome-tab.active .chrome-tab-fade {"
-"    background: linear-gradient(to right, transparent 0%, mix(@headerbar_bg_color, @window_fg_color, 0.1) 60%, mix(@headerbar_bg_color, @window_fg_color, 0.1) 100%);"
+"    background: linear-gradient(to right, transparent 0%, mix(@headerbar_bg_color, @window_fg_color, 0.15) 60%, mix(@headerbar_bg_color, @window_fg_color, 0.15) 100%);"
 "}"
 ".chrome-tab-close-button {"
 "    min-width: 20px;"
@@ -119,15 +119,13 @@ static const char *TAB_CSS =
 "    margin-top: 4px;"
 "    margin-bottom: 4px;"
 "}"
-".chrome-tab-separator.drop-target {"
-"    min-width: 6px;"
-"    background: linear-gradient(to bottom, transparent, #62a0ea 20%, #62a0ea 80%, transparent);"
-"    margin-top: 0px;"
-"    margin-bottom: 0px;"
+".chrome-tab.has-drop-target {"
+"    border-left: 4px solid #62a0ea;"
+"    border-radius: 0 8px 8px 0;"
 "}"
 ".chrome-tab.drop-target-end {"
 "    border-right: 4px solid #62a0ea;"
-"    border-radius: 0 8px 8px 0;"
+"    border-radius: 8px 0 0 8px;"
 "}";
 
 
@@ -383,15 +381,11 @@ vite_tab_set_separator_visible (ViteTab *self, gboolean visible)
 }
 
 void
-vite_tab_set_separator_drop_target (ViteTab *self, gboolean is_target)
+vite_tab_set_drop_indicator (ViteTab *self, gboolean is_target)
 {
-    if (self->separator) {
-        if (is_target) {
-            gtk_widget_add_css_class(self->separator, "drop-target");
-            gtk_widget_set_visible(self->separator, TRUE);
-            gtk_widget_set_opacity(self->separator, 1.0);
-        } else {
-            gtk_widget_remove_css_class(self->separator, "drop-target");
-        }
+    if (is_target) {
+        gtk_widget_add_css_class(GTK_WIDGET(self), "has-drop-target");
+    } else {
+        gtk_widget_remove_css_class(GTK_WIDGET(self), "has-drop-target");
     }
 }

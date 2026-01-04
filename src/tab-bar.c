@@ -16,6 +16,12 @@ struct _ViteTabBar {
 G_DEFINE_TYPE(ViteTabBar, vite_tab_bar, GTK_TYPE_BOX)
 
 static const char *TAB_BAR_CSS = 
+".chrome-tab-bar-container:drop(active), .chrome-tab-bar:drop(active) {"
+"    border: none;"
+"    box-shadow: none;"
+"    background: none;"
+"    outline: none;"
+"}"
 ".chrome-tab-bar-container {"
 "    margin-top: 1px;"
 "    padding: 0;"
@@ -34,21 +40,6 @@ static const char *TAB_BAR_CSS =
 "    background: none;"
 "    border: none;"
 "    outline: none;"
-"}"
-".tab-drop-indicator {"
-"    background: linear-gradient(to bottom, transparent 0%, rgba(0, 127, 255, 0.8) 20%, #3584e4 50%, rgba(0, 127, 255, 0.8) 80%, transparent 100%);"
-"    min-width: 3px;"
-"    min-height: 24px;"
-"    border-radius: 2px;"
-"    margin: 0;"
-"}"
-".end-drop-zone {"
-"    min-width: 4px;"
-"    min-height: 28px;"
-"    background: linear-gradient(to bottom, transparent, #3584e4 20%, #3584e4 80%, transparent);"
-"    border-radius: 2px;"
-"    margin-left: 0px;"
-"    margin-right: 0px;"
 "}";
 
 
@@ -180,7 +171,7 @@ clear_drop_targets (ViteTabBar *self)
     for (GList *l = self->tabs; l != NULL; l = l->next) {
         ViteTab *t = VITE_TAB(l->data);
         if (!GTK_IS_WIDGET(t)) continue;
-        vite_tab_set_separator_drop_target(t, FALSE);
+        vite_tab_set_drop_indicator(t, FALSE);
         gtk_widget_remove_css_class(GTK_WIDGET(t), "drop-target-end");
     }
     self->drop_indicator_position = -1;
@@ -206,7 +197,7 @@ set_drop_target_at (ViteTabBar *self, int position)
         /* Highlight separator of the tab at the drop position */
         ViteTab *target_tab = g_list_nth_data(self->tabs, position);
         if (target_tab) {
-            vite_tab_set_separator_drop_target(target_tab, TRUE);
+            vite_tab_set_drop_indicator(target_tab, TRUE);
         }
     }
 }
