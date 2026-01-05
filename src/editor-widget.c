@@ -83,12 +83,6 @@ struct _EditorWidget {
     
 
     
-    /* Smooth scroll animation for map click */
-    gboolean smooth_scroll_active;
-    double smooth_scroll_target;
-    double smooth_scroll_start;
-    gint64 smooth_scroll_start_time;
-    guint smooth_scroll_tick_id;
     
     /* Cached scroll upper bound (recalculated only when dimensions change) */
     double cached_scroll_upper;
@@ -734,8 +728,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         if (layout_h < self->line_height) layout_h = self->line_height; /* Min height */
         
         /* Apply start offset if first line */
-        /* Draw Current Line Highlight */
-        if (self->highlight_current_line && line_idx == cursor_line) {
+        /* Draw Current Line Highlight - only when no selection */
+        if (self->highlight_current_line && line_idx == cursor_line && 
+            self->cursor_offset == self->selection_anchor) {
              GdkRGBA hl_color = self->color_text;
              hl_color.alpha = 0.05; /* Very subtle */
              /* If dark mode, maybe a bit more alpha? */
@@ -1094,6 +1089,17 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     double text_start_x = gutter_w + self->padding_left;
 
     size_t line_idx = start_line;
+    
+    /* Handle clicks above the visible content area */
+    if (click_y < current_y) {
+        if (start_line == 0) {
+            *out_offset = 0;
+        } else {
+            *out_offset = document_get_offset_of_line(self->doc, start_line);
+        }
+        return;
+    }
+    
     /* Limit scan to reasonable screen height + buffer */
     while (line_idx < max_lines) {
         size_t len;
@@ -1174,46 +1180,6 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     *out_offset += last_len;
 }
 
-/* Smooth scroll animation tick callback */
-static gboolean
-smooth_scroll_tick(GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
-{
-    EditorWidget *self = EDITOR_WIDGET(user_data);
-    (void)clock;
-    
-    if (!self->smooth_scroll_active || !self->vadjustment) {
-        self->smooth_scroll_tick_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-    
-    gint64 now = g_get_monotonic_time();
-    double duration = 200000.0; /* 200ms animation */
-    double elapsed = (double)(now - self->smooth_scroll_start_time);
-    double progress = elapsed / duration;
-    
-    if (progress >= 1.0) {
-        /* Animation complete */
-        gtk_adjustment_set_value(self->vadjustment, self->smooth_scroll_target);
-        self->smooth_scroll_active = FALSE;
-        self->smooth_scroll_tick_id = 0;
-        gtk_widget_queue_draw(widget);
-        return G_SOURCE_REMOVE;
-    }
-    
-    /* Ease-out cubic: 1 - (1-t)^3 */
-    double t = 1.0 - progress;
-    double ease = 1.0 - (t * t * t);
-    
-    double current = self->smooth_scroll_start + 
-                    (self->smooth_scroll_target - self->smooth_scroll_start) * ease;
-    
-    gtk_adjustment_set_value(self->vadjustment, current);
-    gtk_widget_queue_draw(widget);
-    
-    return G_SOURCE_CONTINUE;
-}
-
-/* Mouse wheel scroll handler (works even when scrollbar is hidden) */
 /* Mouse wheel scroll handler (works even when scrollbar is hidden) */
 static gboolean
 on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer user_data)
@@ -1409,6 +1375,10 @@ static void
 on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
+    
+    /* Claim the sequence to prevent ScrolledWindow from intercepting it for scrolling */
+    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    
     if (!self->doc) return;
 
     /* If we just did a multi-click selection (double/triple-click), 
@@ -1447,6 +1417,8 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
 }
 
 /* Autoscroll timer callback for smooth edge scrolling */
+static void stop_autoscroll(EditorWidget *self);
+
 static gboolean
 autoscroll_tick(gpointer user_data)
 {
@@ -1488,8 +1460,9 @@ autoscroll_tick(gpointer user_data)
     if (new_val != current_val) {
         gtk_adjustment_set_value(self->vadjustment, new_val);
     } else {
-        /* Ensure adjustments are consistent anyway */
-        editor_widget_update_adjustments(self, -1, -1);
+        /* Met boundary - stop scrolling to save CPU */
+        stop_autoscroll(self);
+        return G_SOURCE_REMOVE;
     }
     
     /* Throttle hit-testing to ~15ms (60fps) to avoid freezing on long lines */
@@ -1540,8 +1513,8 @@ start_autoscroll(EditorWidget *self, int direction, double speed)
     self->autoscroll_tick_count = 0;
     
     if (!self->autoscroll_timer_id) {
-        /* Timer fires every 1ms (maximum rate for g_timeout) */
-        self->autoscroll_timer_id = g_timeout_add(1, autoscroll_tick, self);
+        /* Timer fires every 16ms (approx 60fps) */
+        self->autoscroll_timer_id = g_timeout_add(16, autoscroll_tick, self);
     }
 }
 
@@ -1873,127 +1846,7 @@ editor_widget_paste_primary(EditorWidget *self)
     gdk_clipboard_read_text_async(clipboard, NULL, on_primary_paste_received, self);
 }
 
-/* Helper to calculate logical scroll change for a pixel delta */
-static double
-calculate_scroll_delta_for_pixels(EditorWidget *self, double current_scroll, double pixel_delta)
-{
-    /* If delta is 0, no change */
-    if (fabs(pixel_delta) < 0.5) return 0;
 
-    size_t start_line = (size_t)(current_scroll / self->line_height);
-    double partial_logical = fmod(current_scroll, self->line_height);
-    
-    char *text; size_t len;
-    
-    if (pixel_delta > 0) {
-        /* Scrolling DOWN: Consuming pixels from the top of the viewport */
-        double consumed = 0;
-        double new_scroll = current_scroll;
-        
-        /* First consume remainder of current partial line */
-        PangoLayout *layout = create_pango_layout_for_line(self, start_line, &text, &len);
-        if (!layout) return pixel_delta / self->line_height * self->line_height; /* Fallback */
-        
-        int h; pango_layout_get_pixel_size(layout, NULL, &h);
-        double line_h = (double)h;
-        if (line_h < self->line_height) line_h = self->line_height;
-        g_object_unref(layout); g_free(text);
-
-        double current_pixel_offset = (partial_logical / self->line_height) * line_h;
-        double remaining_in_line = line_h - current_pixel_offset;
-        
-        if (pixel_delta <= remaining_in_line) {
-            /* Still in same line */
-            double fraction = pixel_delta / line_h;
-            return fraction * self->line_height;
-        }
-        
-        consumed += remaining_in_line;
-        new_scroll += (self->line_height - partial_logical); /* Advance to next line start */
-        start_line++;
-        
-        /* Loop through subsequent lines */
-        while (consumed < pixel_delta) {
-             if (start_line >= document_get_line_count(self->doc)) break;
-             
-             layout = create_pango_layout_for_line(self, start_line, &text, &len);
-             if (!layout) break;
-             pango_layout_get_pixel_size(layout, NULL, &h);
-             line_h = (double)h;
-             if (line_h < self->line_height) line_h = self->line_height;
-             g_object_unref(layout); g_free(text);
-             
-             if (consumed + line_h > pixel_delta) {
-                 /* Target falls inside this line */
-                 double needed = pixel_delta - consumed;
-                 double fraction = needed / line_h;
-                 return (new_scroll + fraction * self->line_height) - current_scroll;
-             }
-             
-             consumed += line_h;
-             new_scroll += self->line_height;
-             start_line++;
-        }
-        return new_scroll - current_scroll;
-        
-    } else {
-        /* Scrolling UP: Adding pixels to top. We look backwards from start_line. */
-        double needed = -pixel_delta;
-        double consumed = 0;
-        double new_scroll = current_scroll;
-        
-        /* First back up within current partial line */
-        PangoLayout *layout = create_pango_layout_for_line(self, start_line, &text, &len);
-        if (!layout) return pixel_delta;
-        int h; pango_layout_get_pixel_size(layout, NULL, &h);
-        double line_h = (double)h;
-        if (line_h < self->line_height) line_h = self->line_height;
-        g_object_unref(layout); g_free(text);
-        
-        double current_pixel_offset = (partial_logical / self->line_height) * line_h;
-        
-        if (needed <= current_pixel_offset) {
-            /* Still in same line */
-            double fraction = needed / line_h;
-            return -(fraction * self->line_height);
-        }
-        
-        consumed += current_pixel_offset;
-        new_scroll -= partial_logical; /* Move to start of current line */
-        
-        /* Loop backwards */
-        while (consumed < needed) {
-            if (start_line == 0) break;
-            start_line--;
-            
-            layout = create_pango_layout_for_line(self, start_line, &text, &len);
-            if (!layout) break;
-            pango_layout_get_pixel_size(layout, NULL, &h);
-            line_h = (double)h;
-            if (line_h < self->line_height) line_h = self->line_height;
-            g_object_unref(layout); g_free(text);
-            
-            if (consumed + line_h > needed) {
-                /* Target falls inside this previous line */
-                double remain = needed - consumed;
-                /* We want to end up 'remain' pixels from the BOTTOM of this line? 
-                   No, 'remain' is how much we need to scroll UP into this line.
-                   So we are solving for a scroll position that is 'remain' pixels down from the bottom?
-                   Wait. New scroll will be (start_line * lh) + (line_h - remain expressed as fraction).
-                   Basically we are 'remain' pixels deep into this line from the bottom.
-                */
-                double offset_from_top = line_h - remain;
-                double fraction = offset_from_top / line_h;
-                double target_for_line = (double)start_line * self->line_height + (fraction * self->line_height);
-                return target_for_line - current_scroll;
-            }
-            
-            consumed += line_h;
-            new_scroll -= self->line_height;
-        }
-        return new_scroll - current_scroll;
-    }
-}
 
 static void
 scroll_to_cursor(EditorWidget *self)
