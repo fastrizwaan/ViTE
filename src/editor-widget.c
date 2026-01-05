@@ -1078,8 +1078,10 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         if (multiplier < 1.0) multiplier = 1.0;
         start_line = (size_t)(scroll_y / (self->line_height * multiplier));
         
-        /* Calculate partial_y for statistical mode as well */
-        partial_y = fmod(scroll_y, self->line_height);
+        /* Calculate partial_y for statistical mode - must match snapshot logic */
+        partial_y = fmod(scroll_y, self->line_height * multiplier);
+        /* Clamp partial_y to valid range */
+        if (partial_y > self->line_height * 20) partial_y = 0;
     }
 
     /* 2. Scan forward visually to find the line at 'y' */
