@@ -2778,7 +2778,44 @@ on_key_pressed(GtkEventControllerKey *controller,
                 if (has_selection) {
                     editor_widget_unindent_selection(self);
                 } else {
-                    return FALSE; /* Allow focus navigation if no selection */
+                    /* Unindent single line if possible */
+                    size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
+                    size_t len;
+                    char *text = document_get_line(self->doc, line, &len);
+                    size_t delete_len = 0;
+                    
+                    if (len > 0) {
+                        if (text[0] == '\t') {
+                            delete_len = 1;
+                        } else if (text[0] == ' ') {
+                            size_t spaces = 0;
+                            while (spaces < self->indent_width && spaces < len && text[spaces] == ' ') {
+                                spaces++;
+                            }
+                            delete_len = spaces;
+                        }
+                    }
+                    g_free(text);
+                    
+                    if (delete_len > 0) {
+                        document_begin_undo_group(self->doc);
+                        size_t line_start = document_get_offset_of_line(self->doc, line);
+                        document_delete(self->doc, line_start, delete_len);
+                        document_end_undo_group(self->doc);
+                        
+                        /* Adjust cursor: Shift back, but not before line start */
+                        if (self->cursor_offset >= line_start + delete_len) {
+                            self->cursor_offset -= delete_len;
+                        } else {
+                            self->cursor_offset = line_start;
+                        }
+                        self->selection_anchor = self->cursor_offset;
+                        
+                        /* Updates handled at end of case */
+                    } else {
+                        /* Do nothing, but consume event to prevent focus switch */
+                        return TRUE; 
+                    }
                 }
             } else {
                 /* Check for multiline selection */
