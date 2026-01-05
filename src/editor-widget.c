@@ -70,7 +70,7 @@ struct _EditorWidget {
     /* Configuration Properties */
     gboolean show_line_numbers;
     gboolean highlight_current_line;
-    gboolean display_overview_map;
+
     gboolean show_right_margin;
     int right_margin_position;
     gboolean wrap_lines;
@@ -81,9 +81,7 @@ struct _EditorWidget {
     gboolean use_custom_font;
     char *font_name;
     
-    gboolean dragging_map;
-    double map_drag_start_scroll; /* Scroll value when map drag began */
-    double map_click_y; /* Y position where map click started (-1 if not clicking) */
+
     
     /* Smooth scroll animation for map click */
     gboolean smooth_scroll_active;
@@ -168,7 +166,7 @@ enum {
     PROP_VSCROLL_POLICY,
     PROP_SHOW_LINE_NUMBERS,
     PROP_HIGHLIGHT_CURRENT_LINE,
-    PROP_DISPLAY_OVERVIEW_MAP,
+
     PROP_SHOW_RIGHT_MARGIN,
     PROP_RIGHT_MARGIN_POSITION,
     PROP_WRAP_LINES,
@@ -713,11 +711,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         pango_layout_set_font_description(layout, self->font_desc);
         pango_layout_set_text(layout, text, (int)len);
         
-        /* Word Wrap - account for gutter, padding, and overview map */
-        int map_w_reserved = self->display_overview_map ? 120 : 0;
-        
+        /* Word Wrap - account for gutter and padding */
         if (self->wrap_lines) {
-            int available_w = width - text_start_x - map_w_reserved;
+            int available_w = width - text_start_x;
             if (available_w < 50) available_w = 50; /* Safe min width */
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
@@ -999,211 +995,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             &GRAPHENE_RECT_INIT((float)margin_x, 0, 1.0f, (float)height));
     }
 
-    /* Draw Overview Map */
-    if (self->display_overview_map) {
-        float map_w = 120.0f;
-        
-        /* Infer theme */
-        double text_brightness = (self->color_text.red + self->color_text.green + self->color_text.blue) / 3.0;
-        gboolean is_dark = (text_brightness > 0.5);
-        
-        /* Background */
-        GdkRGBA panel_color = {0, 0, 0, 0.25}; 
-        if (!is_dark) {
-            panel_color.red = 0.95; panel_color.green = 0.95; panel_color.blue = 0.95; panel_color.alpha = 1.0;
-        }
-        
-        gtk_snapshot_append_color(snapshot, &panel_color, 
-             &GRAPHENE_RECT_INIT(width - map_w, 0, map_w, height));
-             
-        GdkRGBA border_col = self->color_text;
-        border_col.alpha = 0.08;
-        gtk_snapshot_append_color(snapshot, &border_col,
-             &GRAPHENE_RECT_INIT(width - map_w, 0, 1, height));
-
-        /* --- GtkSourceMap Style Implementation --- */
-        /* 1. Fixed Scale for Readability */
-        size_t line_cnt = document_get_line_count(self->doc);
-        double total_h = self->line_height * line_cnt;
-        double map_scale = 0.15; /* Fixed 15% scale */
-        double map_total_h = total_h * map_scale;
-        
-        /* 2. Proportional Map Scrolling */
-        /* If map > widget, it scrolls proportionally to main view */
-        double map_scroll_y = 0;
-        
-        double scroll_y = 0;
-        double upper = 1, page = 1;
-        if (self->vadjustment) {
-            scroll_y = gtk_adjustment_get_value(self->vadjustment);
-            upper = gtk_adjustment_get_upper(self->vadjustment);
-            page = gtk_adjustment_get_page_size(self->vadjustment);
-        }
-        
-        double scroll_max = upper - page;
-        if (scroll_max <= 0) scroll_max = 1;
-        
-        if (map_total_h > height) {
-            double map_scroll_max = map_total_h - height;
-            map_scroll_y = (scroll_y / scroll_max) * map_scroll_max;
-        }
-
-        /* Determine visual range to render */
-        /* We only render lines that intersect the map viewport [0, height] */
-        
-        /* Visible range in map coordinates: [map_scroll_y, map_scroll_y + height] */
-        /* Map Y for line K = K * line_height * map_scale */
-        size_t start_line = (size_t)(map_scroll_y / (self->line_height * map_scale));
-        if (start_line > 0) start_line--; /* Buffer */
-        
-        size_t end_line = (size_t)((map_scroll_y + height) / (self->line_height * map_scale)) + 1;
-        if (end_line > line_cnt) end_line = line_cnt;
-        
-        GdkRGBA main_text_col = self->color_text;
-        main_text_col.alpha = 0.7;
-
-        for (size_t k = start_line; k < end_line; k++) {
-            double ly = (k * self->line_height * map_scale) - map_scroll_y;
-            
-            size_t line_start = document_get_offset_of_line(self->doc, k);
-            size_t next_line_start = document_get_offset_of_line(self->doc, k + 1);
-            size_t total_len = document_get_length(self->doc);
-            
-            size_t line_len;
-            if (next_line_start == (size_t)-1 || next_line_start < line_start) {
-                line_len = total_len - line_start;
-            } else {
-                line_len = next_line_start - line_start;
-                if (line_len > 0) line_len--; 
-            }
-            
-            if (line_len > 100) line_len = 100; 
-            if (line_len == 0) continue;
-            
-            char *text = document_get_text_range(self->doc, line_start, line_len);
-            if (!text) continue;
-            
-            /* Get syntax highlighting for this line */
-            PangoAttrList *attrs = NULL;
-            if (self->syntax_ctx) {
-                attrs = syntax_highlight_line(self->syntax_ctx, k, text);
-            }
-            
-            float mx = (float)(width - map_w + 10); 
-            float my = (float)ly;
-            float block_h = (float)(self->line_height * map_scale);
-            if (block_h > 2.0f) block_h -= 1.0f;
-            
-            int i = 0; 
-            while (i < line_len) {
-                /* Skip whitespace */
-                while (i < line_len && (text[i] == ' ' || text[i] == '\t')) {
-                    mx += 2.0f; i++; 
-                }
-                if (i >= line_len) break;
-                
-                int word_start = i;
-                int w_len = 0;
-                /* Split on whitespace AND punctuation to get smaller tokens */
-                /* This ensures self.method is split into: self, ., method */
-                char c = text[i];
-                if (c == '.' || c == '(' || c == ')' || c == '[' || c == ']' || 
-                    c == '{' || c == '}' || c == ',' || c == ':' || c == ';' ||
-                    c == '=' || c == '+' || c == '-' || c == '*' || c == '/') {
-                    /* Single-char punctuation token */
-                    w_len = 1; i++;
-                } else {
-                    /* Word token - stop at whitespace or punctuation */
-                    while (i < line_len && 
-                           text[i] != ' ' && text[i] != '\t' &&
-                           text[i] != '.' && text[i] != '(' && text[i] != ')' &&
-                           text[i] != '[' && text[i] != ']' && text[i] != '{' && 
-                           text[i] != '}' && text[i] != ',' && text[i] != ':' &&
-                           text[i] != ';' && text[i] != '=' && text[i] != '+' &&
-                           text[i] != '-' && text[i] != '*' && text[i] != '/') {
-                        w_len++; i++;
-                    }
-                }
-                
-                if (w_len > 0) {
-                    float block_w = (float)w_len * 2.0f;
-                    if (mx + block_w > width - 4) block_w = width - 4 - mx;
-                    
-                    if (block_w > 0) {
-                        /* Get color from syntax attrs if available */
-                        GdkRGBA block_color = main_text_col;
-                        
-                        if (attrs) {
-                            /* Iterate through all attributes directly */
-                            GSList *attr_list = pango_attr_list_get_attributes(attrs);
-                            for (GSList *l = attr_list; l != NULL; l = l->next) {
-                                PangoAttribute *attr = (PangoAttribute *)l->data;
-                                
-                                /* Check if this is a foreground color at our position */
-                                if (attr->klass->type == PANGO_ATTR_FOREGROUND &&
-                                    attr->start_index <= (guint)word_start &&
-                                    attr->end_index > (guint)word_start) {
-                                    PangoAttrColor *color_attr = (PangoAttrColor *)attr;
-                                    block_color.red = color_attr->color.red / 65535.0;
-                                    block_color.green = color_attr->color.green / 65535.0;
-                                    block_color.blue = color_attr->color.blue / 65535.0;
-                                    block_color.alpha = 0.8;
-                                    break; /* Use first matching color */
-                                }
-                            }
-                            g_slist_free_full(attr_list, (GDestroyNotify)pango_attribute_destroy);
-                        }
-                        
-                        gtk_snapshot_append_color(snapshot, &block_color,
-                            &GRAPHENE_RECT_INIT(mx, my, block_w, block_h));
-                    }
-                    mx += block_w + 2.0f;
-                }
-            }
-            
-            if (attrs) pango_attr_list_unref(attrs);
-            g_free(text);
-        }
-        
-        /* 3. Slider Geometry */
-        /* Variables already computed above */
-
-        /* Calculate Slider Height (page size scaled) */
-        double slider_h = page * map_scale;
-        if (slider_h < 30) slider_h = 30; /* Min height for usability */
-        if (slider_h > height) slider_h = height;
-        
-        /* Calculate Slider Position (Track-based) */
-        /* Mathematically, if map scrolls proportionally, the slider's screen relative 
-           position also moves proportionally on the "track" */
-        double track_h = height - slider_h;
-        double slider_y = 0;
-        if (track_h > 0) {
-            slider_y = (scroll_y / scroll_max) * track_h;
-        }
-        
-        /* Clamp */
-        if (slider_y < 0) slider_y = 0;
-        if (slider_y > track_h) slider_y = track_h;
-        
-        /* Draw Slider */
-        /* Style: No border, just a subtle overlay */
-        GdkRGBA vp_col = {1.0, 1.0, 1.0, 0.2}; 
-        if (!is_dark) {
-           /* Dark overlay for light theme */
-           vp_col.red = 0; vp_col.green = 0; vp_col.blue = 0; vp_col.alpha = 0.1;
-        } else {
-           /* Light overlay for dark theme */
-           vp_col.red = 1; vp_col.green = 1; vp_col.blue = 1; vp_col.alpha = 0.15;
-        }
-        
-        gtk_snapshot_append_color(snapshot, &vp_col,
-            &GRAPHENE_RECT_INIT(width - map_w, (float)slider_y, map_w, (float)slider_h));
-        
-        /* Store metrics for drag handler - recomputed there for safety */
-    }
-    }
-
+}
 
 
 static void
@@ -1298,7 +1090,6 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     int width = gtk_widget_get_width(GTK_WIDGET(self));
     double gutter_w = get_effective_gutter_width(self);
     double text_start_x = gutter_w + self->padding_left;
-    int map_w_reserved = self->display_overview_map ? 120 : 0;
 
     size_t line_idx = start_line;
     /* Limit scan to reasonable screen height + buffer */
@@ -1319,7 +1110,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         pango_layout_set_text(layout, text, (int)len);
         
         if (self->wrap_lines) {
-            int available_w = width - text_start_x - map_w_reserved;
+            int available_w = width - text_start_x;
             if (available_w < 50) available_w = 50; 
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
@@ -1454,16 +1245,6 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     gtk_widget_grab_focus(GTK_WIDGET(self));
     
     if (!self->doc) return;
-    
-    /* Handle Overview Map Click - store click position for drag_end */
-    int width = gtk_widget_get_width(GTK_WIDGET(self));
-    int map_w = 120;
-    if (self->display_overview_map && x > width - map_w) {
-        /* Store click Y - smooth scroll will happen in drag_end if no significant drag */
-        self->map_click_y = y;
-        return;
-    }
-    self->map_click_y = -1; /* Not a map click */
 
     size_t off;
     editor_widget_get_offset_at_point(self, x, y, &off);
@@ -1627,17 +1408,6 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->doc) return;
-    
-    /* Check for Map Drag */
-    int width = gtk_widget_get_width(GTK_WIDGET(self));
-    if (self->display_overview_map && x > width - 120) {
-        self->dragging_map = TRUE;
-        /* Store initial scroll position for relative dragging */
-        if (self->vadjustment) {
-            self->map_drag_start_scroll = gtk_adjustment_get_value(self->vadjustment);
-        }
-        return;
-    }
 
     /* If we just did a multi-click selection (double/triple-click), 
        don't process drag_begin as it would interfere with the selection */
@@ -1822,42 +1592,6 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
     
     self->drag_x = start_x + offset_x;
     self->drag_y = start_y + offset_y;
-    
-    /* Handle Overview Map Drag */
-    if (self->dragging_map) {
-        if (self->vadjustment) {
-            double widget_height = gtk_widget_get_height(GTK_WIDGET(self));
-            double upper = gtk_adjustment_get_upper(self->vadjustment);
-            double page = gtk_adjustment_get_page_size(self->vadjustment);
-            
-            if (widget_height <= 0) widget_height = 1;
-            
-            double scroll_max = upper - page;
-            if (scroll_max <= 0) scroll_max = 1;
-            
-            /* Recompute slider metrics to ensure sync with rendering */
-            /* 1. Scale */
-            double map_scale = 0.15;
-            
-            /* 2. Slider Height */
-            double slider_h = page * map_scale;
-            if (slider_h < 30) slider_h = 30;
-            if (slider_h > widget_height) slider_h = widget_height;
-            
-            /* 3. Track Length */
-            double track_h = widget_height - slider_h;
-            
-            /* 4. Scrollbar-style Drag: map delta Y to delta Scroll */
-            /* This ensures the slider moves 1:1 with the mouse pointer on the track */
-            if (track_h > 0) {
-                double scroll_delta = (offset_y / track_h) * scroll_max;
-                double target_scroll = self->map_drag_start_scroll + scroll_delta;
-                target_scroll = CLAMP(target_scroll, 0, upper - page);
-                gtk_adjustment_set_value(self->vadjustment, target_scroll);
-            }
-        }
-        return;
-    }
 
     size_t off;
     editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &off);
@@ -1978,57 +1712,6 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->doc) return;
-    
-    if (self->dragging_map) {
-        self->dragging_map = FALSE;
-        
-        /* Check if it was a click (minimal movement) not a drag */
-        double drag_distance = sqrt(offset_x * offset_x + offset_y * offset_y);
-        if (drag_distance < 5 && self->map_click_y >= 0 && self->vadjustment && self->doc) {
-            /* This was a click, do smooth scroll */
-            double widget_height = gtk_widget_get_height(GTK_WIDGET(self));
-            double upper = gtk_adjustment_get_upper(self->vadjustment);
-            double page = gtk_adjustment_get_page_size(self->vadjustment);
-            
-            /* GtkSourceMap proportional mapping inverse */
-            double map_scale = 0.15;
-            double total_h = self->line_height * document_get_line_count(self->doc);
-            double map_total_h = total_h * map_scale;
-            
-            /* Calculate map_scroll_y the same way as rendering */
-            double map_scroll_y = 0;
-            if (map_total_h > widget_height) {
-                double scroll_max = upper - page;
-                if (scroll_max <= 0) scroll_max = 1;
-                double current_scroll_y = gtk_adjustment_get_value(self->vadjustment);
-                double map_scroll_max = map_total_h - widget_height;
-                map_scroll_y = (current_scroll_y / scroll_max) * map_scroll_max;
-            }
-            
-            /* Convert click Y to document scroll position */
-            /* Inverse of: slider_y = (scroll_y / total_h) * map_total_h - map_scroll_y */
-            /* scroll_y = ((slider_y + map_scroll_y) / map_total_h) * total_h */
-            double click_doc_y = ((self->map_click_y + map_scroll_y) / map_total_h) * total_h;
-            
-            /* Center the clicked position in the viewport */
-            double target_scroll = click_doc_y - (page / 2);
-            target_scroll = CLAMP(target_scroll, 0, upper - page);
-            
-            /* Start smooth scroll animation */
-            self->smooth_scroll_start = gtk_adjustment_get_value(self->vadjustment);
-            self->smooth_scroll_target = target_scroll;
-            self->smooth_scroll_start_time = g_get_monotonic_time();
-            self->smooth_scroll_active = TRUE;
-            
-            if (self->smooth_scroll_tick_id == 0) {
-                self->smooth_scroll_tick_id = gtk_widget_add_tick_callback(
-                    GTK_WIDGET(self), smooth_scroll_tick, self, NULL);
-            }
-        }
-        self->map_click_y = -1;
-        return;
-    }
-    self->map_click_y = -1; /* Reset for non-map drags */
     
     /* Always stop autoscroll when drag ends */
     stop_autoscroll(self);
@@ -2406,10 +2089,9 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     
     int width = gtk_widget_get_width(GTK_WIDGET(self));
     double gutter_w = get_effective_gutter_width(self);
-    int map_w_reserved = self->display_overview_map ? 120 : 0;
 
     if (self->wrap_lines) {
-        int available_w = width - (gutter_w + self->padding_left) - map_w_reserved;
+        int available_w = width - (gutter_w + self->padding_left);
         if (available_w < 50) available_w = 50; /* Safe min width */
         pango_layout_set_width(layout, available_w * PANGO_SCALE);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
@@ -3645,7 +3327,6 @@ editor_widget_init(EditorWidget *self)
     /* Config defaults */
     self->show_line_numbers = TRUE;
     self->highlight_current_line = TRUE;
-    self->display_overview_map = FALSE;
     self->show_right_margin = FALSE;
     self->right_margin_position = 80;
     self->wrap_lines = TRUE;
@@ -3727,23 +3408,6 @@ editor_widget_set_property (GObject      *object,
             self->highlight_current_line = g_value_get_boolean(value);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
-        case PROP_DISPLAY_OVERVIEW_MAP:
-            self->display_overview_map = g_value_get_boolean(value);
-            /* Hide vertical scrollbar when overview map is shown */
-            {
-                GtkWidget *parent = gtk_widget_get_parent(GTK_WIDGET(self));
-                if (parent && GTK_IS_SCROLLED_WINDOW(parent)) {
-                    if (self->display_overview_map) {
-                        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(parent),
-                            GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
-                    } else {
-                        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(parent),
-                            GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-                    }
-                }
-            }
-            gtk_widget_queue_draw(GTK_WIDGET(self));
-            break;
         case PROP_SHOW_RIGHT_MARGIN:
             self->show_right_margin = g_value_get_boolean(value);
             gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -3813,9 +3477,6 @@ editor_widget_get_property (GObject    *object,
         case PROP_HIGHLIGHT_CURRENT_LINE:
             g_value_set_boolean(value, self->highlight_current_line);
             break;
-        case PROP_DISPLAY_OVERVIEW_MAP:
-            g_value_set_boolean(value, self->display_overview_map);
-            break;
         case PROP_SHOW_RIGHT_MARGIN:
             g_value_set_boolean(value, self->show_right_margin);
             break;
@@ -3874,9 +3535,6 @@ editor_widget_class_init(EditorWidgetClass *klass)
     
     g_object_class_install_property(object_class, PROP_HIGHLIGHT_CURRENT_LINE,
         g_param_spec_boolean("highlight-current-line", "Highlight Current Line", "Highlight Current Line", TRUE, G_PARAM_READWRITE));
-        
-    g_object_class_install_property(object_class, PROP_DISPLAY_OVERVIEW_MAP,
-        g_param_spec_boolean("display-overview-map", "Display Overview Map", "Display Overview Map", FALSE, G_PARAM_READWRITE));
         
     g_object_class_install_property(object_class, PROP_SHOW_RIGHT_MARGIN,
         g_param_spec_boolean("show-right-margin", "Show Right Margin", "Show Right Margin", FALSE, G_PARAM_READWRITE));
