@@ -16,6 +16,8 @@ sources = files(
   'src/preferences.c',
   'src/syntax.c',
   'src/editor-widget.c',
+  'src/tab.c',
+  'src/tab-bar.c',
 )
 
 executable('vite',

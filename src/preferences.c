@@ -119,7 +119,6 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Display Line Numbers", editor, "show-line-numbers"));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Highlight Current Line", editor, "highlight-current-line"));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Display Overview Map", editor, "display-overview-map"));
     
     /* Group: Typography/Font */
     GtkWidget *group_font = adw_preferences_group_new();
