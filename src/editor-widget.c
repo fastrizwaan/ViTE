@@ -2563,11 +2563,21 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
                 size_t next_gap = utf8_next_grapheme(self, e);
                 size_t gap_len = next_gap - e;
                 char *gap_text = document_get_text_range(self->doc, e, gap_len);
+                
+                document_begin_undo_group(self->doc);
+                /* Save actual cursor state (e.g. collapsed) */
+                document_set_undo_group_selection(self->doc, self->selection_anchor, self->cursor_offset);
                 document_delete(self->doc, s, (e - s) + gap_len);
                 document_insert(self->doc, s, gap_text, gap_len);
                 document_insert(self->doc, s + gap_len, sel_text, e - s);
-                self->selection_anchor = s + gap_len;
-                self->cursor_offset = self->selection_anchor + (e - s);
+                
+                size_t new_anchor = s + gap_len;
+                size_t new_cursor = new_anchor + (e - s);
+                document_set_redo_group_selection(self->doc, new_anchor, new_cursor);
+                document_end_undo_group(self->doc);
+                
+                self->selection_anchor = new_anchor;
+                self->cursor_offset = new_cursor;
                 g_free(gap_text);
             }
         } else {
@@ -2575,11 +2585,21 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
                 size_t prev_gap = utf8_prev_grapheme(self, s);
                 size_t gap_len = s - prev_gap;
                 char *gap_text = document_get_text_range(self->doc, prev_gap, gap_len);
+                
+                document_begin_undo_group(self->doc);
+                /* Save actual cursor state */
+                document_set_undo_group_selection(self->doc, self->selection_anchor, self->cursor_offset);
                 document_delete(self->doc, prev_gap, gap_len + (e - s));
                 document_insert(self->doc, prev_gap, sel_text, e - s);
                 document_insert(self->doc, prev_gap + (e - s), gap_text, gap_len);
-                self->selection_anchor = prev_gap;
-                self->cursor_offset = self->selection_anchor + (e - s);
+                
+                size_t new_anchor = prev_gap;
+                size_t new_cursor = new_anchor + (e - s);
+                document_set_redo_group_selection(self->doc, new_anchor, new_cursor);
+                document_end_undo_group(self->doc);
+                
+                self->selection_anchor = new_anchor;
+                self->cursor_offset = new_cursor;
                 g_free(gap_text);
             }
         }
@@ -2615,13 +2635,22 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         char *sep_text = document_get_text_range(self->doc, e, sep_len);
         char *w2_text = document_get_text_range(self->doc, w2_start, w2_len);
         
+        document_begin_undo_group(self->doc);
+        /* Save actual cursor state */
+        document_set_undo_group_selection(self->doc, self->selection_anchor, self->cursor_offset);
         document_delete(self->doc, s, sel_len + sep_len + w2_len);
         document_insert(self->doc, s, w2_text, w2_len);
         document_insert(self->doc, s + w2_len, sep_text, sep_len);
+        document_insert(self->doc, s + w2_len, sep_text, sep_len);
         document_insert(self->doc, s + w2_len + sep_len, sel_text, sel_len);
         
-        self->selection_anchor = s + w2_len + sep_len;
-        self->cursor_offset = self->selection_anchor + sel_len;
+        size_t new_anchor = s + w2_len + sep_len;
+        size_t new_cursor = new_anchor + sel_len;
+        document_set_redo_group_selection(self->doc, new_anchor, new_cursor);
+        document_end_undo_group(self->doc);
+        
+        self->selection_anchor = new_anchor;
+        self->cursor_offset = new_cursor;
         
         g_free(sel_text); g_free(sep_text); g_free(w2_text);
     } else {
@@ -2647,13 +2676,22 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         char *sep_text = document_get_text_range(self->doc, w2_end, sep_len);
         char *sel_text = document_get_text_range(self->doc, s, sel_len);
         
+        document_begin_undo_group(self->doc);
+        /* Save actual cursor state */
+        document_set_undo_group_selection(self->doc, self->selection_anchor, self->cursor_offset);
         document_delete(self->doc, w2_start, w2_len + sep_len + sel_len);
         document_insert(self->doc, w2_start, sel_text, sel_len);
         document_insert(self->doc, w2_start + sel_len, sep_text, sep_len);
+        document_insert(self->doc, w2_start + sel_len, sep_text, sep_len);
         document_insert(self->doc, w2_start + sel_len + sep_len, w2_text, w2_len);
         
-        self->selection_anchor = w2_start;
-        self->cursor_offset = w2_start + sel_len;
+        size_t new_anchor = w2_start;
+        size_t new_cursor = w2_start + sel_len;
+        document_set_redo_group_selection(self->doc, new_anchor, new_cursor);
+        document_end_undo_group(self->doc);
+        
+        self->selection_anchor = new_anchor;
+        self->cursor_offset = new_cursor;
         
         g_free(sel_text); g_free(sep_text); g_free(w2_text);
     }
@@ -2683,6 +2721,8 @@ editor_widget_move_lines_vertically(EditorWidget *self, int delta)
     
     size_t total_lines = document_get_line_count(self->doc);
     document_begin_undo_group(self->doc);
+    /* Save selection state (moved lines) */
+    document_set_undo_group_selection(self->doc, self->selection_anchor, self->cursor_offset);
     
     if (delta < 0 && start_line > 0) {
         /* Move Up: Swap [prev_line] with [range] */
@@ -3379,7 +3419,11 @@ on_key_pressed(GtkEventControllerKey *controller,
                      editor_widget_clear_cursors(self);
                      EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
                      
-                     if (info.is_insert) {
+                     if (info.has_selection) {
+                         /* Restore saved selection state faithfully */
+                         primary->selection_anchor = info.selection_start;
+                         primary->cursor_offset = info.selection_end;
+                     } else if (info.is_insert) {
                          /* Text restored/inserted: Select it */
                          primary->cursor_offset = info.start + info.length;
                          primary->selection_anchor = info.start;
@@ -3407,7 +3451,12 @@ on_key_pressed(GtkEventControllerKey *controller,
                      editor_widget_clear_cursors(self);
                      EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
 
-                     if (info.is_insert) {
+                     if (info.has_selection) {
+                         /* Restore saved selection state (e.g. from Alt+Arrow Redo) */
+                         /* User requested to KEEP selection on Redo */
+                         primary->selection_anchor = info.selection_start;
+                         primary->cursor_offset = info.selection_end;
+                     } else if (info.is_insert) {
                          primary->cursor_offset = info.start + info.length;
                          primary->selection_anchor = info.start;
                      } else {
