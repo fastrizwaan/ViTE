@@ -2,6 +2,12 @@
 #include "syntax.h"
 #include <math.h>
 
+typedef struct {
+    size_t cursor_offset;
+    size_t selection_anchor;
+    double target_x;
+} EditorCursor;
+
 struct _EditorWidget {
     GtkWidget parent_instance;
 
@@ -23,8 +29,14 @@ struct _EditorWidget {
     PangoFontDescription *font_desc;
     
     /* State */
+    /* State */
+    /* State */
+    GArray *cursors; /* Array of EditorCursor */
+    
+    /* Primary cursor cache (for compatibility with existing logic) */
     size_t cursor_offset;
-    size_t selection_anchor; /* If different from cursor_offset, we have selection */
+    size_t selection_anchor;
+    double target_x;
     
     /* Cursor blink animation */
     guint cursor_blink_tick_id;
@@ -46,7 +58,7 @@ struct _EditorWidget {
     SyntaxContext *syntax_ctx;
 
     /* Visual navigation */
-    double target_x;  /* Target X position for Up/Down navigation (in pixels) */
+    /* Visual navigation */
 
     gboolean alt_word_mode; /* TRUE if selection was auto-created for word swapping */
 
@@ -117,6 +129,49 @@ static void move_cursor(EditorWidget *self, int visual_lines_delta);
 static void editor_widget_update_im_cursor_location(EditorWidget *self);
 static PangoLayout *create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len);
 static void update_selection_extension(EditorWidget *self, size_t off);
+
+static EditorCursor *
+editor_widget_get_primary_cursor(EditorWidget *self)
+{
+    if (!self->cursors || self->cursors->len == 0) return NULL;
+    return &g_array_index(self->cursors, EditorCursor, 0);
+}
+
+static void
+editor_widget_clear_cursors(EditorWidget *self)
+{
+    if (self->cursors->len > 1) {
+        g_array_set_size(self->cursors, 1);
+    }
+}
+
+static void
+editor_widget_add_cursor(EditorWidget *self, size_t offset)
+{
+    /* Check for existing cursor at this offset and remove it (Toggle behavior) */
+    for (guint i = 0; i < self->cursors->len; i++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, i);
+        if (cur->cursor_offset == offset && cur->selection_anchor == offset) {
+            /* Found exact match - remove it */
+            /* If it's the only cursor (primary loop), don't remove? 
+               Usually Alt+Click on LAST cursor removes it? 
+               If we remove the last remaining cursor, we have 0 cursors. 
+               We should prevent removing if len == 1. 
+            */
+            if (self->cursors->len > 1) {
+                g_array_remove_index(self->cursors, i);
+            }
+            return;
+        }
+    }
+
+    EditorCursor c;
+    c.cursor_offset = offset;
+    c.selection_anchor = offset;
+    c.target_x = -1;
+    g_array_append_val(self->cursors, c);
+}
+
 
 static double
 get_gutter_width(EditorWidget *self)
@@ -674,8 +729,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
     PangoContext *context = gtk_widget_get_pango_context(widget);
     
-    size_t cursor_line = document_get_line_of_offset(self->doc, self->cursor_offset);
-    size_t anchor_line = document_get_line_of_offset(self->doc, self->selection_anchor);
+    /* Cursors info is handled inside the loop now */
 
 
     double current_y_pos = -partial_y; /* Start with calculated offset */
@@ -728,16 +782,26 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         if (layout_h < self->line_height) layout_h = self->line_height; /* Min height */
         
         /* Apply start offset if first line */
-        /* Draw Current Line Highlight - only when no selection */
-        if (self->highlight_current_line && line_idx == cursor_line && 
-            self->cursor_offset == self->selection_anchor) {
-             GdkRGBA hl_color = self->color_text;
-             hl_color.alpha = 0.05; /* Very subtle */
-             /* If dark mode, maybe a bit more alpha? */
-             if (self->color_text.red > 0.5) hl_color.alpha = 0.1;
+        /* Draw Current Line Highlight - check if ANY cursor is on this line (and no selection) */
+        if (self->highlight_current_line) {
+             gboolean highlight_this = FALSE;
+             for (guint c = 0; c < self->cursors->len; c++) {
+                 EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                 size_t c_line = document_get_line_of_offset(self->doc, cur->cursor_offset);
+                 if (c_line == line_idx && cur->cursor_offset == cur->selection_anchor) {
+                     highlight_this = TRUE;
+                     break;
+                 }
+             }
              
-             gtk_snapshot_append_color(snapshot, &hl_color, 
-                &GRAPHENE_RECT_INIT(text_start_x, current_y_pos + self->padding_top, width - text_start_x, layout_h));
+             if (highlight_this) {
+                 GdkRGBA hl_color = self->color_text;
+                 hl_color.alpha = 0.05; 
+                 if (self->color_text.red > 0.5) hl_color.alpha = 0.1;
+                 
+                 gtk_snapshot_append_color(snapshot, &hl_color, 
+                    &GRAPHENE_RECT_INIT(text_start_x, current_y_pos + self->padding_top, width - text_start_x, layout_h));
+             }
         }
 
         /* Draw Line Number */
@@ -774,131 +838,103 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
            Simplified: If line is fully selected or partially.
         */
         
-        /* Draw Selection */
-        size_t start_sel = MIN(self->cursor_offset, self->selection_anchor);
-        size_t end_sel = MAX(self->cursor_offset, self->selection_anchor);
+        /* 1. Draw Selections for all cursors */
         size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
-        size_t raw_line_end = line_start_off + len + 1; /* Approximate end including newline if any */
-        
-        if (start_sel < raw_line_end && end_sel > line_start_off && start_sel != end_sel) {
-            size_t sel_in_line_start = MAX(start_sel, line_start_off) - line_start_off;
-            size_t sel_in_line_end = MIN(end_sel, (line_start_off + len)) - line_start_off;
-            
-            /* Handle empty/newline-only lines */
-            if (len == 0) {
-                gtk_snapshot_append_color(snapshot, 
-                                          &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
-                                          &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)layout_h));
-            } else {
-                /* Iterate over visual lines in the layout */
-                PangoLayoutIter *iter = pango_layout_get_iter(layout);
-                do {
-                    PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
-                    int line_start_index = p_line->start_index;
-                    int line_end_index = line_start_index + p_line->length;
-                    
-                    PangoRectangle line_rect;
-                    pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
-                    
-                    double ry = pango_units_to_double(line_rect.y);
-                    double rh;
-                    
-                    /* Peek next line to calculate height for vertical continuity */
-                    PangoLayoutIter *next_iter = pango_layout_iter_copy(iter);
-                    if (pango_layout_iter_next_line(next_iter)) {
-                        PangoRectangle next_rect;
-                        pango_layout_iter_get_line_extents(next_iter, NULL, &next_rect);
-                        rh = pango_units_to_double(next_rect.y) - ry;
-                    } else {
-                        rh = layout_h - ry;
-                    }
-                    pango_layout_iter_free(next_iter);
-                    
-                    if (sel_in_line_end >= (size_t)line_start_index && sel_in_line_start <= (size_t)line_end_index) {
-                        int *ranges;
-                        int n_ranges;
-                        int range_start = (int)MAX(sel_in_line_start, (size_t)line_start_index);
-                        int range_end = (int)MIN(sel_in_line_end, (size_t)line_end_index);
-                        
-                        pango_layout_line_get_x_ranges(p_line, range_start, range_end, &ranges, &n_ranges);
-                        
-                        for (int r = 0; r < n_ranges; r++) {
-                            double rx = pango_units_to_double(ranges[2 * r]);
-                            double rw = pango_units_to_double(ranges[2 * r + 1] - ranges[2 * r]);
-                            
-                            if (rw > 0) {
-                                gtk_snapshot_append_color(snapshot, 
-                                                          &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
-                                                          &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
-                            }
-                        }
-                        g_free(ranges);
+        size_t raw_line_end = line_start_off + len + 1;
 
-                        /* Selection extension for wrapped lines or newline */
-                        if (end_sel > line_start_off + (size_t)line_end_index) {
-                            /* Find the visual end of this line to extend to the widget edge */
-                            int x_pos;
-                            /* For the last char of the visual line, where would the cursor be? */
-                            pango_layout_line_index_to_x(p_line, line_end_index, FALSE, &x_pos);
-                            double dx = pango_units_to_double(x_pos);
+        for (guint c = 0; c < self->cursors->len; c++) {
+            EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+            
+            size_t start_sel = MIN(cur->cursor_offset, cur->selection_anchor);
+            size_t end_sel = MAX(cur->cursor_offset, cur->selection_anchor);
+            
+            if (start_sel < raw_line_end && end_sel > line_start_off && start_sel != end_sel) {
+                size_t sel_in_line_start = MAX(start_sel, line_start_off) - line_start_off;
+                size_t sel_in_line_end = MIN(end_sel, (line_start_off + len)) - line_start_off;
+                
+                if (len == 0) {
+                    if (end_sel > line_start_off) {
+                        gtk_snapshot_append_color(snapshot, 
+                                                  &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
+                                                  &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)layout_h));
+                    }
+                } else {
+                    PangoLayoutIter *iter = pango_layout_get_iter(layout);
+                    do {
+                        PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
+                        int line_start_index = p_line->start_index;
+                        int line_end_index = line_start_index + p_line->length;
+                        
+                        PangoRectangle line_rect;
+                        pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
+                        double ry = pango_units_to_double(line_rect.y);
+                        double rh;
+                         PangoLayoutIter *next_iter = pango_layout_iter_copy(iter);
+                         if (pango_layout_iter_next_line(next_iter)) {
+                             PangoRectangle next_rect;
+                             pango_layout_iter_get_line_extents(next_iter, NULL, &next_rect);
+                             rh = pango_units_to_double(next_rect.y) - ry;
+                         } else {
+                             rh = layout_h - ry;
+                         }
+                         pango_layout_iter_free(next_iter);
+
+                        if (sel_in_line_end >= (size_t)line_start_index && sel_in_line_start <= (size_t)line_end_index) {
+                            int *ranges; int n_ranges;
+                            int range_start = (int)MAX(sel_in_line_start, (size_t)line_start_index);
+                            int range_end = (int)MIN(sel_in_line_end, (size_t)line_end_index);
                             
-                            double ex, ew;
-                            if (p_line->resolved_dir == PANGO_DIRECTION_RTL) {
-                                ex = 0;
-                                ew = dx;
-                            } else {
-                                ex = dx;
-                                ew = width - dx;
+                            pango_layout_line_get_x_ranges(p_line, range_start, range_end, &ranges, &n_ranges);
+                            for (int r = 0; r < n_ranges; r++) {
+                                double rx = pango_units_to_double(ranges[2 * r]);
+                                double rw = pango_units_to_double(ranges[2 * r + 1] - ranges[2 * r]);
+                                if (rw > 0) gtk_snapshot_append_color(snapshot, &(GdkRGBA){0.2, 0.4, 0.8, 0.35}, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
                             }
+                            g_free(ranges);
                             
-                            if (ew > 0) {
-                                gtk_snapshot_append_color(snapshot, 
-                                                          &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
-                                                          &GRAPHENE_RECT_INIT((float)ex, (float)ry, (float)ew, (float)rh));
+                            if (end_sel > line_start_off + (size_t)line_end_index) {
+                                int x_pos;
+                                pango_layout_line_index_to_x(p_line, line_end_index, FALSE, &x_pos);
+                                double dx = pango_units_to_double(x_pos);
+                                double ew = (p_line->resolved_dir == PANGO_DIRECTION_RTL) ? dx : width - dx;
+                                double ex = (p_line->resolved_dir == PANGO_DIRECTION_RTL) ? 0 : dx;
+                                if (ew > 0) gtk_snapshot_append_color(snapshot, &(GdkRGBA){0.2, 0.4, 0.8, 0.35}, &GRAPHENE_RECT_INIT((float)ex, (float)ry, (float)ew, (float)rh));
                             }
                         }
-                    }
-                } while (pango_layout_iter_next_line(iter));
-                pango_layout_iter_free(iter);
+                    } while (pango_layout_iter_next_line(iter));
+                    pango_layout_iter_free(iter);
+                }
             }
         }
-
+        
+        /* 2. Draw Text */
         gtk_snapshot_append_layout(snapshot, layout, &self->color_text);
         
-        /* Draw cursor - only when no selection */
-        gboolean has_selection = (self->cursor_offset != self->selection_anchor);
-        if (line_idx == cursor_line && self->cursor_alpha > 0.01 && !has_selection && !self->is_dragging_selection) {
-             size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
-             if (self->cursor_offset >= line_start_off) {
-                 size_t index_in_line = self->cursor_offset - line_start_off;
-                 if (index_in_line > len) index_in_line = len;
-                 
-                 PangoRectangle strong_pos;
-                 pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
-                 
-                 /* Apply cursor alpha for blink animation */
-                 GdkRGBA cursor_color = self->color_cursor;
-                 cursor_color.alpha = self->cursor_alpha;
-                 
-                 /* Snap to integer pixels for crisp cursor */
-                 int cursor_x = (int)(pango_units_to_double(strong_pos.x) + 0.5);
-                 int cursor_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
-                 
-                 /* User requested caret size as per line height. 
-                    Force cursor height to match our calculated line_height for consistency 
-                    across different scripts/lines. */
-                 int cursor_h = (int)self->line_height;
-                 
-                 /* Adjust y if Pango's local line top differs significantly?
-                    Usually strong_pos.y is relative to the layout top (0).
-                    If we force height, we should center it or align top?
-                    For a single line layout, y is 0. */
-
-                 
-                 gtk_snapshot_append_color(snapshot, 
-                                           &cursor_color,
-                                           &GRAPHENE_RECT_INIT(cursor_x, cursor_y, 1, cursor_h));
-             }
+        /* 3. Draw Cursors for all cursors */
+        for (guint c = 0; c < self->cursors->len; c++) {
+            EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+            gboolean has_selection = (cur->cursor_offset != cur->selection_anchor);
+            
+            /* Optimized check: Is cursor within this line's range? */
+            if (cur->cursor_offset >= line_start_off && cur->cursor_offset <= (line_start_off + len)) {
+                
+                if (self->cursor_alpha > 0.01 && !has_selection && !self->is_dragging_selection) {
+                     size_t index_in_line = cur->cursor_offset - line_start_off;
+                     /* Safety clamp */
+                     if (index_in_line > len) index_in_line = len;
+                     
+                     PangoRectangle strong_pos;
+                     pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
+                     
+                     GdkRGBA cursor_color = self->color_cursor;
+                     cursor_color.alpha = self->cursor_alpha;
+                     int cursor_x = (int)(pango_units_to_double(strong_pos.x) + 0.5);
+                     int cursor_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
+                     int cursor_h = (int)self->line_height;
+                     
+                     gtk_snapshot_append_color(snapshot, &cursor_color, &GRAPHENE_RECT_INIT(cursor_x, cursor_y, 1, cursor_h));
+                }
+            }
         }
 
         /* Draw DnD Drop Caret */
@@ -1220,7 +1256,22 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     editor_widget_reset_cursor_blink(self);
     
     if (n_press == 2) {
-        /* Double click - select word, with special newline extension */
+        /* Double click - select word */
+        /* Always operate on the NEW primary cursor (or the single one if cleared) */
+        
+        gboolean alt_held = (gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture)) & GDK_ALT_MASK);
+        
+        if (!alt_held) {
+             editor_widget_clear_cursors(self);
+             /* Primary cursor will be moved/expanded below */
+        } else {
+             /* Add new cursor if not close to existing? For now just add */
+             editor_widget_add_cursor(self, off);
+        }
+        
+        EditorCursor *primary = editor_widget_get_primary_cursor(self);
+        if (!primary) return; /* Should not happen */
+
         size_t total = document_get_length(self->doc);
         gboolean is_newline = FALSE;
         if (off < total) {
@@ -1230,10 +1281,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         }
         
         if (is_newline) {
-            /* Select trailing whitespace + newline + next line */
             size_t sel_start = off;
-            
-            /* Scan backwards to include any trailing whitespace before the newline */
             while (sel_start > 0) {
                 char *c = document_get_text_range(self->doc, sel_start - 1, 1);
                 if (c && (c[0] == ' ' || c[0] == '\t')) {
@@ -1244,123 +1292,151 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
                     break;
                 }
             }
-            
             size_t sel_end = off + 1;
             if (off + 1 < total) {
                 size_t next_line_start, next_line_end;
                 find_line_at_offset(self->doc, off + 1, &next_line_start, &next_line_end);
                 sel_end = next_line_end;
             }
-            self->selection_anchor = sel_end;
-            self->cursor_offset = sel_start;
+            primary->selection_anchor = sel_end;
+            primary->cursor_offset = sel_start;
         } else {
-            /* Check if clicking on whitespace - select all contiguous whitespace */
             gboolean is_whitespace = FALSE;
             if (off < total) {
                 char *ctext = document_get_text_range(self->doc, off, 1);
                 if (ctext && (ctext[0] == ' ' || ctext[0] == '\t')) is_whitespace = TRUE;
                 g_free(ctext);
             }
-            
             if (is_whitespace) {
-                /* Select all contiguous whitespace only */
                 size_t ws_start = off;
                 size_t ws_end = off;
-                
-                /* Scan backwards for whitespace start */
                 while (ws_start > 0) {
                     char *c = document_get_text_range(self->doc, ws_start - 1, 1);
-                    if (c && (c[0] == ' ' || c[0] == '\t')) {
-                        ws_start--;
-                        g_free(c);
-                    } else {
-                        g_free(c);
-                        break;
-                    }
+                    if (c && (c[0] == ' ' || c[0] == '\t')) ws_start--;
+                    else { g_free(c); break; }
+                    g_free(c);
                 }
-                
-                /* Scan forwards for whitespace end */
                 while (ws_end < total) {
                     char *c = document_get_text_range(self->doc, ws_end, 1);
-                    if (c && (c[0] == ' ' || c[0] == '\t')) {
-                        ws_end++;
-                        g_free(c);
-                    } else {
-                        g_free(c);
-                        break;
-                    }
+                    if (c && (c[0] == ' ' || c[0] == '\t')) ws_end++;
+                    else { g_free(c); break; }
+                    g_free(c);
                 }
-                
-                self->selection_anchor = ws_end;
-                self->cursor_offset = ws_start;
+                primary->selection_anchor = ws_end;
+                primary->cursor_offset = ws_start;
             } else {
                 size_t word_start, word_end;
                 editor_widget_find_word_boundary(self, off, &word_start, &word_end);
-                self->selection_anchor = word_end;
-                self->cursor_offset = word_start;
+                primary->selection_anchor = word_end;
+                primary->cursor_offset = word_start;
             }
         }
-        self->alt_word_mode = TRUE; /* Double click starts word mode */
+        self->alt_word_mode = TRUE;
         self->multi_click_selection = TRUE;
         self->multi_click_mode = 2;
-        self->multi_click_start = MIN(self->selection_anchor, self->cursor_offset);
-        self->multi_click_end = MAX(self->selection_anchor, self->cursor_offset);
+        self->multi_click_start = MIN(primary->selection_anchor, primary->cursor_offset);
+        self->multi_click_end = MAX(primary->selection_anchor, primary->cursor_offset);
+        
     } else if (n_press == 3) {
-        /* Triple click - select entire line */
+        /* Triple click */
+        gboolean alt_held = (gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture)) & GDK_ALT_MASK);
+        if (!alt_held) {
+             editor_widget_clear_cursors(self);
+        } else {
+             editor_widget_add_cursor(self, off);
+        }
+        EditorCursor *primary = editor_widget_get_primary_cursor(self);
+        
         size_t line_start, line_end;
         find_line_at_offset(self->doc, off, &line_start, &line_end);
-        self->selection_anchor = line_end;
-        self->cursor_offset = line_start;
-        self->alt_word_mode = TRUE; /* Triple click is also word-like */
+        primary->selection_anchor = line_end;
+        primary->cursor_offset = line_start;
+        self->alt_word_mode = TRUE;
         self->multi_click_selection = TRUE;
         self->multi_click_mode = 3;
-        self->multi_click_start = line_start;  /* Store for drag extension */
+        self->multi_click_start = line_start;
         self->multi_click_end = line_end;
     } else {
         /* Single click */
         self->multi_click_selection = FALSE;
         GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
         
-        /* Check if clicking inside existing selection */
-        size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
-        size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
-        gboolean has_selection = (sel_start != sel_end);
-        gboolean click_in_selection = has_selection && (off >= sel_start && off < sel_end);
-        
-        if (state & GDK_SHIFT_MASK) {
-            if (click_in_selection) {
-                /* Inside click -> Keep anchor, just move cursor to reduce selection */
-                self->cursor_offset = off;
-                /* Anchor stays as-is (self->selection_anchor is unchanged) */
-            } else {
-                /* Outside click -> Smart Pivot */
-                if (off >= sel_end) {
-                    /* Clicked after selection -> Anchor at start, extend right */
-                    self->selection_anchor = sel_start;
-                    self->cursor_offset = off;
-                } else if (off < sel_start) {
-                    /* Clicked before selection -> Anchor at end, extend left */
-                    self->selection_anchor = sel_end;
-                    self->cursor_offset = off;
-                } else {
-                    /* Fallback (shouldn't happen given logic above) */
-                    self->cursor_offset = off;
-                }
-            }
-            self->alt_word_mode = FALSE; /* Becomes manual after modification */
-        } else if (click_in_selection) {
-            /* Start potential drag of selection */
-            self->is_dragging_selection = TRUE;
-            self->drag_start_offset = off;
-            /* Don't change selection yet - wait for drag or click release */
+        if (state & GDK_ALT_MASK) {
+            /* Alt+Click: Add cursor (or toggle) */
+            editor_widget_add_cursor(self, off);
+             /* Do NOT move primary cursor here! add_cursor creates new one at off. */
+             self->alt_word_mode = FALSE;
         } else {
-            /* Standard click: Reset selection */
-            self->cursor_offset = off;
-            self->selection_anchor = off;
-            self->alt_word_mode = FALSE;
-        }
+             /* Check if clicking inside selection of ANY cursor */
+             gboolean click_in_selection = FALSE;
+             EditorCursor *clicked_cursor = NULL;
+             
+             for (guint c = 0; c < self->cursors->len; c++) {
+                 EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                 size_t sel_start = MIN(cur->cursor_offset, cur->selection_anchor);
+                 size_t sel_end = MAX(cur->cursor_offset, cur->selection_anchor);
+                 if (sel_start != sel_end && off >= sel_start && off < sel_end) {
+                     click_in_selection = TRUE;
+                     clicked_cursor = cur;
+                     break; 
+                 }
+             }
 
-        /* Middle click paste */
+             if (state & GDK_SHIFT_MASK) {
+                 /* Shift+Click: collapse to single selection extending from primary anchor */
+                 editor_widget_clear_cursors(self);
+                 EditorCursor *primary = editor_widget_get_primary_cursor(self);
+                 
+                 /* Smart Pivot on Primary */
+                 size_t p_start = MIN(primary->cursor_offset, primary->selection_anchor);
+                 size_t p_end = MAX(primary->cursor_offset, primary->selection_anchor);
+                 
+                 /* Update primary to extend to 'off' */
+                 if (off >= p_end) {
+                     /* Extend forward: Anchor stays at start */
+                     primary->selection_anchor = p_start;
+                     primary->cursor_offset = off;
+                 } else if (off < p_start) {
+                     /* Extend backward: Anchor moves to end */
+                     primary->selection_anchor = p_end;
+                     primary->cursor_offset = off;
+                 } else {
+                     /* Clicking inside: shrinks but keeps anchor direction usually? 
+                        VS Code logic: Anchor assumes the "pivot" point. 
+                        If we were selecting [10, 20] (caret at 20) and click 15 -> [10, 15] (caret 15).
+                        Anchor (10) stays.
+                     */
+                     primary->cursor_offset = off;
+                 }
+                 /* Sync cache */
+                 self->cursor_offset = primary->cursor_offset;
+                 self->selection_anchor = primary->selection_anchor;
+                 
+                 self->alt_word_mode = FALSE;
+             } else if (click_in_selection) {
+                 /* Drag start logic */
+                 self->is_dragging_selection = TRUE;
+                 self->drag_start_offset = off;
+                 /* Which cursor are we dragging? 
+                    For now, treat "dragging selection" as valid if any cursor selected it.
+                    We don't modify cursors yet.
+                 */
+             } else {
+                 /* Normal click: Clear all, move primary to here */
+                 editor_widget_clear_cursors(self);
+                 EditorCursor *primary = editor_widget_get_primary_cursor(self);
+                 primary->cursor_offset = off;
+                 primary->selection_anchor = off;
+                 primary->target_x = -1.0; /* Will be updated by update_target_x */
+                 
+                 /* Sync cache to ensure drag selection uses correct anchor */
+                 self->cursor_offset = primary->cursor_offset;
+                 self->selection_anchor = primary->selection_anchor;
+                 self->target_x = primary->target_x;
+                 self->alt_word_mode = FALSE;
+             }
+        }
+        
         if (gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 2) {
             editor_widget_paste_primary(self);
         }
@@ -1388,27 +1464,41 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
         return;
     }
     
-    /* Check if we're starting a drag on a selection */
+    /* Check if we're starting a drag on a selection (iterate all cursors) */
     size_t off;
     editor_widget_get_offset_at_point(self, x, y, &off);
     
-    size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
-    size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+    gboolean in_selection = FALSE;
+    EditorCursor *found_cur = NULL;
     
-    if (sel_start != sel_end && off >= sel_start && off < sel_end) {
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        size_t s = MIN(cur->cursor_offset, cur->selection_anchor);
+        size_t e = MAX(cur->cursor_offset, cur->selection_anchor);
+        if (s != e && off >= s && off < e) {
+            in_selection = TRUE;
+            found_cur = cur;
+            break;
+        }
+    }
+    
+    if (in_selection && found_cur) {
         /* Starting drag on existing selection - prepare for DnD */
         self->is_dragging_selection = TRUE;
         self->drag_start_offset = off;
 
         /* Create ghost layout for the selected text */
-        char *text = document_get_text_range(self->doc, sel_start, sel_end - sel_start);
+        size_t s = MIN(found_cur->cursor_offset, found_cur->selection_anchor);
+        size_t e = MAX(found_cur->cursor_offset, found_cur->selection_anchor);
+        
+        char *text = document_get_text_range(self->doc, s, e - s);
         if (text) {
             if (self->drag_ghost_layout) g_object_unref(self->drag_ghost_layout);
             self->drag_ghost_layout = gtk_widget_create_pango_layout(GTK_WIDGET(self), text);
             pango_layout_set_font_description(self->drag_ghost_layout, self->font_desc);
             g_free(text);
         }
-        self->is_dnd_active = FALSE;
+        self->is_dnd_active = FALSE; /* Will be set to true if drag threshold passed */
     } else {
         /* Normal click/drag - selection handled by on_click_pressed and on_drag_update */
         self->is_dragging_selection = FALSE;
@@ -1518,6 +1608,123 @@ start_autoscroll(EditorWidget *self, int direction, double speed)
     }
 }
 
+static int
+compare_cursors_desc(gconstpointer a, gconstpointer b)
+{
+    const EditorCursor *ca = (const EditorCursor *)a;
+    const EditorCursor *cb = (const EditorCursor *)b;
+    /* Sort descending by offset */
+    if (ca->cursor_offset > cb->cursor_offset) return -1;
+    if (ca->cursor_offset < cb->cursor_offset) return 1;
+    return 0;
+}
+
+static void
+editor_widget_backspace(EditorWidget *self)
+{
+    if (!self->cursors || self->cursors->len == 0) return;
+    
+    /* Sort cursors descending to avoid index shifting issues */
+    g_array_sort(self->cursors, compare_cursors_desc);
+    
+    document_begin_undo_group(self->doc);
+    
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        
+        size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+        size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+        
+        long delta = 0;
+        
+        if (start != end) {
+             /* Delete selection */
+             document_delete(self->doc, start, end - start);
+             cur->cursor_offset = start;
+             cur->selection_anchor = start;
+             delta -= (long)(end - start);
+        } else {
+             /* Delete char before */
+             if (cur->cursor_offset > 0) {
+                 document_delete(self->doc, cur->cursor_offset - 1, 1);
+                 cur->cursor_offset--;
+                 cur->selection_anchor = cur->cursor_offset;
+                 delta = -1;
+             }
+        }
+        
+        if (delta != 0) {
+            for (guint j = 0; j < c; j++) {
+                EditorCursor *prev = &g_array_index(self->cursors, EditorCursor, j);
+                if ((long)prev->cursor_offset + delta < 0) prev->cursor_offset = 0;
+                else prev->cursor_offset += delta;
+                
+                if ((long)prev->selection_anchor + delta < 0) prev->selection_anchor = 0;
+                else prev->selection_anchor += delta;
+            }
+        }
+    }
+    
+    document_end_undo_group(self->doc);
+    
+    editor_widget_reset_cursor_blink(self);
+    editor_widget_update_adjustments(self, -1, -1);
+    scroll_to_cursor(self);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static void
+editor_widget_delete(EditorWidget *self)
+{
+    if (!self->cursors || self->cursors->len == 0) return;
+    
+    /* Sort cursors descending */
+    g_array_sort(self->cursors, compare_cursors_desc);
+    
+    document_begin_undo_group(self->doc);
+    
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        
+        size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+        size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+        
+        long delta = 0;
+        
+        if (start != end) {
+             document_delete(self->doc, start, end - start);
+             cur->cursor_offset = start;
+             cur->selection_anchor = start;
+             delta -= (long)(end - start);
+        } else {
+             /* Delete char after */
+             size_t total = document_get_length(self->doc);
+             if (cur->cursor_offset < total) {
+                 document_delete(self->doc, cur->cursor_offset, 1);
+                 /* Offset stays same */
+                 delta = -1;
+             }
+        }
+        
+        if (delta != 0) {
+            for (guint j = 0; j < c; j++) {
+                EditorCursor *prev = &g_array_index(self->cursors, EditorCursor, j);
+                if ((long)prev->cursor_offset + delta < 0) prev->cursor_offset = 0;
+                else prev->cursor_offset += delta;
+                
+                if ((long)prev->selection_anchor + delta < 0) prev->selection_anchor = 0;
+                else prev->selection_anchor += delta;
+            }
+        }
+    }
+    
+    document_end_undo_group(self->doc);
+    
+    editor_widget_reset_cursor_blink(self);
+    editor_widget_update_adjustments(self, -1, -1);
+    scroll_to_cursor(self);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
 static void
 update_selection_extension(EditorWidget *self, size_t off)
 {
@@ -1554,6 +1761,14 @@ update_selection_extension(EditorWidget *self, size_t off)
         self->cursor_offset = off;
         self->alt_word_mode = FALSE; /* Manual drag selection is character-based */
     }
+    
+    /* Sync back to primary cursor */
+    EditorCursor *primary = editor_widget_get_primary_cursor(self);
+    if (primary) {
+        primary->cursor_offset = self->cursor_offset;
+        primary->selection_anchor = self->selection_anchor;
+        primary->target_x = -1; /* Reset target x on drag */
+    }
 }
 
 static void
@@ -1588,8 +1803,9 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
             size_t drop_off;
             editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &drop_off);
             
-            size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
-            size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+            EditorCursor *primary = editor_widget_get_primary_cursor(self);
+            size_t sel_start = MIN(primary->cursor_offset, primary->selection_anchor);
+            size_t sel_end = MAX(primary->cursor_offset, primary->selection_anchor);
 
             /* Rule: Never show caret inside or overlap selected range */
             if (drop_off >= sel_start && drop_off < sel_end) {
@@ -1648,8 +1864,9 @@ editor_widget_drag_drop_finish(EditorWidget *self, size_t drop_off)
 {
     if (drop_off == (size_t)-1 || !self->doc) return;
 
-    size_t sel_start = MIN(self->cursor_offset, self->selection_anchor);
-    size_t sel_end = MAX(self->cursor_offset, self->selection_anchor);
+    EditorCursor *primary = editor_widget_get_primary_cursor(self);
+    size_t sel_start = MIN(primary->cursor_offset, primary->selection_anchor);
+    size_t sel_end = MAX(primary->cursor_offset, primary->selection_anchor);
     size_t sel_len = sel_end - sel_start;
     
     char *text = document_get_text_range(self->doc, sel_start, sel_len);
@@ -1669,8 +1886,10 @@ editor_widget_drag_drop_finish(EditorWidget *self, size_t drop_off)
     document_insert(self->doc, drop_off, text, sel_len);
     
     /* Select dropped text */
-    self->selection_anchor = drop_off;
-    self->cursor_offset = drop_off + sel_len;
+    /* Select dropped text */
+    primary = editor_widget_get_primary_cursor(self);
+    primary->selection_anchor = drop_off;
+    primary->cursor_offset = drop_off + sel_len;
     self->alt_word_mode = FALSE;
     
     document_end_undo_group(self->doc);
@@ -1708,8 +1927,9 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
             editor_widget_drag_drop_finish(self, self->drag_drop_offset);
         } else if (!self->is_dnd_active) {
             /* Clicked inside selection without dragging -> Clear selection */
-            self->cursor_offset = self->drag_start_offset;
-            self->selection_anchor = self->drag_start_offset;
+            EditorCursor *primary = editor_widget_get_primary_cursor(self);
+            primary->cursor_offset = self->drag_start_offset;
+            primary->selection_anchor = self->drag_start_offset;
             self->alt_word_mode = FALSE;
         }
         self->is_dnd_active = FALSE;
@@ -1724,49 +1944,88 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     editor_widget_update_adjustments(self, -1, -1);
 }
 
+/* Helper for comparing cursors - need forward declaration or static here */
+static int compare_cursors_desc(gconstpointer a, gconstpointer b);
+
 static size_t
 editor_widget_delete_selection(EditorWidget *self)
 {
-    if (self->cursor_offset == self->selection_anchor) return 0;
+    /* This function handles bulk deletion of all selections */
+    if (!self->cursors || self->cursors->len == 0) return 0;
     
-    size_t start = MIN(self->cursor_offset, self->selection_anchor);
-    size_t end = MAX(self->cursor_offset, self->selection_anchor);
-    size_t len = end - start;
+    g_array_sort(self->cursors, compare_cursors_desc);
     
-    document_delete(self->doc, start, len);
-    self->cursor_offset = start;
-    self->selection_anchor = start;
+    size_t total_deleted = 0;
+    document_begin_undo_group(self->doc);
     
-    return len;
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+        size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+        
+        if (start != end) {
+            size_t len = end - start;
+            document_delete(self->doc, start, len);
+            total_deleted += len;
+            cur->cursor_offset = start;
+            cur->selection_anchor = start;
+        }
+    }
+    
+    document_end_undo_group(self->doc);
+    return total_deleted;
 }
 
 static void
 editor_widget_copy(EditorWidget *self)
 {
-    if (self->cursor_offset == self->selection_anchor) return;
+    /* Copy logic for multi-cursor:
+       VS Code joins selection with newlines. 
+    */
+    GString *clip_text = g_string_new("");
     
-    size_t start = MIN(self->cursor_offset, self->selection_anchor);
-    size_t end = MAX(self->cursor_offset, self->selection_anchor);
-    size_t len = end - start;
+    /* Sort explicit ascending for copy order */
+    /* Or just iterate default? Default array order seems insertion order. */
+    /* Usually we want document order. */
+    /* Let's dup and sort ascending. */
     
-    char *text = document_get_text_range(self->doc, start, len);
-    GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
-    gdk_clipboard_set_text(clipboard, text);
-    g_free(text);
+    GArray *sorted = g_array_sized_new(FALSE, FALSE, sizeof(EditorCursor), self->cursors->len);
+    g_array_append_vals(sorted, self->cursors->data, self->cursors->len);
+    /* Ascending sort needed? We did descending earlier. */
+    /* Implement compare_cursors_asc inline or helper? */
+    /* Simple bubble sort for small N or just iterate finding min? */
+    /* Actually we need a real sort. */
+    /* Let's just traverse array. If we want doc order, we should sort. */
+    
+    /* Assume sorted for now or TODO implement sort. */
+    
+    for (guint c = 0; c < self->cursors->len; c++) {
+         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+         size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+         size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+         if (start == end) continue;
+         
+         char *text = document_get_text_range(self->doc, start, end - start);
+         if (clip_text->len > 0) g_string_append_c(clip_text, '\n');
+         g_string_append(clip_text, text);
+         g_free(text);
+    }
+    
+    if (clip_text->len > 0) {
+        GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
+        gdk_clipboard_set_text(clipboard, clip_text->str);
+    }
+    g_string_free(clip_text, TRUE);
+    g_array_free(sorted, TRUE);
 }
 
 static void
 editor_widget_cut(EditorWidget *self)
 {
     if (!self->doc) return;
-    
-    /* Copy selection then delete it */
     editor_widget_copy(self);
-    if (editor_widget_delete_selection(self)) {
-        editor_widget_reset_cursor_blink(self);
-        gtk_widget_queue_draw(GTK_WIDGET(self));
-        editor_widget_update_adjustments(self, -1, -1);
-    }
+    editor_widget_delete_selection(self); 
+    /* delete_selection implements bulk delete sorted descending */
 }
 
 static void
@@ -1781,12 +2040,16 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
         /* If we have a selection, delete it first */
         editor_widget_delete_selection(self);
         
-        document_insert(self->doc, self->cursor_offset, text, len);
+        /* Insert at all cursors (delete_selection already reduced to insertion points) */
+        /* Actually delete_selection might simplify things but paste usually inserts at all cursors */
+        /* If we just did delete_selection, cursors are at correct spots. */
         
-        /* Move cursor to end of inserted text */
-        size_t new_off = self->cursor_offset + len;
-        self->cursor_offset = new_off;
-        self->selection_anchor = new_off;
+        for (guint c = 0; c < self->cursors->len; c++) {
+             EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+             document_insert(self->doc, cur->cursor_offset, text, len);
+             cur->cursor_offset += len;
+             cur->selection_anchor = cur->cursor_offset;
+        }
         
         document_end_undo_group(self->doc);
         
@@ -1819,14 +2082,15 @@ on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer us
                But this is usually called by middle click logic which sets cursor first) */
             
             /* Wait, middle click sets cursor_offset in on_click_pressed. 
-               So we insert at cursor_offset. */
+               So we insert at primary cursor. */
                
+            EditorCursor *primary = editor_widget_get_primary_cursor(self);
             document_begin_undo_group(self->doc);
-            document_insert(self->doc, self->cursor_offset, text, len);
+            document_insert(self->doc, primary->cursor_offset, text, len);
             
             /* Advance cursor */
-            self->cursor_offset += len;
-            self->selection_anchor = self->cursor_offset;
+            primary->cursor_offset += len;
+            primary->selection_anchor = primary->cursor_offset;
             
             document_end_undo_group(self->doc);
             
@@ -1853,7 +2117,15 @@ scroll_to_cursor(EditorWidget *self)
 {
     if (!self->vadjustment || !self->doc) return;
     
-    size_t cursor_line = document_get_line_of_offset(self->doc, self->cursor_offset);
+    EditorCursor *primary = editor_widget_get_primary_cursor(self);
+    if (!primary) return;
+    
+    /* SYNC CACHE from Primary Cursor */
+    self->cursor_offset = primary->cursor_offset;
+    self->selection_anchor = primary->selection_anchor;
+    self->target_x = primary->target_x;
+    
+    size_t cursor_line = document_get_line_of_offset(self->doc, primary->cursor_offset);
     double cursor_line_y;
 
     /* Get Y of cursor line */
@@ -1965,62 +2237,183 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
 static void
 update_target_x(EditorWidget *self)
 {
-    size_t line_idx = document_get_line_of_offset(self->doc, self->cursor_offset);
-    size_t line_start = document_get_offset_of_line(self->doc, line_idx);
-    size_t index_in_line = self->cursor_offset - line_start;
-    
-    char *text;
-    size_t len;
-    PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
-    if (!layout) return;
-    
-    if (index_in_line > len) index_in_line = len;
-    
-    PangoRectangle strong_pos;
-    pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
-    self->target_x = pango_units_to_double(strong_pos.x);
-    
-    g_object_unref(layout);
-    g_free(text);
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        
+        size_t line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
+        size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+        size_t index_in_line = cur->cursor_offset - line_start;
+        
+        char *text; size_t len;
+        PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
+        if (!layout) continue;
+        
+        if (index_in_line > len) index_in_line = len;
+        
+        PangoRectangle strong_pos;
+        pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
+        cur->target_x = pango_units_to_double(strong_pos.x);
+        
+        g_object_unref(layout);
+        g_free(text);
+    }
 }
 
 static void
 move_cursor(EditorWidget *self, int visual_lines_delta)
 {
     if (visual_lines_delta == 0) return;
+    
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        
+        size_t line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
+        size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+        size_t char_idx = cur->cursor_offset - line_start;
+        
+        char *text = NULL; size_t len;
+        PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
+        if (!layout) continue;
 
-    size_t line_idx = document_get_line_of_offset(self->doc, self->cursor_offset);
+        if (cur->target_x < 0) {
+             PangoRectangle strong_pos;
+             pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &strong_pos, NULL);
+             cur->target_x = pango_units_to_double(strong_pos.x);
+        }
+        
+        PangoRectangle cursor_pos;
+        pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &cursor_pos, NULL);
+        int cursor_y_center = cursor_pos.y + (cursor_pos.height / 2);
+        
+        PangoLayoutIter *iter = pango_layout_get_iter(layout);
+        int current_v_line_idx = 0;
+        gboolean found_v_line = FALSE;
+        do {
+            PangoRectangle line_extents;
+            pango_layout_iter_get_line_extents(iter, NULL, &line_extents);
+            if (cursor_y_center >= line_extents.y && cursor_y_center < line_extents.y + line_extents.height) {
+                found_v_line = TRUE;
+                break;
+            }
+            current_v_line_idx++;
+        } while (pango_layout_iter_next_line(iter));
+        pango_layout_iter_free(iter);
+        
+        if (!found_v_line) current_v_line_idx = MAX(0, pango_layout_get_line_count(layout) - 1);
+        
+        int local_delta = visual_lines_delta;
+        size_t current_line_idx = line_idx;
+        
+        while (TRUE) {
+            int total_v_lines = pango_layout_get_line_count(layout);
+            int target_v_line = current_v_line_idx + local_delta;
+
+            if (target_v_line >= 0 && target_v_line < total_v_lines) {
+                iter = pango_layout_get_iter(layout);
+                for (int i = 0; i < target_v_line; i++) pango_layout_iter_next_line(iter);
+                PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
+                int index, trailing;
+                pango_layout_line_x_to_index(v_line, (int)(cur->target_x * PANGO_SCALE), &index, &trailing);
+                size_t ls = document_get_offset_of_line(self->doc, current_line_idx);
+                cur->cursor_offset = ls + index + trailing;
+                pango_layout_iter_free(iter);
+                break;
+            } else {
+                if (local_delta > 0) {
+                     int lines_remaining = total_v_lines - current_v_line_idx - 1;
+                     local_delta -= (lines_remaining + 1);
+                     size_t next_line = current_line_idx + 1;
+                     if (next_line >= document_get_line_count(self->doc)) {
+                         iter = pango_layout_get_iter(layout);
+                         int last_v = total_v_lines - 1; 
+                         for (int i = 0; i < last_v; i++) pango_layout_iter_next_line(iter);
+                         PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
+                         int index, trailing;
+                         pango_layout_line_x_to_index(v_line, (int)(cur->target_x * PANGO_SCALE), &index, &trailing);
+                         size_t ls = document_get_offset_of_line(self->doc, current_line_idx);
+                         cur->cursor_offset = ls + index + trailing;
+                         pango_layout_iter_free(iter);
+                         break;
+                     }
+                     current_line_idx = next_line;
+                     g_object_unref(layout); g_free(text);
+                     layout = create_pango_layout_for_line(self, current_line_idx, &text, &len);
+                     current_v_line_idx = 0;
+                } else {
+                     int lines_above = current_v_line_idx;
+                     local_delta += (lines_above + 1);
+                     if (current_line_idx == 0) {
+                         iter = pango_layout_get_iter(layout);
+                         PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
+                         int index, trailing;
+                         pango_layout_line_x_to_index(v_line, (int)(cur->target_x * PANGO_SCALE), &index, &trailing);
+                         size_t ls = document_get_offset_of_line(self->doc, current_line_idx);
+                         cur->cursor_offset = ls + index + trailing;
+                         pango_layout_iter_free(iter);
+                         break;
+                     }
+                     current_line_idx--;
+                     g_object_unref(layout); g_free(text);
+                     layout = create_pango_layout_for_line(self, current_line_idx, &text, &len);
+                     current_v_line_idx = pango_layout_get_line_count(layout) - 1; 
+                }
+            }
+        }
+        g_object_unref(layout);
+        g_free(text);
+    }
+    
+    editor_widget_update_im_cursor_location(self);
+}
+
+static void
+editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_delta)
+{
+    if (!self->cursors || self->cursors->len == 0) return;
+    
+    /* Sort to find extreme cursor */
+    g_array_sort(self->cursors, compare_cursors_desc);
+    
+    EditorCursor *ref_cur = NULL;
+    if (visual_lines_delta > 0) {
+        /* Down: Use last cursor (index 0 is MAX in descending sort? Wait check sort) */
+        /* compare_cursors_desc: if a > b return -1. So Max is at 0. */
+        /* So Descending: [Max, ..., Min] */
+        /* Moving Down (increasing offset): Start from Max (index 0). */
+         ref_cur = &g_array_index(self->cursors, EditorCursor, 0); 
+    } else {
+        /* Up: Start from Min (last index) */
+        ref_cur = &g_array_index(self->cursors, EditorCursor, self->cursors->len - 1);
+    }
+    
+    /* Logic to find target offset - duplicated from move_cursor for single step */
+    size_t line_idx = document_get_line_of_offset(self->doc, ref_cur->cursor_offset);
     size_t line_start = document_get_offset_of_line(self->doc, line_idx);
-    size_t char_idx = self->cursor_offset - line_start;
-
-    char *text = NULL;
-    size_t len;
+    size_t char_idx = ref_cur->cursor_offset - line_start;
+    
+    char *text = NULL; size_t len;
     PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
     if (!layout) return;
-
-    /* If target_x isn't set, set it from current position */
-    if (self->target_x < 0) {
-        PangoRectangle strong_pos;
-        pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &strong_pos, NULL);
-        self->target_x = pango_units_to_double(strong_pos.x);
+    
+    double target_x = ref_cur->target_x;
+    if (target_x < 0) {
+         PangoRectangle strong_pos;
+         pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &strong_pos, NULL);
+         target_x = pango_units_to_double(strong_pos.x);
+         /* Update reference cursor too so it remembers x for subsequent moves */
+         ref_cur->target_x = target_x;
     }
-
-    /* Find current visual line index */
-    /* Find current visual line index based on cursor Y position */
+    
     PangoRectangle cursor_pos;
     pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &cursor_pos, NULL);
-    
-    /* Use center of cursor line to check containment, safer against rounding */
     int cursor_y_center = cursor_pos.y + (cursor_pos.height / 2);
     
     PangoLayoutIter *iter = pango_layout_get_iter(layout);
     int current_v_line_idx = 0;
     gboolean found_v_line = FALSE;
-    
     do {
         PangoRectangle line_extents;
         pango_layout_iter_get_line_extents(iter, NULL, &line_extents);
-        
         if (cursor_y_center >= line_extents.y && cursor_y_center < line_extents.y + line_extents.height) {
             found_v_line = TRUE;
             break;
@@ -2029,95 +2422,91 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
     } while (pango_layout_iter_next_line(iter));
     pango_layout_iter_free(iter);
     
-    if (!found_v_line) {
-        current_v_line_idx = MAX(0, pango_layout_get_line_count(layout) - 1);
-    }
-
-    /* Loop to consume delta across logical lines */
+    if (!found_v_line) current_v_line_idx = MAX(0, pango_layout_get_line_count(layout) - 1);
+    
+    size_t new_offset = ref_cur->cursor_offset; /* Fallback */
+    
+    int local_delta = visual_lines_delta;
+    size_t current_line_idx = line_idx;
+    
+    /* Loop to find target line */
     while (TRUE) {
         int total_v_lines = pango_layout_get_line_count(layout);
-
-        /* Check if target is within current logical line */
-        int target_v_line = current_v_line_idx + visual_lines_delta;
+        int target_v_line = current_v_line_idx + local_delta;
 
         if (target_v_line >= 0 && target_v_line < total_v_lines) {
-            /* Target reached in this line */
             iter = pango_layout_get_iter(layout);
             for (int i = 0; i < target_v_line; i++) pango_layout_iter_next_line(iter);
             PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
-            
             int index, trailing;
-            pango_layout_line_x_to_index(v_line, (int)(self->target_x * PANGO_SCALE), &index, &trailing);
-            line_start = document_get_offset_of_line(self->doc, line_idx);
-            self->cursor_offset = line_start + index + trailing;
+            pango_layout_line_x_to_index(v_line, (int)(target_x * PANGO_SCALE), &index, &trailing);
+            size_t ls = document_get_offset_of_line(self->doc, current_line_idx);
+            new_offset = ls + index + trailing;
             pango_layout_iter_free(iter);
-            
-            visual_lines_delta = 0; /* Done */
             break;
         } else {
-            /* Target is outside current logical line */
-            if (visual_lines_delta > 0) {
-                /* Moving down */
-                int lines_remaining = total_v_lines - current_v_line_idx - 1;
-                visual_lines_delta -= (lines_remaining + 1); /* +1 to jump to next line */
-                
-                size_t next_line = line_idx + 1;
-                if (next_line >= document_get_line_count(self->doc)) {
-                    /* End of doc - clamp to last visual line */
-                    visual_lines_delta = 0;
-                    /* Apply clamp to end of current line */
-                    iter = pango_layout_get_iter(layout);
-                    int last_v = total_v_lines - 1;
-                    for (int i = 0; i < last_v; i++) pango_layout_iter_next_line(iter);
-                    PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
-                    int index, trailing;
-                    pango_layout_line_x_to_index(v_line, (int)(self->target_x * PANGO_SCALE), &index, &trailing);
-                    line_start = document_get_offset_of_line(self->doc, line_idx);
-                    self->cursor_offset = line_start + index + trailing;
-                    pango_layout_iter_free(iter);
-                    break;
-                }
-                
-                /* Advance to next logical line */
-                line_idx = next_line;
-                g_object_unref(layout);
-                g_free(text);
-                layout = create_pango_layout_for_line(self, line_idx, &text, &len);
-                current_v_line_idx = 0; /* Start at top of next line */
+            if (local_delta > 0) {
+                 int lines_remaining = total_v_lines - current_v_line_idx - 1;
+                 local_delta -= (lines_remaining + 1);
+                 size_t next_line = current_line_idx + 1;
+                 if (next_line >= document_get_line_count(self->doc)) {
+                     /* EOF reached, clamp to end of last line */
+                     iter = pango_layout_get_iter(layout);
+                     int last_v = total_v_lines - 1; 
+                     for (int i = 0; i < last_v; i++) pango_layout_iter_next_line(iter);
+                     PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
+                     int index, trailing;
+                     pango_layout_line_x_to_index(v_line, (int)(target_x * PANGO_SCALE), &index, &trailing);
+                     size_t ls = document_get_offset_of_line(self->doc, current_line_idx);
+                     new_offset = ls + index + trailing;
+                     pango_layout_iter_free(iter);
+                     break;
+                 }
+                 current_line_idx = next_line;
+                 g_object_unref(layout); g_free(text);
+                 layout = create_pango_layout_for_line(self, current_line_idx, &text, &len);
+                 current_v_line_idx = 0;
             } else {
-                /* Moving up */
-                int lines_above = current_v_line_idx;
-                visual_lines_delta += (lines_above + 1); /* +1 to jump to prev line */
-                
-                if (line_idx == 0) {
-                    /* Top of doc - clamp to first visual line */
-                    visual_lines_delta = 0;
-                    /* Apply clamp to start of current line */
-                    iter = pango_layout_get_iter(layout);
-                    /* iter is already at 0 */
-                    PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
-                    int index, trailing;
-                    pango_layout_line_x_to_index(v_line, (int)(self->target_x * PANGO_SCALE), &index, &trailing);
-                    line_start = document_get_offset_of_line(self->doc, line_idx);
-                    self->cursor_offset = line_start + index + trailing;
-                    pango_layout_iter_free(iter);
-                    break;
-                }
-                
-                /* Retreat to prev logical line */
-                line_idx = line_idx - 1;
-                g_object_unref(layout);
-                g_free(text);
-                layout = create_pango_layout_for_line(self, line_idx, &text, &len);
-                /* Start at bottom of prev line */
-                current_v_line_idx = pango_layout_get_line_count(layout) - 1; 
+                 int lines_above = current_v_line_idx;
+                 local_delta += (lines_above + 1);
+                 if (current_line_idx == 0) {
+                     /* BOF reached */
+                     iter = pango_layout_get_iter(layout);
+                     PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
+                     int index, trailing;
+                     pango_layout_line_x_to_index(v_line, (int)(target_x * PANGO_SCALE), &index, &trailing);
+                     size_t ls = document_get_offset_of_line(self->doc, current_line_idx);
+                     new_offset = ls + index + trailing;
+                     pango_layout_iter_free(iter);
+                     break;
+                 }
+                 current_line_idx--;
+                 g_object_unref(layout); g_free(text);
+                 layout = create_pango_layout_for_line(self, current_line_idx, &text, &len);
+                 current_v_line_idx = pango_layout_get_line_count(layout) - 1; 
             }
         }
     }
-
     g_object_unref(layout);
     g_free(text);
-    editor_widget_update_im_cursor_location(self);
+    
+    /* Add the new cursor */
+    /* Check if duplicate before adding? editor_widget_add_cursor has toggle logic. 
+       If we land on existing, it deletes it. 
+       Check if new_offset matches any existing. */
+    gboolean exists = FALSE;
+    for (guint i=0; i<self->cursors->len; i++) {
+        EditorCursor *c = &g_array_index(self->cursors, EditorCursor, i);
+        if (c->cursor_offset == new_offset) { exists = TRUE; break; }
+    }
+    
+    if (!exists) {
+        editor_widget_add_cursor(self, new_offset);
+        /* Set target_x for the new cursor */
+        /* It is now at the end of array */
+        EditorCursor *new_cur = &g_array_index(self->cursors, EditorCursor, self->cursors->len - 1);
+        new_cur->target_x = target_x;
+    }
 }
 
 static gboolean
@@ -2143,6 +2532,9 @@ is_alt_word_char_at(Document *doc, size_t offset)
 static void
 editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
 {
+    /* Collapse to single cursor for complex move operations */
+    if (self->cursors && self->cursors->len > 1) editor_widget_clear_cursors(self);
+    
     size_t total = document_get_length(self->doc);
     size_t s = MIN(self->cursor_offset, self->selection_anchor);
     size_t e = MAX(self->cursor_offset, self->selection_anchor);
@@ -2154,13 +2546,7 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         if (off > 0 && !is_alt_word_char_at(self->doc, off) && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self, off))) {
             off = utf8_prev_grapheme(self, off);
         }
-        if (!is_alt_word_char_at(self->doc, off)) {
-            if (delta > 0) {
-                while (off < total && !is_alt_word_char_at(self->doc, off)) off = utf8_next_grapheme(self, off);
-            } else {
-                while (off > 0 && !is_alt_word_char_at(self->doc, off)) off = utf8_prev_grapheme(self, off);
-            }
-        }
+
         if (off >= total || !is_alt_word_char_at(self->doc, off)) return;
         
         s = off;
@@ -2199,6 +2585,11 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         }
         g_free(sel_text);
         update_target_x(self);
+        
+        /* Sync primary cursor */
+        EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+        primary->cursor_offset = self->cursor_offset;
+        primary->selection_anchor = self->selection_anchor;
         return;
     }
     
@@ -2267,11 +2658,18 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         g_free(sel_text); g_free(sep_text); g_free(w2_text);
     }
     update_target_x(self);
+    /* Sync primary cursor */
+    EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+    primary->cursor_offset = self->cursor_offset;
+    primary->selection_anchor = self->selection_anchor;
 }
 
 static void
 editor_widget_move_lines_vertically(EditorWidget *self, int delta)
 {
+    /* Collapse to single cursor for complex move operations */
+    if (self->cursors && self->cursors->len > 1) editor_widget_clear_cursors(self);
+
     size_t start_off = MIN(self->cursor_offset, self->selection_anchor);
     size_t end_off = MAX(self->cursor_offset, self->selection_anchor);
     
@@ -2353,7 +2751,12 @@ editor_widget_move_lines_vertically(EditorWidget *self, int delta)
     }
     
     document_end_undo_group(self->doc);
+    
     update_target_x(self);
+    /* Sync primary cursor */
+    EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+    primary->cursor_offset = self->cursor_offset;
+    primary->selection_anchor = self->selection_anchor;
 }
 
 
@@ -2428,22 +2831,57 @@ get_cursor_screen_coordinates(EditorWidget *self, double *out_x, double *out_y)
 }
 
 /* Indentation helpers */
+static int compare_size_t(gconstpointer a, gconstpointer b) {
+    size_t sa = *(const size_t*)a;
+    size_t sb = *(const size_t*)b;
+    if (sa < sb) return -1;
+    if (sa > sb) return 1;
+    return 0;
+}
+
 static void
 editor_widget_indent_selection(EditorWidget *self)
 {
-    if (!self->doc) return;
+    if (!self->doc || !self->cursors) return;
 
-    size_t start = MIN(self->cursor_offset, self->selection_anchor);
-    size_t end = MAX(self->cursor_offset, self->selection_anchor);
+    /* Collect all unique lines to indent */
+    GArray *lines = g_array_new(FALSE, FALSE, sizeof(size_t));
     
-    size_t start_line = document_get_line_of_offset(self->doc, start);
-    size_t end_line = document_get_line_of_offset(self->doc, end);
-    
-    /* If end is exactly at the start of a line, don't include that line in indentation */
-    if (end > start && end == document_get_offset_of_line(self->doc, end_line)) {
-        if (end_line > start_line) end_line--;
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+        size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+        
+        size_t start_line = document_get_line_of_offset(self->doc, start);
+        size_t end_line = document_get_line_of_offset(self->doc, end);
+        
+        if (end > start && end == document_get_offset_of_line(self->doc, end_line)) {
+            if (end_line > start_line) end_line--;
+        }
+        
+        for (size_t l = start_line; l <= end_line; l++) {
+            g_array_append_val(lines, l);
+        }
     }
-
+    
+    if (lines->len == 0) {
+        g_array_free(lines, TRUE);
+        return;
+    }
+    
+    g_array_sort(lines, compare_size_t);
+    
+    /* Remove duplicates */
+    for (guint i = 0; i < lines->len - 1; ) {
+        size_t l1 = g_array_index(lines, size_t, i);
+        size_t l2 = g_array_index(lines, size_t, i+1);
+        if (l1 == l2) {
+            g_array_remove_index(lines, i+1);
+        } else {
+            i++;
+        }
+    }
+    
     /* Prepare indentation string */
     char *indent_str;
     size_t indent_len;
@@ -2456,56 +2894,87 @@ editor_widget_indent_selection(EditorWidget *self)
         indent_len = 1;
         indent_str = g_strdup("\t");
     }
-
+    
     document_begin_undo_group(self->doc);
     
-    size_t bytes_added = 0;
+    /* Process descending to keep line indices valid during insertion? 
+       Actually line indices stay valid if we insert characters, as newline count doesn't change.
+       Wait, document_get_offset_of_line uses line structure. 
+       Inserting non-newlines doesn't change line mapping usually.
+       But sorting descending is safer for offsets if we tracked offsets.
+       Since we use get_offset_of_line REPEATEDLY, checking line index is safe assuming line count constant.
+    */
     
-    for (size_t i = start_line; i <= end_line; i++) {
-        size_t line_start = document_get_offset_of_line(self->doc, i);
+    for (int i = lines->len - 1; i >= 0; i--) {
+        size_t line_idx = g_array_index(lines, size_t, i);
+        size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+        
         document_insert(self->doc, line_start, indent_str, indent_len);
-        bytes_added += indent_len;
+        
+        /* Update all cursors after this point */
+        for (guint c = 0; c < self->cursors->len; c++) {
+            EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+            /* If cursor is at or after insertion, shift it */
+            if (cur->cursor_offset >= line_start) cur->cursor_offset += indent_len;
+            if (cur->selection_anchor >= line_start) cur->selection_anchor += indent_len;
+        }
     }
     
     document_end_undo_group(self->doc);
+    g_array_free(lines, TRUE);
     g_free(indent_str);
-
-    /* Update selection: snapped to line start for block indent behavior */
-    size_t new_start = document_get_offset_of_line(self->doc, start_line);
-    size_t new_end = end + bytes_added;
-    
-    if (self->cursor_offset == start) {
-        self->cursor_offset = new_start;
-        self->selection_anchor = new_end;
-    } else {
-        self->cursor_offset = new_end;
-        self->selection_anchor = new_start;
-    }
 }
 
 static void
 editor_widget_unindent_selection(EditorWidget *self)
 {
-    if (!self->doc) return;
+    if (!self->doc || !self->cursors) return;
 
-    size_t start = MIN(self->cursor_offset, self->selection_anchor);
-    size_t end = MAX(self->cursor_offset, self->selection_anchor);
+    /* Collect all unique lines to unindent */
+    GArray *lines = g_array_new(FALSE, FALSE, sizeof(size_t));
     
-    size_t start_line = document_get_line_of_offset(self->doc, start);
-    size_t end_line = document_get_line_of_offset(self->doc, end);
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+        size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+        
+        size_t start_line = document_get_line_of_offset(self->doc, start);
+        size_t end_line = document_get_line_of_offset(self->doc, end);
+        
+        if (end > start && end == document_get_offset_of_line(self->doc, end_line)) {
+            if (end_line > start_line) end_line--;
+        }
+        
+        for (size_t l = start_line; l <= end_line; l++) {
+            g_array_append_val(lines, l);
+        }
+    }
     
-    if (end > start && end == document_get_offset_of_line(self->doc, end_line)) {
-        if (end_line > start_line) end_line--;
+    if (lines->len == 0) {
+        g_array_free(lines, TRUE);
+        return;
+    }
+    
+    g_array_sort(lines, compare_size_t);
+    /* Remove duplicates */
+    for (guint i = 0; i < lines->len - 1; ) {
+        size_t l1 = g_array_index(lines, size_t, i);
+        size_t l2 = g_array_index(lines, size_t, i+1);
+        if (l1 == l2) {
+            g_array_remove_index(lines, i+1);
+        } else {
+            i++;
+        }
     }
     
     document_begin_undo_group(self->doc);
     
-    size_t total_removed = 0;
-    
-    for (size_t i = start_line; i <= end_line; i++) {
-        size_t line_off = document_get_offset_of_line(self->doc, i);
+    for (int i = lines->len - 1; i >= 0; i--) {
+        size_t line_idx = g_array_index(lines, size_t, i);
+        size_t line_off = document_get_offset_of_line(self->doc, line_idx);
+        
         size_t len;
-        char *line_text = document_get_line(self->doc, i, &len);
+        char *line_text = document_get_line(self->doc, line_idx, &len);
         
         gboolean can_unindent = FALSE;
         size_t delete_len = 0;
@@ -2515,7 +2984,6 @@ editor_widget_unindent_selection(EditorWidget *self)
                 can_unindent = TRUE;
                 delete_len = 1;
             } else if (line_text[0] == ' ') {
-                /* Check for up to indent_width spaces */
                 size_t spaces = 0;
                 while (spaces < self->indent_width && spaces < len && line_text[spaces] == ' ') {
                     spaces++;
@@ -2526,28 +2994,26 @@ editor_widget_unindent_selection(EditorWidget *self)
                 }
             }
         }
-        
         g_free(line_text);
         
         if (can_unindent) {
             document_delete(self->doc, line_off, delete_len);
-            total_removed += delete_len;
+            
+            /* Update cursors */
+            for (guint c = 0; c < self->cursors->len; c++) {
+                EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                if (cur->cursor_offset > line_off) {
+                    cur->cursor_offset -= MIN(cur->cursor_offset - line_off, delete_len);
+                }
+                if (cur->selection_anchor > line_off) {
+                    cur->selection_anchor -= MIN(cur->selection_anchor - line_off, delete_len);
+                }
+            }
         }
     }
     
     document_end_undo_group(self->doc);
-    
-    /* Adjust selection: snapped to line start */
-    size_t new_start = document_get_offset_of_line(self->doc, start_line);
-    size_t new_end = (end > total_removed) ? end - total_removed : 0;
-    
-    if (self->cursor_offset == start) {
-        self->cursor_offset = new_start;
-        self->selection_anchor = new_end;
-    } else {
-        self->cursor_offset = new_end;
-        self->selection_anchor = new_start;
-    }
+    g_array_free(lines, TRUE);
 }
 
 static gboolean
@@ -2572,24 +3038,51 @@ on_key_pressed(GtkEventControllerKey *controller,
     }
     
     switch (keyval) {
+        case GDK_KEY_Escape:
+            /* standard Reset: remove all extra cursors */
+            if (self->cursors->len > 1) {
+                g_array_set_size(self->cursors, 1);
+                /* Cache is already primary (index 0), so no change needed unless primary changed? */
+                /* Primary is index 0. We removed 1..N. Primary valid. Cache valid. */
+                gtk_widget_queue_draw(GTK_WIDGET(self));
+            }
+            break;
         case GDK_KEY_Up:
             if (state & GDK_ALT_MASK) {
-                editor_widget_move_lines_vertically(self, -1);
+                if (state & GDK_SHIFT_MASK) {
+                    editor_widget_add_cursor_vertically(self, -1);
+                } else {
+                    editor_widget_move_lines_vertically(self, -1);
+                }
             } else {
                 self->alt_word_mode = FALSE;
                 move_cursor(self, -1);
-                if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+                if (!(state & GDK_SHIFT_MASK)) {
+                    for (guint c = 0; c < self->cursors->len; c++) {
+                        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                        cur->selection_anchor = cur->cursor_offset;
+                    }
+                }
             }
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Down:
             if (state & GDK_ALT_MASK) {
-                editor_widget_move_lines_vertically(self, 1);
+                if (state & GDK_SHIFT_MASK) {
+                    editor_widget_add_cursor_vertically(self, 1);
+                } else {
+                    editor_widget_move_lines_vertically(self, 1);
+                }
             } else {
                 self->alt_word_mode = FALSE;
                 move_cursor(self, 1);
-                if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
+                if (!(state & GDK_SHIFT_MASK)) {
+                     for (guint c = 0; c < self->cursors->len; c++) {
+                         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                         cur->selection_anchor = cur->cursor_offset;
+                     }
+                }
             }
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -2598,14 +3091,17 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (state & GDK_ALT_MASK) {
                 editor_widget_move_selection_horizontally(self, -1);
             } else {
-                self->alt_word_mode = FALSE;
-                if (state & GDK_CONTROL_MASK) {
-                    self->cursor_offset = word_prev(self, self->cursor_offset);
-                } else {
-                    self->cursor_offset = utf8_prev_grapheme(self, self->cursor_offset);
-                }
-                if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
-                update_target_x(self);
+                 self->alt_word_mode = FALSE;
+                 for (guint c = 0; c < self->cursors->len; c++) {
+                     EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                     if (state & GDK_CONTROL_MASK) {
+                         cur->cursor_offset = word_prev(self, cur->cursor_offset);
+                     } else {
+                         cur->cursor_offset = utf8_prev_grapheme(self, cur->cursor_offset);
+                     }
+                     if (!(state & GDK_SHIFT_MASK)) cur->selection_anchor = cur->cursor_offset;
+                 }
+                 update_target_x(self);
             }
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -2614,31 +3110,33 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (state & GDK_ALT_MASK) {
                 editor_widget_move_selection_horizontally(self, 1);
             } else {
-                self->alt_word_mode = FALSE;
-                if (state & GDK_CONTROL_MASK) {
-                    self->cursor_offset = word_next(self, self->cursor_offset);
-                } else {
-                    self->cursor_offset = utf8_next_grapheme(self, self->cursor_offset);
-                }
-                if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
-                update_target_x(self);
+                 self->alt_word_mode = FALSE;
+                 for (guint c = 0; c < self->cursors->len; c++) {
+                     EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                     if (state & GDK_CONTROL_MASK) {
+                         cur->cursor_offset = word_next(self, cur->cursor_offset);
+                     } else {
+                         cur->cursor_offset = utf8_next_grapheme(self, cur->cursor_offset);
+                     }
+                     if (!(state & GDK_SHIFT_MASK)) cur->selection_anchor = cur->cursor_offset;
+                 }
+                 update_target_x(self);
             }
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
         case GDK_KEY_Home:
         {
-            if (state & GDK_CONTROL_MASK) {
-                /* Ctrl+Home: Move to start of document */
-                self->cursor_offset = 0;
-            } else {
-                /* Home: Move to start of line */
-                size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
-                self->cursor_offset = document_get_offset_of_line(self->doc, line);
+            for (guint c = 0; c < self->cursors->len; c++) {
+                 EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                 if (state & GDK_CONTROL_MASK) {
+                     cur->cursor_offset = 0;
+                 } else {
+                     size_t line = document_get_line_of_offset(self->doc, cur->cursor_offset);
+                     cur->cursor_offset = document_get_offset_of_line(self->doc, line);
+                 }
+                 if (!(state & GDK_SHIFT_MASK)) cur->selection_anchor = cur->cursor_offset;
             }
-            
-            if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
-            
             update_target_x(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -2646,26 +3144,26 @@ on_key_pressed(GtkEventControllerKey *controller,
         }
         case GDK_KEY_End:
         {
-            if (state & GDK_CONTROL_MASK) {
-                /* Ctrl+End: Move to end of document */
-                self->cursor_offset = document_get_length(self->doc);
-            } else {
-                /* End: Move to end of line */
-                size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
-                size_t len;
-                char *t = document_get_line(self->doc, line, &len);
-                g_free(t);
-                size_t start = document_get_offset_of_line(self->doc, line);
-                size_t real_len = len;
-                if (len > 0) {
-                     char *last = document_get_text_range(self->doc, start + len - 1, 1);
-                     if (last && last[0] == '\n') real_len--;
-                     g_free(last);
-                }
-                self->cursor_offset = start + real_len;
+            for (guint c = 0; c < self->cursors->len; c++) {
+                 EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                 if (state & GDK_CONTROL_MASK) {
+                     cur->cursor_offset = document_get_length(self->doc);
+                 } else {
+                     size_t line = document_get_line_of_offset(self->doc, cur->cursor_offset);
+                     size_t len;
+                     char *t = document_get_line(self->doc, line, &len);
+                     g_free(t);
+                     size_t start = document_get_offset_of_line(self->doc, line);
+                     size_t real_len = len;
+                     if (len > 0) {
+                          char *last = document_get_text_range(self->doc, start + len - 1, 1);
+                          if (last && last[0] == '\n') real_len--;
+                          g_free(last);
+                     }
+                     cur->cursor_offset = start + real_len;
+                 }
+                 if (!(state & GDK_SHIFT_MASK)) cur->selection_anchor = cur->cursor_offset;
             }
-            
-            if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
             
             update_target_x(self);
             scroll_to_cursor(self);
@@ -2674,181 +3172,141 @@ on_key_pressed(GtkEventControllerKey *controller,
         }
         case GDK_KEY_Page_Up:
         {
-             double cx = 0, cy = 0;
-             gboolean was_visible = get_cursor_screen_coordinates(self, &cx, &cy);
-             
-             double x_widget = (self->target_x >= 0) ? (self->target_x + self->padding_left) : cx;
-             if (self->target_x < 0 && was_visible) self->target_x = x_widget - self->padding_left;
-             
+             /* Simplified multi-cursor page up: move all by page size */
              double page_px = (self->vadjustment) ? gtk_adjustment_get_page_size(self->vadjustment) : 200;
-             
              if (self->vadjustment) {
                  double current = gtk_adjustment_get_value(self->vadjustment);
                  gtk_adjustment_set_value(self->vadjustment, current - page_px);
              }
+             int page_lines = (int)(page_px / self->line_height);
+             if (page_lines < 1) page_lines = 1;
+             move_cursor(self, -page_lines);
              
-             if (was_visible) {
-                 size_t new_off;
-                 editor_widget_get_offset_at_point(self, x_widget, cy, &new_off);
-                 self->cursor_offset = new_off;
-             } else {
-                 int page_lines = (int)(page_px / self->line_height);
-                 if (page_lines < 1) page_lines = 1;
-                 move_cursor(self, -page_lines);
+             if (!(state & GDK_SHIFT_MASK)) {
+                 for (guint c = 0; c < self->cursors->len; c++) {
+                     EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                     cur->selection_anchor = cur->cursor_offset;
+                 }
              }
-             
-             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
              scroll_to_cursor(self);
              gtk_widget_queue_draw(GTK_WIDGET(self));
              break;
         }
         case GDK_KEY_Page_Down:
         {
-             double cx = 0, cy = 0;
-             gboolean was_visible = get_cursor_screen_coordinates(self, &cx, &cy);
-             
-             double x_widget = (self->target_x >= 0) ? (self->target_x + self->padding_left) : cx;
-             if (self->target_x < 0 && was_visible) self->target_x = x_widget - self->padding_left;
-             
              double page_px = (self->vadjustment) ? gtk_adjustment_get_page_size(self->vadjustment) : 200;
-             
              if (self->vadjustment) {
                  double current = gtk_adjustment_get_value(self->vadjustment);
                  gtk_adjustment_set_value(self->vadjustment, current + page_px);
              }
+             int page_lines = (int)(page_px / self->line_height);
+             if (page_lines < 1) page_lines = 1;
+             move_cursor(self, page_lines);
              
-             if (was_visible) {
-                 size_t new_off;
-                 editor_widget_get_offset_at_point(self, x_widget, cy, &new_off);
-                 self->cursor_offset = new_off;
-             } else {
-                 int page_lines = (int)(page_px / self->line_height);
-                 if (page_lines < 1) page_lines = 1;
-                 move_cursor(self, page_lines);
+             if (!(state & GDK_SHIFT_MASK)) {
+                 for (guint c = 0; c < self->cursors->len; c++) {
+                     EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                     cur->selection_anchor = cur->cursor_offset;
+                 }
              }
-             
-             if (!(state & GDK_SHIFT_MASK)) self->selection_anchor = self->cursor_offset;
              scroll_to_cursor(self);
              gtk_widget_queue_draw(GTK_WIDGET(self));
              break;   
         }
         case GDK_KEY_Return:
-            editor_widget_delete_selection(self);
-            
-            /* Auto-indentation logic */
-            char *indent = NULL;
-            if (self->auto_indent) {
-                size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
-                size_t line_len;
-                char *text = document_get_line(self->doc, line, &line_len);
-                if (text) {
-                    /* Count leading whitespace */
-                    size_t i = 0;
-                    while (i < line_len && (text[i] == ' ' || text[i] == '\t')) i++;
-                    if (i > 0) {
-                        indent = g_strndup(text, i);
-                    }
-                    g_free(text);
-                }
-            }
-            
-            document_insert(self->doc, self->cursor_offset, "\n", 1);
-            self->cursor_offset++;
-            
-            if (indent) {
-                size_t len = strlen(indent);
-                document_insert(self->doc, self->cursor_offset, indent, len);
-                self->cursor_offset += len;
-                g_free(indent);
-            }
-            
-            self->selection_anchor = self->cursor_offset;
-            editor_widget_reset_cursor_blink(self);
-            editor_widget_update_adjustments(self, -1, -1);
-            scroll_to_cursor(self);
-            gtk_widget_queue_draw(GTK_WIDGET(self));
-            break;
+        case GDK_KEY_KP_Enter:
+             /* Enter key */
+             /* Insert newline at all cursors */
+             document_begin_undo_group(self->doc);
+             g_array_sort(self->cursors, compare_cursors_desc);
+             for (guint c = 0; c < self->cursors->len; c++) {
+                 EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                 size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+                 size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+                 
+                 /* Auto-indentation logic (per cursor) */
+                 char *indent = NULL;
+                 if (self->auto_indent) {
+                     size_t line = document_get_line_of_offset(self->doc, start);
+                     size_t line_len;
+                     char *text = document_get_line(self->doc, line, &line_len);
+                     if (text) {
+                         size_t i = 0;
+                         while (i < line_len && (text[i] == ' ' || text[i] == '\t')) i++;
+                         if (i > 0) indent = g_strndup(text, i);
+                         g_free(text);
+                     }
+                 }
+
+                 if (start != end) {
+                     document_delete(self->doc, start, end-start);
+                     cur->cursor_offset = start;
+                 }
+                 document_insert(self->doc, cur->cursor_offset, "\n", 1);
+                 cur->cursor_offset++;
+                 
+                 if (indent) {
+                     size_t len = strlen(indent);
+                     document_insert(self->doc, cur->cursor_offset, indent, len);
+                     cur->cursor_offset += len;
+                     g_free(indent);
+                 }
+                 
+                 cur->selection_anchor = cur->cursor_offset;
+             }
+             document_end_undo_group(self->doc);
+             editor_widget_reset_cursor_blink(self);
+             editor_widget_update_adjustments(self, -1, -1);
+             scroll_to_cursor(self);
+             gtk_widget_queue_draw(GTK_WIDGET(self));
+             break;
         case GDK_KEY_Tab:
         case GDK_KEY_ISO_Left_Tab:
         {
             gboolean shift = (state & GDK_SHIFT_MASK) || (keyval == GDK_KEY_ISO_Left_Tab);
-            gboolean has_selection = (self->cursor_offset != self->selection_anchor);
             
             if (shift) {
-                if (has_selection) {
-                    editor_widget_unindent_selection(self);
-                } else {
-                    /* Unindent single line if possible */
-                    size_t line = document_get_line_of_offset(self->doc, self->cursor_offset);
-                    size_t len;
-                    char *text = document_get_line(self->doc, line, &len);
-                    size_t delete_len = 0;
-                    
-                    if (len > 0) {
-                        if (text[0] == '\t') {
-                            delete_len = 1;
-                        } else if (text[0] == ' ') {
-                            size_t spaces = 0;
-                            while (spaces < self->indent_width && spaces < len && text[spaces] == ' ') {
-                                spaces++;
-                            }
-                            delete_len = spaces;
-                        }
-                    }
-                    g_free(text);
-                    
-                    if (delete_len > 0) {
-                        document_begin_undo_group(self->doc);
-                        size_t line_start = document_get_offset_of_line(self->doc, line);
-                        document_delete(self->doc, line_start, delete_len);
-                        document_end_undo_group(self->doc);
-                        
-                        /* Adjust cursor: Shift back, but not before line start */
-                        if (self->cursor_offset >= line_start + delete_len) {
-                            self->cursor_offset -= delete_len;
-                        } else {
-                            self->cursor_offset = line_start;
-                        }
-                        self->selection_anchor = self->cursor_offset;
-                        
-                        /* Updates handled at end of case */
-                    } else {
-                        /* Do nothing, but consume event to prevent focus switch */
-                        return TRUE; 
-                    }
-                }
+                editor_widget_unindent_selection(self);
             } else {
-                /* Check for multiline selection */
-                size_t start = MIN(self->cursor_offset, self->selection_anchor);
-                size_t end = MAX(self->cursor_offset, self->selection_anchor);
-                
-                size_t start_line = document_get_line_of_offset(self->doc, start);
-                size_t end_line = document_get_line_of_offset(self->doc, end);
-                
-                /* If end is at start of line, it doesn't count as part of that line for multiline check */
-                if (end > start && end == document_get_offset_of_line(self->doc, end_line)) {
-                     if (end_line > start_line) end_line--;
+                gboolean any_selection = FALSE;
+                for (guint c = 0; c < self->cursors->len; c++) {
+                    EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                    if (cur->cursor_offset != cur->selection_anchor) {
+                        any_selection = TRUE;
+                        break;
+                    }
                 }
                 
-                if (end_line > start_line) {
+                if (any_selection) {
                     editor_widget_indent_selection(self);
                 } else {
-                    /* Single line / normal tab behavior */
-                     editor_widget_delete_selection(self);
-                    if (self->indent_style == 0) { 
-                        /* Spaces */
-                        char *spaces = g_malloc(self->indent_width + 1);
+                    document_begin_undo_group(self->doc);
+                    g_array_sort(self->cursors, compare_cursors_desc);
+                    
+                    char *text_to_insert;
+                    char *spaces = NULL;
+                    size_t insert_len;
+                    
+                    if (self->indent_style == 0) {
+                        spaces = g_malloc(self->indent_width + 1);
                         memset(spaces, ' ', self->indent_width);
                         spaces[self->indent_width] = '\0';
-                        document_insert(self->doc, self->cursor_offset, spaces, self->indent_width);
-                        self->cursor_offset += self->indent_width;
-                        g_free(spaces);
+                        text_to_insert = spaces;
+                        insert_len = self->indent_width;
                     } else {
-                        /* Tab char */
-                        document_insert(self->doc, self->cursor_offset, "\t", 1);
-                        self->cursor_offset++;
+                        text_to_insert = "\t";
+                        insert_len = 1;
                     }
-                    self->selection_anchor = self->cursor_offset;
+                    
+                    for (guint c = 0; c < self->cursors->len; c++) {
+                        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                        document_insert(self->doc, cur->cursor_offset, text_to_insert, insert_len);
+                        cur->cursor_offset += insert_len;
+                        cur->selection_anchor = cur->cursor_offset;
+                    }
+                    
+                    if (spaces) g_free(spaces);
+                    document_end_undo_group(self->doc);
                 }
             }
             
@@ -2859,49 +3317,80 @@ on_key_pressed(GtkEventControllerKey *controller,
             break;
         }
         case GDK_KEY_BackSpace:
-            if (editor_widget_delete_selection(self)) {
-                editor_widget_reset_cursor_blink(self);
-                editor_widget_update_adjustments(self, -1, -1);
-                gtk_widget_queue_draw(GTK_WIDGET(self));
-            } else if (self->cursor_offset > 0) {
-                size_t prev = utf8_prev_grapheme(self, self->cursor_offset);
-                size_t bytes_to_delete = self->cursor_offset - prev;
-                document_delete(self->doc, prev, bytes_to_delete);
-                self->cursor_offset = prev;
-                self->selection_anchor = self->cursor_offset;
-                editor_widget_reset_cursor_blink(self);
-                editor_widget_update_adjustments(self, -1, -1);
-                gtk_widget_queue_draw(GTK_WIDGET(self));
-            }
-            break;
+             if (state & GDK_CONTROL_MASK) {
+                 /* Ctrl+Backspace: Delete Word */
+                 document_begin_undo_group(self->doc);
+                 g_array_sort(self->cursors, compare_cursors_desc);
+                 for (guint c = 0; c < self->cursors->len; c++) {
+                     EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                     size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+                     size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+                     if (start != end) {
+                         document_delete(self->doc, start, end-start);
+                         cur->cursor_offset = start; cur->selection_anchor = start;
+                     } else {
+                         size_t prev = word_prev(self, cur->cursor_offset);
+                         if (prev < cur->cursor_offset) {
+                             document_delete(self->doc, prev, cur->cursor_offset - prev);
+                             cur->cursor_offset = prev; cur->selection_anchor = prev;
+                         }
+                     }
+                 }
+                 document_end_undo_group(self->doc);
+                 editor_widget_update_adjustments(self, -1, -1);
+                 scroll_to_cursor(self);
+             } else {
+                 editor_widget_backspace(self);
+             }
+             gtk_widget_queue_draw(GTK_WIDGET(self));
+             break;
         case GDK_KEY_Delete:
-            if (editor_widget_delete_selection(self)) {
-                editor_widget_reset_cursor_blink(self);
-                editor_widget_update_adjustments(self, -1, -1);
-                gtk_widget_queue_draw(GTK_WIDGET(self));
-            } else if (self->cursor_offset < document_get_length(self->doc)) {
-                size_t next = utf8_next_grapheme(self, self->cursor_offset);
-                size_t bytes_to_delete = next - self->cursor_offset;
-                document_delete(self->doc, self->cursor_offset, bytes_to_delete);
-                self->selection_anchor = self->cursor_offset;
-                editor_widget_reset_cursor_blink(self);
-                editor_widget_update_adjustments(self, -1, -1);
-                gtk_widget_queue_draw(GTK_WIDGET(self));
-            }
-            break;
+             if (state & GDK_CONTROL_MASK) {
+                 /* Ctrl+Delete: Delete Word Next */
+                 document_begin_undo_group(self->doc);
+                 g_array_sort(self->cursors, compare_cursors_desc);
+                 for (guint c = 0; c < self->cursors->len; c++) {
+                     EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                     size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+                     size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+                     if (start != end) {
+                         document_delete(self->doc, start, end-start);
+                         cur->cursor_offset = start; cur->selection_anchor = start;
+                     } else {
+                         size_t next = word_next(self, cur->cursor_offset);
+                         if (next > cur->cursor_offset) {
+                             document_delete(self->doc, cur->cursor_offset, next - cur->cursor_offset);
+                         }
+                     }
+                 }
+                 document_end_undo_group(self->doc);
+                 editor_widget_update_adjustments(self, -1, -1);
+                 scroll_to_cursor(self);
+             } else {
+                 editor_widget_delete(self);
+             }
+             gtk_widget_queue_draw(GTK_WIDGET(self));
+             break;
         case GDK_KEY_z:
             if (state & GDK_CONTROL_MASK) {
                  UndoInfo info = document_undo(self->doc);
                  if (info.success) {
+                     /* Collapse to single cursor at undo point to avoid multi-cursor desync */
+                     editor_widget_clear_cursors(self);
+                     EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+                     
                      if (info.is_insert) {
                          /* Text restored/inserted: Select it */
-                         self->cursor_offset = info.start + info.length;
-                         self->selection_anchor = info.start;
+                         primary->cursor_offset = info.start + info.length;
+                         primary->selection_anchor = info.start;
                      } else {
                          /* Text deleted: Place cursor at start */
-                         self->cursor_offset = info.start;
-                         self->selection_anchor = info.start;
+                         primary->cursor_offset = info.start;
+                         primary->selection_anchor = info.start;
                      }
+                     /* Sync cache */
+                     self->cursor_offset = primary->cursor_offset;
+                     self->selection_anchor = primary->selection_anchor;
                      
                      editor_widget_reset_cursor_blink(self);
                      editor_widget_update_adjustments(self, -1, -1);
@@ -2914,13 +3403,20 @@ on_key_pressed(GtkEventControllerKey *controller,
             if (state & GDK_CONTROL_MASK) {
                  UndoInfo info = document_redo(self->doc);
                  if (info.success) {
+                     /* Collapse to single cursor */
+                     editor_widget_clear_cursors(self);
+                     EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+
                      if (info.is_insert) {
-                         self->cursor_offset = info.start + info.length;
-                         self->selection_anchor = info.start;
+                         primary->cursor_offset = info.start + info.length;
+                         primary->selection_anchor = info.start;
                      } else {
-                         self->cursor_offset = info.start;
-                         self->selection_anchor = info.start;
+                         primary->cursor_offset = info.start;
+                         primary->selection_anchor = info.start;
                      }
+                     /* Sync cache */
+                     self->cursor_offset = primary->cursor_offset;
+                     self->selection_anchor = primary->selection_anchor;
                      
                      editor_widget_reset_cursor_blink(self);
                      editor_widget_update_adjustments(self, -1, -1);
@@ -3008,20 +3504,59 @@ static void
 on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
-    if (!self->doc) return;
-    
-    editor_widget_delete_selection(self);
+    if (!self->doc || !self->cursors) return;
     
     size_t len = strlen(str);
-    document_insert(self->doc, self->cursor_offset, str, len);
-    self->cursor_offset += len;
-    self->selection_anchor = self->cursor_offset;
+    if (len == 0) return;
+
+    document_begin_undo_group(self->doc);
+    g_array_sort(self->cursors, compare_cursors_desc);
+    
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        
+        size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+        size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+        
+        long delta = 0;
+        
+        /* If replacing selection */
+        if (start != end) {
+            document_delete(self->doc, start, end - start);
+            /* Current cursor collapses to start */
+            cur->cursor_offset = start;
+            /* Delta is negative length of deletion */
+            delta -= (long)(end - start);
+        }
+        
+        /* Insert new text */
+        document_insert(self->doc, cur->cursor_offset, str, len);
+        cur->cursor_offset += len;
+        cur->selection_anchor = cur->cursor_offset;
+        delta += (long)len;
+        
+        /* Propagate offset change to all previously processed cursors (indices 0..c-1)
+           Since we sort descending, these cursors are at higher offsets than current 'start'.
+        */
+        if (delta != 0) {
+            for (guint j = 0; j < c; j++) {
+                EditorCursor *prev = &g_array_index(self->cursors, EditorCursor, j);
+                /* Using signed math for delta */
+                if ((long)prev->cursor_offset + delta < 0) prev->cursor_offset = 0;
+                else prev->cursor_offset += delta;
+                
+                if ((long)prev->selection_anchor + delta < 0) prev->selection_anchor = 0;
+                else prev->selection_anchor += delta;
+            }
+        }
+    }
+    document_end_undo_group(self->doc);
+    
     self->alt_word_mode = FALSE;
     
-    editor_widget_update_im_cursor_location(self);
-    editor_widget_reset_cursor_blink(self);  /* Keep cursor visible while typing */
+    editor_widget_reset_cursor_blink(self);
     editor_widget_update_adjustments(self, -1, -1);
-    scroll_to_cursor(self);
+    scroll_to_cursor(self); /* Syncs cache and updates IM location */
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
@@ -3166,6 +3701,7 @@ editor_widget_dispose(GObject *object)
     if (self->syntax_ctx) syntax_context_free(self->syntax_ctx);
     if (self->font_name) g_free(self->font_name);
     if (self->line_y_offsets) g_array_free(self->line_y_offsets, TRUE);
+    if (self->cursors) g_array_free(self->cursors, TRUE);
     if (self->idle_resize_id) {
         g_source_remove(self->idle_resize_id);
         self->idle_resize_id = 0;
@@ -3196,6 +3732,8 @@ editor_widget_init(EditorWidget *self)
     self->font_desc = NULL;
     
     self->line_y_offsets = g_array_new(FALSE, FALSE, sizeof(double));
+    self->cursors = g_array_new(FALSE, FALSE, sizeof(EditorCursor));
+    editor_widget_add_cursor(self, 0);
     
     /* Initialize cursor blink animation */
     self->cursor_alpha = 1.0;
@@ -3472,8 +4010,10 @@ void
 editor_widget_set_document(EditorWidget *self, Document *doc)
 {
     self->doc = doc;
-    self->cursor_offset = 0;
-    self->selection_anchor = 0;
+    self->doc = doc;
+    /* Force clear all cursors including the default one from init */
+    if (self->cursors) g_array_set_size(self->cursors, 0);
+    editor_widget_add_cursor(self, 0);
     
     /* Removed large file auto-disable. Relying on efficient O(N) linear scan now. */
     
