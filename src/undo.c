@@ -103,6 +103,26 @@ undo_stack_end_group(UndoStack *stack)
     }
 }
 
+void
+undo_stack_set_group_selection(UndoStack *stack, size_t start, size_t end)
+{
+    if (stack->current_group) {
+        stack->current_group->has_selection = TRUE;
+        stack->current_group->selection_start = start;
+        stack->current_group->selection_end = end;
+    }
+}
+
+void
+undo_stack_set_group_selection_after(UndoStack *stack, size_t start, size_t end)
+{
+    if (stack->current_group) {
+        stack->current_group->has_redo_selection = TRUE;
+        stack->current_group->redo_selection_start = start;
+        stack->current_group->redo_selection_end = end;
+    }
+}
+
 static void
 execute_command(UndoCommand *cmd, PieceTable *pt, gboolean undo)
 {
@@ -149,6 +169,17 @@ get_command_info(UndoCommand *cmd, gboolean undo, UndoInfo *info)
                 Last executed is Insert B. */
              GList *last = g_list_last(cmd->group_commands);
              if (last) get_command_info((UndoCommand*)last->data, undo, info);
+        }
+        
+        /* If the group has explicit selection info, use it (overriding sub-commands) */
+        if (cmd->has_selection && undo) {
+            info->has_selection = TRUE;
+            info->selection_start = cmd->selection_start;
+            info->selection_end = cmd->selection_end;
+        } else if (cmd->has_redo_selection && !undo) {
+             info->has_selection = TRUE;
+             info->selection_start = cmd->redo_selection_start;
+             info->selection_end = cmd->redo_selection_end;
         }
         return;
     }

@@ -16,6 +16,16 @@ typedef struct _UndoCommand {
     char *text;
     size_t length;
     GList *group_commands; /* List of UndoCommand* if type == UNDO_OP_GROUP */
+    
+    /* Selection state to restore after UNDO (i.e., state BEFORE the operation) */
+    gboolean has_selection;
+    size_t selection_start;
+    size_t selection_end;
+    
+    /* Selection state to restore after REDO (i.e., state AFTER the operation) */
+    gboolean has_redo_selection;
+    size_t redo_selection_start;
+    size_t redo_selection_end;
 } UndoCommand;
 
 typedef struct {
@@ -34,12 +44,18 @@ void undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_
 
 void undo_stack_begin_group(UndoStack *stack);
 void undo_stack_end_group(UndoStack *stack);
+void undo_stack_set_group_selection(UndoStack *stack, size_t start, size_t end);
+void undo_stack_set_group_selection_after(UndoStack *stack, size_t start, size_t end);
 
 typedef struct {
     gboolean success;
     size_t start;
     size_t length;
     gboolean is_insert; /* If true, text was inserted by the operation */
+    
+    gboolean has_selection;
+    size_t selection_start;
+    size_t selection_end;
 } UndoInfo;
 
 /* Returns info about the executed operation */

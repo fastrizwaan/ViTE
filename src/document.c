@@ -127,3 +127,15 @@ document_end_undo_group(Document *doc)
 {
     undo_stack_end_group(doc->undo_stack);
 }
+
+void
+document_set_undo_group_selection(Document *doc, size_t start, size_t end)
+{
+    undo_stack_set_group_selection(doc->undo_stack, start, end);
+}
+
+void
+document_set_redo_group_selection(Document *doc, size_t start, size_t end)
+{
+    undo_stack_set_group_selection_after(doc->undo_stack, start, end);
+}
