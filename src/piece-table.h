@@ -14,6 +14,7 @@ typedef struct {
     PieceSource source;
     size_t start;
     size_t length;
+    size_t cached_lf;  /* Cached newline count for this piece */
 } Piece;
 
 /* Splay Tree Node */
