@@ -3449,9 +3449,20 @@ on_key_pressed(GtkEventControllerKey *controller,
         case GDK_KEY_a:
             if (state & GDK_CONTROL_MASK) {
                 /* Select all - anchor at end so Shift+Click reduces from start */
-                self->selection_anchor = document_get_length(self->doc);
-                self->cursor_offset = 0;
+                /* Select all: Anchor at 0 (start), Cursor at length (end) */
+                editor_widget_clear_cursors(self);
+                EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+                
+                size_t total = document_get_length(self->doc);
+                primary->selection_anchor = 0;
+                primary->cursor_offset = total;
+                
+                /* Sync cache */
+                self->cursor_offset = primary->cursor_offset;
+                self->selection_anchor = primary->selection_anchor;
+                
                 self->alt_word_mode = TRUE; /* Treat as auto-selection */
+                scroll_to_cursor(self);
                 gtk_widget_queue_draw(GTK_WIDGET(self));
             } else {
                 handled = FALSE;
