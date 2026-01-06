@@ -137,9 +137,10 @@ node_new(Piece piece)
 static void
 update_node(PieceTable *pt, PieceNode *x)
 {
+    (void)pt; /* Now unused since we use cached_lf */
     if (!x) return;
     x->size_subtree = x->piece.length;
-    x->lf_subtree = piece_newlines(pt, &x->piece);
+    x->lf_subtree = x->piece.cached_lf;  /* Use cached value instead of scanning */
     
     if (x->left) {
         x->size_subtree += x->left->size_subtree;
@@ -439,7 +440,7 @@ piece_table_new(const char *filename)
             size_t len = chunk_size;
             if (start + len > pt->orig_size) len = pt->orig_size - start;
             
-            Piece p = { SOURCE_ORIGINAL, start, len };
+            Piece p = { SOURCE_ORIGINAL, start, len, count_newlines(pt->orig_data + start, len) };
             nodes[i] = node_new(p);
         }
         
@@ -496,10 +497,9 @@ piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
     size_t start_in_add = pt->add_buffer->len;
     g_byte_array_append(pt->add_buffer, (guint8*)text, len);
     
-    Piece new_piece = { SOURCE_ADD, start_in_add, len };
+    size_t lf_count = count_newlines(text, len);
+    Piece new_piece = { SOURCE_ADD, start_in_add, len, lf_count };
     PieceNode *new_node = node_new(new_piece);
-    /* Set manual LF */
-    new_node->lf_subtree = count_newlines(text, len);
 
     if (!pt->root) {
         pt->root = new_node;
@@ -574,23 +574,15 @@ piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
     Piece right_piece = at_node->piece;
     right_piece.start += split_point;
     right_piece.length -= split_point;
+    /* Calculate and cache LF for right piece */
+    const char *src_data = (right_piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    right_piece.cached_lf = count_newlines(src_data + right_piece.start, right_piece.length);
     PieceNode *right_node = node_new(right_piece);
-    /* Calculate LF for right piece carefully */
-    right_node->lf_subtree = piece_newlines(pt, &right_piece);
 
-    /* Update left piece (at_node) */
+    /* Update left piece (at_node) - use subtraction optimization */
+    size_t old_total_lf = at_node->piece.cached_lf;
     at_node->piece.length = split_point;
-    /* Needs update LF */
-    /* Only way is to recount or be smart. Recounting small piece is fast. */
-    /* Or we already know total LF. */
-    /* Recounting part of it */
-    /* optimization: we know total in at_node, we calc right_node, so left is total - right */
-    size_t old_total = piece_newlines(pt, &at_node->piece); // This re-reads full, safer
-    /* Actually at_node data is valid still */
-    at_node->lf_subtree = count_newlines(
-        (at_node->piece.source == SOURCE_ORIGINAL ? pt->orig_data : (char*)pt->add_buffer->data) + at_node->piece.start,
-        split_point
-    );
+    at_node->piece.cached_lf = old_total_lf - right_piece.cached_lf;
     at_node->size_subtree = split_point; // Temporary before full update
 
     /* Stitch:
@@ -657,16 +649,15 @@ ensure_split_at(PieceTable *pt, size_t offset)
     Piece right_piece = node->piece;
     right_piece.start += local_off;
     right_piece.length -= local_off;
-    
+    /* Calculate and cache LF for right piece */
+    const char *src_data = (right_piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    right_piece.cached_lf = count_newlines(src_data + right_piece.start, right_piece.length);
     PieceNode *right_node = node_new(right_piece);
-    right_node->lf_subtree = piece_newlines(pt, &right_piece);
     
-    /* Update Left (node) */
+    /* Update Left (node) - use subtraction optimization */
+    size_t old_total_lf = node->piece.cached_lf;
     node->piece.length = local_off;
-    node->lf_subtree = count_newlines(
-         (node->piece.source == SOURCE_ORIGINAL ? pt->orig_data : (char*)pt->add_buffer->data) + node->piece.start,
-         local_off
-    ); // simplified
+    node->piece.cached_lf = old_total_lf - right_piece.cached_lf;
     node->size_subtree = local_off; // Temp
     
     /* Insert B right of A */
