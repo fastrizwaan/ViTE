@@ -2,6 +2,13 @@
 #include "syntax.h"
 #include <math.h>
 
+/* Fold Region - represents a collapsible block */
+typedef struct {
+    size_t start_line;    /* Line where fold starts (the "head") */
+    size_t end_line;      /* Line where fold ends (inclusive) */
+    gboolean is_folded;   /* TRUE if currently collapsed */
+} FoldRegion;
+
 struct _EditorWidget {
     GtkWidget parent_instance;
 
@@ -99,6 +106,13 @@ struct _EditorWidget {
     /* Statistical Scroll for Large Files */
     double avg_visual_lines;
     
+    /* Code Folding - High Performance */
+    GHashTable *fold_heads;           /* line_idx -> FoldRegion* for fold start lines */
+    guint8 *hidden_lines_cache;       /* Bitfield: 1 = hidden */
+    size_t hidden_cache_size;         /* Allocated bytes */
+    gboolean hidden_cache_valid;      /* TRUE if cache is current */
+    size_t last_analyzed_line;        /* Lazy analysis watermark */
+    
     /* System font monitoring */
     GSettings *interface_settings;
 };
@@ -138,7 +152,7 @@ get_gutter_width(EditorWidget *self)
     double char_w = self->cached_char_width;
     if (char_w < 1.0) char_w = self->line_height * 0.5; /* Fallback */
 
-    return (digits * char_w) + 8.0; /* 4px left + 4px right */
+    return (digits * char_w) + 24.0; /* 4px left + 4px right + 16px fold icon */
 }
 
 /* Helper to get gutter width based on settings */
@@ -172,6 +186,232 @@ enum {
     PROP_FONT_NAME,
     N_PROPS
 };
+
+/* ========== HIGH-PERFORMANCE CODE FOLDING ========== */
+
+/* Get indentation level of a line (O(line_length), cached by caller) */
+static int
+get_line_indent(EditorWidget *self, size_t line_idx)
+{
+    size_t len;
+    char *text = document_get_line(self->doc, line_idx, &len);
+    if (!text || len == 0) {
+        g_free(text);
+        return -1;  /* Empty/whitespace-only returns -1 */
+    }
+    
+    int indent = 0;
+    gboolean has_content = FALSE;
+    for (size_t i = 0; i < len; i++) {
+        if (text[i] == ' ') {
+            indent++;
+        } else if (text[i] == '\t') {
+            indent += self->tab_width;
+        } else if (text[i] != '\n' && text[i] != '\r') {
+            has_content = TRUE;
+            break;
+        }
+    }
+    
+    g_free(text);
+    return has_content ? indent : -1;
+}
+
+/* Free a FoldRegion (for hash table) */
+static void
+fold_region_free(gpointer data)
+{
+    g_slice_free(FoldRegion, data);
+}
+
+/* Initialize fold hash table if needed */
+static void
+ensure_fold_table(EditorWidget *self)
+{
+    if (!self->fold_heads) {
+        self->fold_heads = g_hash_table_new_full(
+            g_direct_hash, g_direct_equal, NULL, fold_region_free);
+    }
+}
+
+/* O(1) hidden line check using bitset cache */
+static gboolean
+is_line_hidden(EditorWidget *self, size_t line_idx)
+{
+    if (!self->hidden_cache_valid || !self->hidden_lines_cache) return FALSE;
+    if (line_idx >= self->hidden_cache_size * 8) return FALSE;
+    return (self->hidden_lines_cache[line_idx / 8] >> (line_idx % 8)) & 1;
+}
+
+/* Rebuild hidden lines cache from fold_heads (only when needed) */
+static void
+rebuild_hidden_cache(EditorWidget *self)
+{
+    if (!self->doc) return;
+    
+    size_t line_count = document_get_line_count(self->doc);
+    size_t bytes_needed = (line_count + 7) / 8;
+    
+    /* Reallocate if needed */
+    if (self->hidden_cache_size < bytes_needed) {
+        g_free(self->hidden_lines_cache);
+        self->hidden_lines_cache = g_malloc0(bytes_needed);
+        self->hidden_cache_size = bytes_needed;
+    } else {
+        memset(self->hidden_lines_cache, 0, bytes_needed);
+    }
+    
+    if (!self->fold_heads) {
+        self->hidden_cache_valid = TRUE;
+        return;
+    }
+    
+    /* Mark hidden lines in bitfield */
+    GHashTableIter iter;
+    gpointer key, value;
+    g_hash_table_iter_init(&iter, self->fold_heads);
+    while (g_hash_table_iter_next(&iter, &key, &value)) {
+        FoldRegion *r = (FoldRegion *)value;
+        if (r->is_folded) {
+            /* Lines start_line+1 through end_line are hidden */
+            for (size_t line = r->start_line + 1; line <= r->end_line && line < line_count; line++) {
+                self->hidden_lines_cache[line / 8] |= (1 << (line % 8));
+            }
+        }
+    }
+    self->hidden_cache_valid = TRUE;
+}
+
+/* Get fold region at line (O(1) hash lookup) */
+static FoldRegion *
+get_fold_at_line(EditorWidget *self, size_t line_idx)
+{
+    if (!self->fold_heads) return NULL;
+    return g_hash_table_lookup(self->fold_heads, GSIZE_TO_POINTER(line_idx));
+}
+
+/* Lazy fold analysis - only analyze up to end_line if not already done */
+static void
+ensure_folds_for_range(EditorWidget *self, size_t start_line, size_t end_line)
+{
+    if (!self->doc) return;
+    
+    size_t line_count = document_get_line_count(self->doc);
+    if (end_line >= line_count) end_line = line_count - 1;
+    
+    /* Already analyzed past this point */
+    if (end_line < self->last_analyzed_line) return;
+    
+    ensure_fold_table(self);
+    
+    /* Stack-based fold detection from last_analyzed_line */
+    typedef struct { size_t start; int indent; } FoldScope;
+    GArray *stack = g_array_new(FALSE, FALSE, sizeof(FoldScope));
+    
+    /* Restore context from last analysis point */
+    int last_indent = 0;
+    size_t last_non_empty = (size_t)-1;
+    
+    /* If resuming, we need context from before last_analyzed_line */
+    if (self->last_analyzed_line > 0 && self->last_analyzed_line < line_count) {
+        /* Find last non-empty line before our start point for context */
+        for (size_t i = self->last_analyzed_line; i > 0; i--) {
+            int indent = get_line_indent(self, i - 1);
+            if (indent >= 0) {
+                last_indent = indent;
+                last_non_empty = i - 1;
+                break;
+            }
+        }
+    }
+    
+    size_t analyze_start = self->last_analyzed_line;
+    
+    for (size_t i = analyze_start; i <= end_line && i < line_count; i++) {
+        int indent = get_line_indent(self, i);
+        if (indent < 0) continue;  /* Skip empty lines */
+        
+        /* Close folds that ended (dedent) */
+        while (stack->len > 0) {
+            FoldScope *top = &g_array_index(stack, FoldScope, stack->len - 1);
+            if (indent < top->indent) {
+                /* Fold ended at previous non-empty line */
+                if (last_non_empty != (size_t)-1 && last_non_empty > top->start) {
+                    FoldRegion *region = g_slice_new(FoldRegion);
+                    region->start_line = top->start;
+                    region->end_line = last_non_empty;
+                    region->is_folded = FALSE;
+                    
+                    /* Don't overwrite existing fold (preserve fold state) */
+                    if (!g_hash_table_contains(self->fold_heads, GSIZE_TO_POINTER(top->start))) {
+                        g_hash_table_insert(self->fold_heads, GSIZE_TO_POINTER(top->start), region);
+                    } else {
+                        g_slice_free(FoldRegion, region);
+                    }
+                }
+                g_array_remove_index(stack, stack->len - 1);
+            } else {
+                break;
+            }
+        }
+        
+        /* Open new fold (indent) */
+        if (indent > last_indent && last_non_empty != (size_t)-1) {
+            FoldScope scope = { last_non_empty, indent };
+            g_array_append_val(stack, scope);
+        }
+        
+        last_non_empty = i;
+        last_indent = indent;
+    }
+    
+    /* Close remaining open folds at analysis end */
+    while (stack->len > 0) {
+        FoldScope *top = &g_array_index(stack, FoldScope, stack->len - 1);
+        if (last_non_empty != (size_t)-1 && last_non_empty > top->start) {
+            FoldRegion *region = g_slice_new(FoldRegion);
+            region->start_line = top->start;
+            region->end_line = last_non_empty;
+            region->is_folded = FALSE;
+            
+            if (!g_hash_table_contains(self->fold_heads, GSIZE_TO_POINTER(top->start))) {
+                g_hash_table_insert(self->fold_heads, GSIZE_TO_POINTER(top->start), region);
+            } else {
+                g_slice_free(FoldRegion, region);
+            }
+        }
+        g_array_remove_index(stack, stack->len - 1);
+    }
+    
+    g_array_free(stack, TRUE);
+    
+    self->last_analyzed_line = end_line + 1;
+}
+
+/* Invalidate folds from a line onwards (called on document edit) */
+static void
+invalidate_folds_from_line(EditorWidget *self, size_t line_idx)
+{
+    if (line_idx < self->last_analyzed_line) {
+        self->last_analyzed_line = line_idx;
+    }
+    self->hidden_cache_valid = FALSE;
+}
+
+/* Toggle fold at line */
+static void
+toggle_fold_at_line(EditorWidget *self, size_t line_idx)
+{
+    FoldRegion *fold = get_fold_at_line(self, line_idx);
+    if (fold) {
+        fold->is_folded = !fold->is_folded;
+        self->hidden_cache_valid = FALSE;
+        rebuild_hidden_cache(self);
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+    }
+}
+
+/* ========== END CODE FOLDING ========== */
 
 /* Scroll Calculation Helper */
 typedef struct {
@@ -676,14 +916,29 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     
     size_t cursor_line = document_get_line_of_offset(self->doc, self->cursor_offset);
     size_t anchor_line = document_get_line_of_offset(self->doc, self->selection_anchor);
+    (void)anchor_line;  /* May be unused */
+
+    /* Lazy fold analysis for visible range + lookahead */
+    size_t lookahead = (size_t)(height / self->line_height) + 50;
+    ensure_folds_for_range(self, start_line, start_line + lookahead);
+    
+    /* Rebuild hidden cache if needed */
+    if (!self->hidden_cache_valid) {
+        rebuild_hidden_cache(self);
+    }
 
 
     double current_y_pos = -partial_y; /* Start with calculated offset */
     double text_start_x = gutter_w + self->padding_left;
 
-    for (size_t i = 0; i < count_lines; ++i) {
-        size_t line_idx = start_line + i;
-        if (line_idx >= max_lines) break;
+    size_t visible_lines_drawn = 0;
+    size_t line_idx = start_line;
+    while (visible_lines_drawn < count_lines && line_idx < max_lines) {
+        /* Skip hidden (folded) lines */
+        if (is_line_hidden(self, line_idx)) {
+            line_idx++;
+            continue;
+        }
 
         size_t len;
         char *text = document_get_line(self->doc, line_idx, &len);
@@ -764,6 +1019,26 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             gtk_snapshot_restore(snapshot);
             
             g_object_unref(lnum_layout);
+            
+            /* Draw Fold Icon if this line is a fold head */
+            FoldRegion *fold = get_fold_at_line(self, line_idx);
+            if (fold) {
+                const char *icon = fold->is_folded ? "▶" : "▼";
+                PangoLayout *fold_layout = pango_layout_new(context);
+                pango_layout_set_font_description(fold_layout, self->font_desc);
+                pango_layout_set_text(fold_layout, icon, -1);
+                
+                GdkRGBA fold_color = self->color_text;
+                fold_color.alpha = 0.6;
+                
+                gtk_snapshot_save(snapshot);
+                /* Position at right edge of gutter (gutter_w - 16 for icon width) */
+                gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT((float)(gutter_w - 14), current_y_pos + self->padding_top));
+                gtk_snapshot_append_layout(snapshot, fold_layout, &fold_color);
+                gtk_snapshot_restore(snapshot);
+                
+                g_object_unref(fold_layout);
+            }
         }
 
         gtk_snapshot_save(snapshot);
@@ -939,6 +1214,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         if (current_y_pos > height) {
              break;
         }
+        
+        line_idx++;
+        visible_lines_drawn++;
     }
 
     /* Draw DnD Overlays */
@@ -1213,6 +1491,28 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     gtk_widget_grab_focus(GTK_WIDGET(self));
     
     if (!self->doc) return;
+
+    /* Check if click is in gutter fold icon area */
+    double gutter_w = get_effective_gutter_width(self);
+    if (x < gutter_w && x > gutter_w - 16 && n_press == 1) {
+        /* Calculate which line was clicked */
+        double scroll_y = 0;
+        if (self->vadjustment)
+            scroll_y = gtk_adjustment_get_value(self->vadjustment);
+        
+        double click_y = y + scroll_y - self->padding_top;
+        size_t line_idx = (size_t)(click_y / self->line_height);
+        
+        /* Ensure folds are analyzed for this line */
+        ensure_folds_for_range(self, line_idx, line_idx + 1);
+        
+        /* Check if this line has a fold and toggle it */
+        FoldRegion *fold = get_fold_at_line(self, line_idx);
+        if (fold) {
+            toggle_fold_at_line(self, line_idx);
+            return;
+        }
+    }
 
     size_t off;
     editor_widget_get_offset_at_point(self, x, y, &off);
@@ -3169,6 +3469,16 @@ editor_widget_dispose(GObject *object)
     if (self->idle_resize_id) {
         g_source_remove(self->idle_resize_id);
         self->idle_resize_id = 0;
+    }
+    
+    /* Cleanup folding resources */
+    if (self->fold_heads) {
+        g_hash_table_destroy(self->fold_heads);
+        self->fold_heads = NULL;
+    }
+    if (self->hidden_lines_cache) {
+        g_free(self->hidden_lines_cache);
+        self->hidden_lines_cache = NULL;
     }
     
     /* Disconnect GSettings signal and cleanup */
