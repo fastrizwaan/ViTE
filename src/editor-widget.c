@@ -3679,9 +3679,15 @@ cursor_blink_tick_callback(GtkWidget *widget, GdkFrameClock *frame_clock, gpoint
     /* sin(elapsed * PI * 2) gives a -1 to 1 wave over 1 second */
     /* We map this to 0-1 alpha with smoother fade */
     double phase = sin(elapsed * G_PI * 2.0);  /* -1 to 1 over 1 second */
-    self->cursor_alpha = (phase + 1.0) / 2.0;  /* Map to 0-1 */
+    double new_alpha = (phase + 1.0) / 2.0;  /* Map to 0-1 */
     
-    gtk_widget_queue_draw(widget);
+    /* Only redraw if alpha changed significantly (threshold of 0.05 ~= 20 updates/sec max) */
+    gboolean need_redraw = fabs(new_alpha - self->cursor_alpha) >= 0.05;
+    self->cursor_alpha = new_alpha;
+    
+    if (need_redraw) {
+        gtk_widget_queue_draw(widget);
+    }
     
     /* 
        Auto-scrolling during drag-and-drop 
