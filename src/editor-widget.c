@@ -729,7 +729,19 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
     PangoContext *context = gtk_widget_get_pango_context(widget);
     
-    /* Cursors info is handled inside the loop now */
+    /* Pre-compute cursor line indices to avoid O(N*M) complexity in the render loop */
+    guint num_cursors = self->cursors->len;
+    size_t *cursor_lines = NULL;
+    size_t cursor_lines_stack[16];  /* Stack allocation for common case of few cursors */
+    if (num_cursors <= 16) {
+        cursor_lines = cursor_lines_stack;
+    } else {
+        cursor_lines = g_new(size_t, num_cursors);
+    }
+    for (guint c = 0; c < num_cursors; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        cursor_lines[c] = document_get_line_of_offset(self->doc, cur->cursor_offset);
+    }
 
 
     double current_y_pos = -partial_y; /* Start with calculated offset */
@@ -785,10 +797,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* Draw Current Line Highlight - check if ANY cursor is on this line (and no selection) */
         if (self->highlight_current_line) {
              gboolean highlight_this = FALSE;
-             for (guint c = 0; c < self->cursors->len; c++) {
+             for (guint c = 0; c < num_cursors; c++) {
                  EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
-                 size_t c_line = document_get_line_of_offset(self->doc, cur->cursor_offset);
-                 if (c_line == line_idx && cur->cursor_offset == cur->selection_anchor) {
+                 if (cursor_lines[c] == line_idx && cur->cursor_offset == cur->selection_anchor) {
                      highlight_this = TRUE;
                      break;
                  }
@@ -868,16 +879,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                         PangoRectangle line_rect;
                         pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
                         double ry = pango_units_to_double(line_rect.y);
-                        double rh;
-                         PangoLayoutIter *next_iter = pango_layout_iter_copy(iter);
-                         if (pango_layout_iter_next_line(next_iter)) {
-                             PangoRectangle next_rect;
-                             pango_layout_iter_get_line_extents(next_iter, NULL, &next_rect);
-                             rh = pango_units_to_double(next_rect.y) - ry;
-                         } else {
-                             rh = layout_h - ry;
-                         }
-                         pango_layout_iter_free(next_iter);
+                        /* Use logical line height directly instead of copying iterator to peek ahead */
+                        double rh = pango_units_to_double(line_rect.height);
 
                         if (sel_in_line_end >= (size_t)line_start_index && sel_in_line_start <= (size_t)line_end_index) {
                             int *ranges; int n_ranges;
@@ -1026,6 +1029,10 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             &GRAPHENE_RECT_INIT((float)margin_x, 0, 1.0f, (float)height));
     }
 
+    /* Cleanup cursor_lines if heap allocated */
+    if (cursor_lines != cursor_lines_stack) {
+        g_free(cursor_lines);
+    }
 }
 
 
@@ -3672,17 +3679,15 @@ cursor_blink_tick_callback(GtkWidget *widget, GdkFrameClock *frame_clock, gpoint
         self->cursor_blink_start_time = now;
     }
     
-    /* Calculate elapsed time in seconds */
-    double elapsed = (double)(now - self->cursor_blink_start_time) / 1000000.0;
+    /* Calculate elapsed time in milliseconds */
+    gint64 elapsed_ms = (now - self->cursor_blink_start_time) / 1000;
     
-    /* Blink cycle: 1 second period (500ms on, 500ms off) with smooth sine wave */
-    /* sin(elapsed * PI * 2) gives a -1 to 1 wave over 1 second */
-    /* We map this to 0-1 alpha with smoother fade */
-    double phase = sin(elapsed * G_PI * 2.0);  /* -1 to 1 over 1 second */
-    double new_alpha = (phase + 1.0) / 2.0;  /* Map to 0-1 */
+    /* Simple on/off blink: 500ms on, 500ms off (no fade animation) */
+    /* This is much more efficient as we only redraw when state changes */
+    double new_alpha = ((elapsed_ms / 500) % 2 == 0) ? 1.0 : 0.0;
     
-    /* Only redraw if alpha changed significantly (threshold of 0.05 ~= 20 updates/sec max) */
-    gboolean need_redraw = fabs(new_alpha - self->cursor_alpha) >= 0.05;
+    /* Only redraw if alpha actually changed (state transition) */
+    gboolean need_redraw = (new_alpha != self->cursor_alpha);
     self->cursor_alpha = new_alpha;
     
     if (need_redraw) {
