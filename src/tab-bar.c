@@ -2,6 +2,7 @@
 
 struct _ViteTabBar {
     GtkBox parent_instance;
+    GtkWidget *scroller;
     GtkWidget *flowbox;
     
     GList *tabs;
@@ -11,9 +12,17 @@ struct _ViteTabBar {
     
     int last_allocated_width;
     int cached_cols;
+    gboolean is_overflowing;
 };
 
 G_DEFINE_TYPE(ViteTabBar, vite_tab_bar, GTK_TYPE_BOX)
+
+enum {
+    SIGNAL_OVERFLOW_CHANGED,
+    N_SIGNALS
+};
+
+static guint signals[N_SIGNALS] = {0};
 
 static const char *TAB_BAR_CSS = 
 ".chrome-tab-bar-container:drop(active), .chrome-tab-bar:drop(active) {"
@@ -88,45 +97,54 @@ update_separators (ViteTabBar *self)
 }
 
 static void
-update_tab_sizes (ViteTabBar *self, int allocated_width)
+update_tab_sizes (ViteTabBar *self)
 {
-    if (allocated_width <= 0) allocated_width = gtk_widget_get_width(GTK_WIDGET(self));
-    if (allocated_width <= 0) return;
-    
     if (!self->tabs) return;
-    
-    int margin_start = 6;
-    int available_width = allocated_width - margin_start;
-    
-    int min_tab_width = 150;
-    int max_tab_width = 240;
     
     int num_tabs = g_list_length(self->tabs);
     if (num_tabs == 0) return;
     
-    int capacity = MAX(1, available_width / min_tab_width);
-    int cols = MIN(num_tabs, capacity);
-    if (cols < 1) cols = 1;
-    
-    self->cached_cols = cols;
-    
-    int final_tab_width = CLAMP(available_width / cols, min_tab_width, max_tab_width);
+    /* Force single line layout */
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(self->flowbox), num_tabs);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(self->flowbox), num_tabs);
     
     for (GList *l = self->tabs; l != NULL; l = l->next) {
         GtkWidget *tab = GTK_WIDGET(l->data);
         if (!GTK_IS_WIDGET(tab)) continue;
-        gtk_widget_set_size_request(tab, final_tab_width, 32);
+        
+        /* Set flexible size request to allow shrinking */
+        gtk_widget_set_size_request(tab, 50, 32);
+        gtk_widget_set_hexpand(tab, TRUE);
+        gtk_widget_set_halign(tab, GTK_ALIGN_FILL);
+        
+        /* Ensure FlowBoxChild wrapper also expands */
+        GtkWidget *parent = gtk_widget_get_parent(tab);
+        if (parent && GTK_IS_FLOW_BOX_CHILD(parent)) {
+             gtk_widget_set_hexpand(parent, TRUE);
+             gtk_widget_set_halign(parent, GTK_ALIGN_FILL);
+        }
     }
     
     update_separators(self);
 }
 
 static void
-on_notify_width (GObject *object, GParamSpec *pspec, gpointer user_data)
+check_overflow (ViteTabBar *self)
 {
-    ViteTabBar *self = VITE_TAB_BAR(object);
-    update_tab_sizes(self, gtk_widget_get_width(GTK_WIDGET(self)));
+    GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
+    double upper = gtk_adjustment_get_upper(adj);
+    double page_size = gtk_adjustment_get_page_size(adj);
+    
+    gboolean overflowing = (upper > page_size + 0.1); /* Epsilon for float layout */
+    
+    if (overflowing != self->is_overflowing) {
+        self->is_overflowing = overflowing;
+        g_signal_emit(self, signals[SIGNAL_OVERFLOW_CHANGED], 0, overflowing);
+    }
 }
+
+
+
 
 
 static int
@@ -262,11 +280,41 @@ on_drag_drop (GtkDropTarget *target, const GValue *value, double x, double y, Vi
     return TRUE;
 }
 
+static gboolean
+on_scroll_controller_scroll (GtkEventControllerScroll *controller,
+                             double dx, double dy,
+                             gpointer user_data)
+{
+    ViteTabBar *self = VITE_TAB_BAR(user_data);
+    GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
+    
+    double value = gtk_adjustment_get_value(adj);
+    /* Multiply by a factor for comfortable scroll speed */
+    double new_value = value + (dy * 50.0); 
+
+    gtk_adjustment_set_value(adj, new_value);
+
+    return TRUE; /* Stop propagation */
+}
+
 static void
 vite_tab_bar_init (ViteTabBar *self)
 {
     gtk_widget_add_css_class(GTK_WIDGET(self), "chrome-tab-bar-container");
     gtk_orientable_set_orientation(GTK_ORIENTABLE(self), GTK_ORIENTATION_VERTICAL);
+    
+    self->scroller = gtk_scrolled_window_new();
+    /* EXTERNAL policy hides the scrollbar but keeps the adjustment active for wheel scrolling */
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(self->scroller), GTK_POLICY_EXTERNAL, GTK_POLICY_NEVER);
+    
+    /* Connect adjustment monitoring */
+    GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
+    g_signal_connect_swapped(adj, "changed", G_CALLBACK(check_overflow), self);
+    g_signal_connect_swapped(adj, "notify::upper", G_CALLBACK(check_overflow), self);
+    g_signal_connect_swapped(adj, "notify::page-size", G_CALLBACK(check_overflow), self);
+    
+    gtk_widget_set_hexpand(self->scroller, TRUE);
+    gtk_box_append(GTK_BOX(self), self->scroller);
     
     self->flowbox = gtk_flow_box_new();
     gtk_widget_add_css_class(self->flowbox, "chrome-tab-bar");
@@ -276,26 +324,42 @@ vite_tab_bar_init (ViteTabBar *self)
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(self->flowbox), 3);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(self->flowbox), 3);
     gtk_widget_set_hexpand(self->flowbox, TRUE);
-    gtk_box_append(GTK_BOX(self), self->flowbox);
+    gtk_widget_set_halign(self->flowbox, GTK_ALIGN_FILL);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(self->scroller), self->flowbox);
     
     self->drop_target = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
     gtk_drop_target_set_preload(self->drop_target, TRUE);
     g_signal_connect(self->drop_target, "motion", G_CALLBACK(on_drag_motion), self);
     g_signal_connect(self->drop_target, "leave", G_CALLBACK(on_drag_leave), self);
     g_signal_connect(self->drop_target, "drop", G_CALLBACK(on_drag_drop), self);
+    g_signal_connect(self->drop_target, "drop", G_CALLBACK(on_drag_drop), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(self->drop_target));
     
-    /* Legacy drop indicator - not used anymore */
+    /* Scroll Controller for Map Vertical Scroll -> Horizontal */
+    GtkEventController *scroll_controller = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    g_signal_connect(scroll_controller, "scroll", G_CALLBACK(on_scroll_controller_scroll), self);
+    gtk_widget_add_controller(GTK_WIDGET(self), scroll_controller);
     
-    g_signal_connect(self, "notify::width", G_CALLBACK(on_notify_width), NULL);
-    g_signal_connect(self, "map", G_CALLBACK(on_notify_width), NULL);
-}
+    
+    /* Monitor Overflow - already connected above */
+    /* Trigger initial check */
+    // queue a check? The signals above handle it.
+} 
+
+
+
 
 static void
 vite_tab_bar_class_init (ViteTabBarClass *class)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(class);
     object_class->finalize = vite_tab_bar_finalize;
+    
+    signals[SIGNAL_OVERFLOW_CHANGED] = g_signal_new("overflow-changed",
+        G_TYPE_FROM_CLASS(class),
+        G_SIGNAL_RUN_LAST,
+        0, NULL, NULL, NULL,
+        G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
     
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, TAB_BAR_CSS);
@@ -317,11 +381,11 @@ vite_tab_bar_add_tab (ViteTabBar *self, ViteTab *tab)
     vite_tab_set_tab_bar(tab, self);
     gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), -1);
     self->tabs = g_list_append(self->tabs, tab);
-    update_tab_sizes(self, -1);
-    
-    update_separators(self);
     
     gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
+    
+    update_tab_sizes(self);
+    update_separators(self);
 }
 
 void
@@ -348,12 +412,82 @@ vite_tab_bar_remove_tab (ViteTabBar *self, ViteTab *tab)
     }
     
     update_separators(self);
+    update_tab_sizes(self);
     gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
 }
 
 /* ... */
 
 
+
+typedef struct {
+    ViteTab *tab;
+    int attempts;
+} ScrollRetryData;
+
+static gboolean
+scroll_retry_timeout (gpointer user_data)
+{
+    ScrollRetryData *data = user_data;
+    ViteTab *tab = data->tab;
+    
+    if (!GTK_IS_WIDGET(tab) || !gtk_widget_get_parent(GTK_WIDGET(tab))) {
+        g_object_unref(tab);
+        g_free(data);
+        return G_SOURCE_REMOVE;
+    }
+
+    ViteTabBar *self = VITE_TAB_BAR(g_object_get_data(G_OBJECT(tab), "tab-bar"));
+    if (!self || !self->scroller) {
+        g_object_unref(tab);
+        g_free(data);
+        return G_SOURCE_REMOVE;
+    }
+
+    graphene_rect_t bounds;
+    /* Try to compute bounds */
+    if (gtk_widget_compute_bounds(GTK_WIDGET(tab), self->flowbox, &bounds)) {
+        GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
+        double page_size = gtk_adjustment_get_page_size(adj);
+        double value = gtk_adjustment_get_value(adj);
+        double upper = gtk_adjustment_get_upper(adj);
+        
+        /* Check if the scroller knows about the new size yet. 
+           If bounds are way outside upper, maybe we need to wait more? 
+           But usually upper matches FlowBox allocation. */
+           
+        double padding = 20.0;
+        double target = -1.0;
+        
+        if (bounds.origin.x < value) {
+            target = bounds.origin.x - padding;
+        } else if (bounds.origin.x + bounds.size.width > value + page_size) {
+            target = bounds.origin.x + bounds.size.width - page_size + padding;
+        }
+        
+        if (target != -1.0) {
+            /* Ensure target is valid */
+            if (target < 0) target = 0;
+            if (target > upper - page_size) target = upper - page_size;
+            
+            gtk_adjustment_set_value(adj, target);
+        }
+        
+        /* Done */
+        g_object_unref(tab);
+        g_free(data);
+        return G_SOURCE_REMOVE;
+    }
+    
+    data->attempts++;
+    if (data->attempts > 20) { /* 400ms max */
+        g_object_unref(tab);
+        g_free(data);
+        return G_SOURCE_REMOVE;
+    }
+    
+    return G_SOURCE_CONTINUE;
+}
 
 void
 vite_tab_bar_set_active_tab (ViteTabBar *self, ViteTab *tab)
@@ -362,6 +496,15 @@ vite_tab_bar_set_active_tab (ViteTabBar *self, ViteTab *tab)
     for (l = self->tabs; l != NULL; l = l->next) {
         ViteTab *t = VITE_TAB(l->data);
         vite_tab_set_active(t, t == tab);
+    }
+    
+    if (tab) {
+        /* Start retry loop immediately to handle layout delays */
+        ScrollRetryData *data = g_new(ScrollRetryData, 1);
+        data->tab = tab;
+        g_object_ref(tab);
+        data->attempts = 0;
+        g_timeout_add(20, scroll_retry_timeout, data);
     }
 }
 
@@ -382,4 +525,10 @@ vite_tab_bar_get_active_tab (ViteTabBar *self)
         }
     }
     return NULL;
+}
+
+GList *
+vite_tab_bar_get_tabs (ViteTabBar *self)
+{
+    return g_list_copy(self->tabs);
 }

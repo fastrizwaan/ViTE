@@ -15,5 +15,6 @@ void vite_tab_bar_remove_tab(ViteTabBar *self, ViteTab *tab);
 int vite_tab_bar_get_n_tabs(ViteTabBar *self);
 void vite_tab_bar_set_active_tab(ViteTabBar *self, ViteTab *tab);
 ViteTab *vite_tab_bar_get_active_tab(ViteTabBar *self);
+GList *vite_tab_bar_get_tabs(ViteTabBar *self);
 
 G_END_DECLS
