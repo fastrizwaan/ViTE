@@ -6,6 +6,9 @@ struct _SyntaxContext {
     /* State tracking: index i = state AFTER line i */
     GByteArray *state_chain;
 
+    /* Cache: maps line_index -> {content_hash, PangoAttrList*} */
+    GHashTable *line_cache;  /* size_t -> SyntaxCacheEntry* */
+    
     /* Regexes */
     /* C */
     GRegex *c_keywords;
@@ -36,6 +39,13 @@ struct _SyntaxContext {
     GRegex *sh_comment;
     GRegex *sh_variable;
 };
+
+/* Cache entry structure */
+typedef struct {
+    guint content_hash;
+    SyntaxState start_state;
+    PangoAttrList *attrs;
+} SyntaxCacheEntry;
 
 /* --- Colors --- */
 /* Atom One Dark theme colors */
@@ -96,10 +106,12 @@ syntax_context_new(void)
     ctx->py_string_dq = g_regex_new("\"", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->py_string_sq = g_regex_new("'", G_REGEX_OPTIMIZE, 0, NULL);
     
-    /* Bash */
     ctx->sh_keywords = g_regex_new("\\b(if|then|else|elif|fi|case|esac|for|select|while|until|do|done|in|function|time|coproc|declare|typeset|local|readonly|export|unset|set|shopt|trap|source|alias|unalias|break|continue|return|exit|eval|exec)\\b", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->sh_comment = g_regex_new("#.*$", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->sh_variable = g_regex_new("\\$(\\w+|\\{[^}]+\\}|[0-9*@#?!$-])", G_REGEX_OPTIMIZE, 0, NULL);
+
+    /* Initialize line cache */
+    ctx->line_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
 
     return ctx;
 }
@@ -135,6 +147,19 @@ syntax_context_free(SyntaxContext *ctx)
     if (ctx->sh_comment) g_regex_unref(ctx->sh_comment);
     if (ctx->sh_variable) g_regex_unref(ctx->sh_variable);
     
+    /* Free cache - entries freed by hash table */
+    if (ctx->line_cache) {
+        /* Free PangoAttrLists from cache entries */
+        GHashTableIter iter;
+        gpointer key, value;
+        g_hash_table_iter_init(&iter, ctx->line_cache);
+        while (g_hash_table_iter_next(&iter, &key, &value)) {
+            SyntaxCacheEntry *entry = value;
+            if (entry->attrs) pango_attr_list_unref(entry->attrs);
+        }
+        g_hash_table_destroy(ctx->line_cache);
+    }
+    
     free(ctx);
 }
 
@@ -162,6 +187,36 @@ syntax_context_invalidate(SyntaxContext *ctx, size_t start_line)
 {
     if (start_line < ctx->state_chain->len) {
         g_byte_array_set_size(ctx->state_chain, start_line);
+    }
+    /* Remove cache entries from start_line onwards */
+    if (ctx->line_cache) {
+        GHashTableIter iter;
+        gpointer key, value;
+        g_hash_table_iter_init(&iter, ctx->line_cache);
+        while (g_hash_table_iter_next(&iter, &key, &value)) {
+            size_t line = GPOINTER_TO_SIZE(key);
+            if (line >= start_line) {
+                SyntaxCacheEntry *entry = value;
+                if (entry->attrs) pango_attr_list_unref(entry->attrs);
+                g_hash_table_iter_remove(&iter);
+            }
+        }
+    }
+}
+
+void
+syntax_context_invalidate_all(SyntaxContext *ctx)
+{
+    g_byte_array_set_size(ctx->state_chain, 0);
+    if (ctx->line_cache) {
+        GHashTableIter iter;
+        gpointer key, value;
+        g_hash_table_iter_init(&iter, ctx->line_cache);
+        while (g_hash_table_iter_next(&iter, &key, &value)) {
+            SyntaxCacheEntry *entry = value;
+            if (entry->attrs) pango_attr_list_unref(entry->attrs);
+        }
+        g_hash_table_remove_all(ctx->line_cache);
     }
 }
 
@@ -205,10 +260,22 @@ set_line_end_state(SyntaxContext *ctx, size_t line_index, SyntaxState state)
 PangoAttrList *
 syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
 {
-    PangoAttrList *attrs = pango_attr_list_new();
-    if (ctx->lang == LANG_NONE) return attrs;
+    if (ctx->lang == LANG_NONE) return pango_attr_list_new();
     
-    SyntaxState state = get_line_start_state(ctx, line_index);
+    SyntaxState start_state = get_line_start_state(ctx, line_index);
+    guint content_hash = g_str_hash(text);
+    
+    /* Cache lookup */
+    if (ctx->line_cache) {
+        SyntaxCacheEntry *cached = g_hash_table_lookup(ctx->line_cache, GSIZE_TO_POINTER(line_index));
+        if (cached && cached->content_hash == content_hash && cached->start_state == start_state) {
+            /* Cache hit - return a copy of the cached attrs */
+            return pango_attr_list_ref(cached->attrs);
+        }
+    }
+    
+    PangoAttrList *attrs = pango_attr_list_new();
+    SyntaxState state = start_state;
     size_t len = strlen(text);
     size_t cur = 0;
     
@@ -646,7 +713,20 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
     /* Save end state */
     set_line_end_state(ctx, line_index, state);
     
-    /* Combine attributes? Pango does it. */
+    /* Store in cache */
+    if (ctx->line_cache) {
+        /* Remove old entry if exists */
+        SyntaxCacheEntry *old = g_hash_table_lookup(ctx->line_cache, GSIZE_TO_POINTER(line_index));
+        if (old && old->attrs) {
+            pango_attr_list_unref(old->attrs);
+        }
+        
+        SyntaxCacheEntry *entry = g_new(SyntaxCacheEntry, 1);
+        entry->content_hash = content_hash;
+        entry->start_state = start_state;
+        entry->attrs = pango_attr_list_ref(attrs);
+        g_hash_table_insert(ctx->line_cache, GSIZE_TO_POINTER(line_index), entry);
+    }
     
     return attrs;
 }
