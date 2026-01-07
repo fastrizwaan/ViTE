@@ -2689,7 +2689,6 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         document_delete(self->doc, s, sel_len + sep_len + w2_len);
         document_insert(self->doc, s, w2_text, w2_len);
         document_insert(self->doc, s + w2_len, sep_text, sep_len);
-        document_insert(self->doc, s + w2_len, sep_text, sep_len);
         document_insert(self->doc, s + w2_len + sep_len, sel_text, sel_len);
         
         size_t new_anchor = s + w2_len + sep_len;
@@ -2729,7 +2728,6 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         document_set_undo_group_selection(self->doc, self->selection_anchor, self->cursor_offset);
         document_delete(self->doc, w2_start, w2_len + sep_len + sel_len);
         document_insert(self->doc, w2_start, sel_text, sel_len);
-        document_insert(self->doc, w2_start + sel_len, sep_text, sep_len);
         document_insert(self->doc, w2_start + sel_len, sep_text, sep_len);
         document_insert(self->doc, w2_start + sel_len + sep_len, w2_text, w2_len);
         
