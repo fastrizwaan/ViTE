@@ -106,7 +106,7 @@ load_css(void)
     "    border-bottom-right-radius: 0px;"
     "    margin: 0px;"
     "    padding-left: 10px;"
-    "    padding-right: 3px;"
+    "    padding-right: 6px;"
     "}"
     ".open-split-btn button:hover {"
     "    background: alpha(@window_fg_color, 0.12);"
@@ -121,7 +121,7 @@ load_css(void)
     "    border-bottom-left-radius: 0px;" 
     "    border-top-right-radius: 10px; "
     "    border-bottom-right-radius: 10px;"
-    "    padding-left: 3px;"
+    "    padding-left: 4px;"
     "    padding-right: 6px;"
     "}"
 
@@ -301,6 +301,92 @@ add_to_local_recents(const char *uri)
     
     save_local_recents(uris);
     g_list_free_full(uris, g_free);
+}
+
+typedef struct {
+    GtkWidget *btn;
+    gboolean overflowing;
+} OverflowUpdate;
+
+static void
+update_overflow_idle (gpointer data)
+{
+    OverflowUpdate *u = data;
+    if (GTK_IS_WIDGET(u->btn)) {
+        gtk_widget_set_visible(u->btn, u->overflowing);
+    }
+    g_free(u);
+}
+
+static void
+on_overflow_changed (ViteTabBar *bar, gboolean overflowing, gpointer user_data)
+{
+    GtkWidget *btn = GTK_WIDGET(user_data);
+    
+    OverflowUpdate *u = g_new(OverflowUpdate, 1);
+    u->btn = btn;
+    u->overflowing = overflowing;
+    g_idle_add_once(update_overflow_idle, u);
+}
+
+static void
+on_popover_tab_row_activated (GtkListBox *list, GtkListBoxRow *row, gpointer user_data)
+{
+    ViteTab *tab = g_object_get_data(G_OBJECT(row), "tab");
+    if (tab) {
+        g_signal_emit_by_name(tab, "clicked");
+        
+        GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(list), GTK_TYPE_POPOVER);
+        if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
+    }
+}
+
+static void
+update_open_tabs_list (GtkWidget *popover, gpointer user_data)
+{
+    GtkListBox *list = GTK_LIST_BOX(user_data);
+    if (!list) list = g_object_get_data(G_OBJECT(popover), "list");
+    if (!list) return;
+
+    /* Clear */
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(list)))) {
+        gtk_list_box_remove(list, child);
+    }
+    
+    if (!main_tab_bar) return;
+    
+    GList *tabs = vite_tab_bar_get_tabs(main_tab_bar);
+    for (GList *l = tabs; l != NULL; l = l->next) {
+        ViteTab *tab = VITE_TAB(l->data);
+        const char *title = vite_tab_get_title(tab);
+        
+        GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+        gtk_widget_set_margin_start(row_box, 12);
+        gtk_widget_set_margin_end(row_box, 12);
+        gtk_widget_set_margin_top(row_box, 8);
+        gtk_widget_set_margin_bottom(row_box, 8);
+        
+        GtkWidget *label = gtk_label_new(title);
+        gtk_widget_set_halign(label, GTK_ALIGN_START);
+        gtk_box_append(GTK_BOX(row_box), label);
+        
+        if (vite_tab_is_active(tab)) {
+            GtkWidget *icon = gtk_image_new_from_icon_name("object-select-symbolic");
+            gtk_box_append(GTK_BOX(row_box), icon);
+        }
+        
+        gtk_list_box_insert(list, row_box, -1);
+        
+        /* Store tab pointer */
+        GtkListBoxRow *row = gtk_list_box_get_row_at_index(list, gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(gtk_widget_get_parent(row_box))));
+        g_object_set_data(G_OBJECT(row), "tab", tab);
+    }
+    g_list_free(tabs);
+    
+    /* Connect activation */
+    g_signal_handlers_disconnect_by_func(list, on_popover_tab_row_activated, NULL);
+    g_signal_connect(list, "row-activated", G_CALLBACK(on_popover_tab_row_activated), NULL);
 }
 
 static void
@@ -739,6 +825,33 @@ setup_window(GtkWindow *window)
     
     main_tab_bar = VITE_TAB_BAR(vite_tab_bar_new());
     gtk_box_append(GTK_BOX(titlebar_container), GTK_WIDGET(main_tab_bar));
+
+    /* Open Tabs Button (Overflow Menu) */
+    GtkWidget *btn_tabs = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(btn_tabs), "pan-down-symbolic");
+    gtk_widget_set_tooltip_text(btn_tabs, "Open Tabs");
+    gtk_widget_set_visible(btn_tabs, FALSE); /* Hidden by default until overflow */
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_tabs);
+
+    /* Popover for tabs */
+    GtkWidget *tabs_popover = gtk_popover_new();
+    GtkWidget *tabs_list = gtk_list_box_new();
+    GtkWidget *tabs_scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(tabs_scrolled), tabs_list);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(tabs_scrolled), 300);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(tabs_scrolled), TRUE);
+    gtk_popover_set_child(GTK_POPOVER(tabs_popover), tabs_scrolled);
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(btn_tabs), tabs_popover);
+    
+    /* Check for overflow logic helper */
+    g_object_set_data(G_OBJECT(main_tab_bar), "tabs-btn", btn_tabs);
+    g_object_set_data(G_OBJECT(tabs_popover), "list", tabs_list);
+    
+    g_signal_connect(main_tab_bar, "overflow-changed", G_CALLBACK(on_overflow_changed), btn_tabs);
+    g_signal_connect(tabs_popover, "map", G_CALLBACK(update_open_tabs_list), NULL); /* User_data passed via signal not ideal, let's use swap/data */
+    
+    /* Better signal connect for updating list */
+    g_signal_connect(tabs_popover, "map", G_CALLBACK(update_open_tabs_list), tabs_list);
 }
 
 static void

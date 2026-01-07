@@ -224,6 +224,7 @@ vite_tab_init (ViteTab *self)
     gtk_orientable_set_orientation(GTK_ORIENTABLE(self), GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_overflow(GTK_WIDGET(self), GTK_OVERFLOW_HIDDEN);
     gtk_widget_set_size_request(GTK_WIDGET(self), 150, 32); 
+    gtk_widget_set_hexpand(GTK_WIDGET(self), TRUE); 
     
     /* Separator (Left) */
     self->separator = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
@@ -357,6 +358,7 @@ vite_tab_set_title (ViteTab *self, const char *title)
     g_free(self->title);
     self->title = g_strdup(title);
     gtk_label_set_text(GTK_LABEL(self->label), title);
+    gtk_widget_set_tooltip_text(GTK_WIDGET(self), title);
 }
 
 gboolean
