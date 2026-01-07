@@ -25,6 +25,7 @@ struct _EditorWidget {
     GdkRGBA color_cursor;
 
     double line_height;
+    double ascent;
     double cached_char_width;
     PangoFontDescription *font_desc;
     
@@ -608,27 +609,42 @@ editor_widget_ensure_metrics(EditorWidget *self)
     
     PangoFontMetrics *metrics = pango_context_get_metrics(context, self->font_desc, pango_context_get_language(context));
     int ascent = pango_font_metrics_get_ascent(metrics);
-    int descent = pango_font_metrics_get_descent(metrics);
-    
-    /* Calculate line height from metrics ensuring space for all scripts */
-    self->line_height = (double)(ascent + descent) / PANGO_SCALE;
-
-    /* Measure '0' for more accurate char width in code/monospace scenarios */
-    /* Use logical extents to avoid HiDPI scaling issues with get_pixel_size */
+    /* Create a temporary layout to measure "Hg" dimensions.
+       "Hg" is chosen to capture both the ascender (H) and descender (g) 
+       of the standard Latin script, giving a more accurate baseline height. */
     PangoLayout *layout = pango_layout_new(context);
     pango_layout_set_font_description(layout, self->font_desc);
-    pango_layout_set_text(layout, "0", 1);
+    pango_layout_set_text(layout, "Hg", 2);
+
+    PangoRectangle ink_rect, logical_rect;
+    pango_layout_get_extents(layout, &ink_rect, &logical_rect);
+
+    /* Get metrics for "Hg" */
+    int logical_top = logical_rect.y;
+    int baseline = pango_layout_get_baseline(layout);
     
-    PangoRectangle logical_rect;
-    pango_layout_get_extents(layout, NULL, &logical_rect);
+    double hg_height = (double)logical_rect.height / PANGO_SCALE;
+    self->cached_char_width = (double)logical_rect.width / PANGO_SCALE / 2.0; /* Approximate char width */
+    double hg_ascent = (double)(baseline - logical_top) / PANGO_SCALE;
+    
     g_object_unref(layout);
+
+
+    /* Strict Latin/Code Priority with Visual Comfort:
+       We use the "Hg" layout metrics to include descenders.
+    */
+    double raw_height = hg_height;
+    double raw_ascent = hg_ascent;
+
+    /* Remove excessive padding (5% was too much for Arabic).
+       We rely on ceil() to provide integer pixel alignment, which naturally adds
+       a tiny fraction of padding (up to 1px). */
+    self->line_height = ceil(raw_height);
     
-    self->cached_char_width = (double)logical_rect.width / PANGO_SCALE;
-    if (self->cached_char_width < 1.0) self->cached_char_width = 1.0;
-    
-    /* Add line spacing (leading) for readability */
-    /* 1.15x is compact but comfortable */
-    self->line_height = ceil(self->line_height * 1.15);
+    /* Center the text/caret by distributing the extra space (from rounding)
+       equally to the top and bottom. */
+    double extra_space = self->line_height - raw_height;
+    self->ascent = raw_ascent + floor(extra_space / 2.0);
 
     pango_font_metrics_unref(metrics);
 }
@@ -790,9 +806,13 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* Calculate height of this layout */
         int pixel_h;
         pango_layout_get_pixel_size(layout, NULL, &pixel_h);
-        double layout_h = (double)pixel_h;
+        double real_layout_h = (double)pixel_h;
+        double layout_h = real_layout_h;
         if (layout_h < self->line_height) layout_h = self->line_height; /* Min height */
         
+        /* Vertical Centering: Calculate offset to center the text within the row */
+        double centering_offset = floor((layout_h - real_layout_h) / 2.0);
+
         /* Apply start offset if first line */
         /* Draw Current Line Highlight - check if ANY cursor is on this line (and no selection) */
         if (self->highlight_current_line) {
@@ -833,8 +853,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             gutter_fg.alpha = 0.5;
             
             gtk_snapshot_save(snapshot);
-            /* Translate X=4 for 4px left padding */
-            gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(4, current_y_pos + self->padding_top));
+            /* Translate X=4 for 4px left padding. Use centering_offset for consistent alignment. */
+            gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(4, current_y_pos + self->padding_top + centering_offset));
             gtk_snapshot_append_layout(snapshot, lnum_layout, &gutter_fg);
             gtk_snapshot_restore(snapshot);
             
@@ -842,7 +862,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         }
 
         gtk_snapshot_save(snapshot);
-        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x, current_y_pos + self->padding_top));
+        /* Apply centering_offset to the text drawing translation */
+        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x, current_y_pos + self->padding_top + centering_offset));
         
         /* Draw Line Background if selected */
         /* Selection rendering across lines is complex. 
@@ -865,9 +886,10 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                 
                 if (len == 0) {
                     if (end_sel > line_start_off) {
+                        /* For empty lines, draw selection block using layout_h */
                         gtk_snapshot_append_color(snapshot, 
                                                   &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
-                                                  &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)layout_h));
+                                                  &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)real_layout_h));
                     }
                 } else {
                     PangoLayoutIter *iter = pango_layout_get_iter(layout);
@@ -914,6 +936,12 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         gtk_snapshot_append_layout(snapshot, layout, &self->color_text);
         
         /* 3. Draw Cursors for all cursors */
+        /* User requested 0.4px specifically (verified "sharp" on their display). 
+           We retain the multi-pass drawing to ensure it remains opaque/black 
+           rather than a faint sub-pixel blur. */
+        float cursor_w = 0.4f;
+        int scale = gtk_widget_get_scale_factor(widget);
+
         for (guint c = 0; c < self->cursors->len; c++) {
             EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
             gboolean has_selection = (cur->cursor_offset != cur->selection_anchor);
@@ -931,11 +959,22 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                      
                      GdkRGBA cursor_color = self->color_cursor;
                      cursor_color.alpha = self->cursor_alpha;
-                     int cursor_x = (int)(pango_units_to_double(strong_pos.x) + 0.5);
-                     int cursor_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
-                     int cursor_h = (int)self->line_height;
                      
-                     gtk_snapshot_append_color(snapshot, &cursor_color, &GRAPHENE_RECT_INIT(cursor_x, cursor_y, 1, cursor_h));
+                     /* Snap to physical pixel grid */
+                     double x_pos = pango_units_to_double(strong_pos.x);
+                     float cursor_x = (float)floor(x_pos * scale + 0.5) / scale;
+
+                     /* Calculate Cursor Height and Y: match line height and center */
+                     double pango_h = pango_units_to_double(strong_pos.height);
+                     double pango_y = pango_units_to_double(strong_pos.y);
+                     
+                     double cursor_h = MAX(pango_h, self->line_height);
+                     double cursor_y = pango_y - (cursor_h - pango_h) / 2.0;
+                     
+                     /* Draw 4 times to accumulate opacity and force "sharpness" on sub-pixels */
+                     for (int pass = 0; pass < 4; pass++) {
+                        gtk_snapshot_append_color(snapshot, &cursor_color, &GRAPHENE_RECT_INIT(cursor_x, (float)((int)(cursor_y + 0.5)), cursor_w, (float)((int)cursor_h)));
+                     }
                 }
             }
         }
@@ -952,19 +991,21 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                 pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
 
                 GdkRGBA caret_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){1.0, 0.647, 0.0, 1.0};
-                /* Smooth pixel-based drop caret: follow mouse X exactly instead of snapping to char */
-                int caret_x = (int)(self->drag_x - text_start_x);
+                /* Snap for drop caret */
+                float caret_x = (float)(self->drag_x - text_start_x);
                 if (caret_x < 0) caret_x = 0;
+                caret_x = (float)floor(caret_x * scale + 0.5) / scale;
                 
-                int caret_y = (int)(pango_units_to_double(strong_pos.y) + 0.5);
-                int caret_h = (int)(pango_units_to_double(strong_pos.height) + 0.5);
-                
-                /* Use line_height as fallback for empty lines */
-                if (caret_h < 1) caret_h = (int)self->line_height;
+                double pango_h = pango_units_to_double(strong_pos.height);
+                double pango_y = pango_units_to_double(strong_pos.y);
+                double caret_h = MAX(pango_h, self->line_height);
+                double caret_y = pango_y - (caret_h - pango_h) / 2.0;
 
-                gtk_snapshot_append_color(snapshot, 
-                                          &caret_color,
-                                          &GRAPHENE_RECT_INIT(caret_x, caret_y, 1, caret_h));
+                for (int pass = 0; pass < 4; pass++) {
+                    gtk_snapshot_append_color(snapshot, 
+                                              &caret_color,
+                                              &GRAPHENE_RECT_INIT(caret_x, (float)((int)(caret_y + 0.5)), cursor_w, (float)((int)caret_h)));
+                }
             }
         }
         
