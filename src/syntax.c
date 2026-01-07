@@ -48,21 +48,42 @@ typedef struct {
 } SyntaxCacheEntry;
 
 /* --- Colors --- */
-/* Atom One Dark theme colors */
-static const char *COLOR_KEYWORD  = "#C678DD";  /* Purple - keywords */
-static const char *COLOR_TYPE     = "#E5C07B";  /* Yellow/Gold - types, class names */
-static const char *COLOR_STRING   = "#98C379";  /* Green - strings */
-static const char *COLOR_COMMENT  = "#5C6370";  /* Gray - comments */
-static const char *COLOR_PREPROC  = "#E06C75";  /* Red - preprocessor, decorators */
-static const char *COLOR_NUMBER   = "#D19A66";  /* Orange - numbers */
-static const char *COLOR_FUNCTION = "#61AFEF";  /* Blue - functions, builtins */
-static const char *COLOR_BOOL     = "#D19A66";  /* Orange - True/False/None */
-static const char *COLOR_SELF     = "#E06C75";  /* Red - self, helpers */
-static const char *COLOR_VARIABLE = "#E06C75";  /* Red - variables */
+/* Atom One Dark theme colors - Pre-parsed for performance */
+static PangoColor color_keyword;   /* Purple - keywords */
+static PangoColor color_type;      /* Yellow/Gold - types, class names */
+static PangoColor color_string;    /* Green - strings */
+static PangoColor color_comment;   /* Gray - comments */
+static PangoColor color_preproc;   /* Red - preprocessor, decorators */
+static PangoColor color_number;    /* Orange - numbers */
+static PangoColor color_function;  /* Blue - functions, builtins */
+static PangoColor color_bool;      /* Orange - True/False/None */
+static PangoColor color_self;      /* Red - self, helpers */
+static PangoColor color_variable;  /* Red - variables */
+static gboolean colors_initialized = FALSE;
+
+static void
+init_syntax_colors(void)
+{
+    if (colors_initialized) return;
+    pango_color_parse(&color_keyword, "#C678DD");
+    pango_color_parse(&color_type, "#E5C07B");
+    pango_color_parse(&color_string, "#98C379");
+    pango_color_parse(&color_comment, "#5C6370");
+    pango_color_parse(&color_preproc, "#E06C75");
+    pango_color_parse(&color_number, "#D19A66");
+    pango_color_parse(&color_function, "#61AFEF");
+    pango_color_parse(&color_bool, "#D19A66");
+    pango_color_parse(&color_self, "#E06C75");
+    pango_color_parse(&color_variable, "#E06C75");
+    colors_initialized = TRUE;
+}
 
 SyntaxContext *
 syntax_context_new(void)
 {
+    /* Initialize color cache on first context creation */
+    init_syntax_colors();
+    
     SyntaxContext *ctx = malloc(sizeof(SyntaxContext));
     ctx->lang = LANG_NONE;
     ctx->state_chain = g_byte_array_new();
@@ -220,13 +241,12 @@ syntax_context_invalidate_all(SyntaxContext *ctx)
     }
 }
 
-/* Helper to add attribute */
+/* Helper to add attribute - uses pre-parsed color for performance */
 static void
-add_attr(PangoAttrList *attrs, int start, int end, const char *color)
+add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color)
 {
     if (start >= end) return;
-    PangoAttribute *attr = pango_attr_foreground_new(0, 0, 0);
-    pango_color_parse(&((PangoAttrColor*)attr)->color, color);
+    PangoAttribute *attr = pango_attr_foreground_new(color->red, color->green, color->blue);
     attr->start_index = start;
     attr->end_index = end;
     pango_attr_list_insert(attrs, attr);
@@ -299,7 +319,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                 while (g_match_info_matches(mi)) {
                     int s, e;
                     g_match_info_fetch_pos(mi, 0, &s, &e);
-                    add_attr(attrs, s, e, COLOR_KEYWORD);
+                    add_attr(attrs, s, e, &color_keyword);
                     g_match_info_next(mi, NULL);
                 }
             }
@@ -309,7 +329,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                 while (g_match_info_matches(mi)) {
                     int s, e;
                     g_match_info_fetch_pos(mi, 0, &s, &e);
-                    add_attr(attrs, s, e, COLOR_TYPE);
+                    add_attr(attrs, s, e, &color_type);
                     g_match_info_next(mi, NULL);
                 }
             }
@@ -319,7 +339,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                  while (g_match_info_matches(mi)) {
                     int s, e;
                     g_match_info_fetch_pos(mi, 0, &s, &e);
-                    add_attr(attrs, s, e, COLOR_PREPROC);
+                    add_attr(attrs, s, e, &color_preproc);
                     g_match_info_next(mi, NULL);
                 }
             }
@@ -352,13 +372,13 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                         cur++;
                     }
                     /* Apply color */
-                    add_attr(attrs, start_pos, cur, COLOR_STRING);
+                    add_attr(attrs, start_pos, cur, &color_string);
                     continue; /* Loop again in ROOT */
                 }
                 /* // */
                 else if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
                     /* Comment until EOL */
-                    add_attr(attrs, cur, len, COLOR_COMMENT);
+                    add_attr(attrs, cur, len, &color_comment);
                     cur = len;
                     break;
                 }
@@ -378,7 +398,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                     }
                     if (state == STATE_IN_ML_COMMENT) cur = len; /* Until end of line */
                     
-                    add_attr(attrs, start_pos, cur, COLOR_COMMENT);
+                    add_attr(attrs, start_pos, cur, &color_comment);
                     continue;
                 }
                 else {
@@ -397,7 +417,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                     cur++;
                 }
                 if (state == STATE_IN_ML_COMMENT) cur = len;
-                add_attr(attrs, start_pos, cur, COLOR_COMMENT);
+                add_attr(attrs, start_pos, cur, &color_comment);
             }
             else {
                 /* Should handle multi-line strings if supported, C strings usually single line but with backslash... 
@@ -415,7 +435,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int s, e;
                  g_match_info_fetch_pos(mi, 0, &s, &e);
-                 add_attr(attrs, s, e, COLOR_PREPROC);
+                 add_attr(attrs, s, e, &color_preproc);
                  g_match_info_next(mi, NULL);
              }
          }
@@ -426,10 +446,10 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int kw_s, kw_e, name_s, name_e;
                  if (g_match_info_fetch_pos(mi, 1, &kw_s, &kw_e)) {
-                     add_attr(attrs, kw_s, kw_e, COLOR_KEYWORD);
+                     add_attr(attrs, kw_s, kw_e, &color_keyword);
                  }
                  if (g_match_info_fetch_pos(mi, 2, &name_s, &name_e)) {
-                     add_attr(attrs, name_s, name_e, COLOR_FUNCTION);
+                     add_attr(attrs, name_s, name_e, &color_function);
                  }
                  g_match_info_next(mi, NULL);
              }
@@ -441,10 +461,10 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int kw_s, kw_e, name_s, name_e;
                  if (g_match_info_fetch_pos(mi, 1, &kw_s, &kw_e)) {
-                     add_attr(attrs, kw_s, kw_e, COLOR_KEYWORD);
+                     add_attr(attrs, kw_s, kw_e, &color_keyword);
                  }
                  if (g_match_info_fetch_pos(mi, 2, &name_s, &name_e)) {
-                     add_attr(attrs, name_s, name_e, COLOR_TYPE);
+                     add_attr(attrs, name_s, name_e, &color_type);
                  }
                  g_match_info_next(mi, NULL);
              }
@@ -456,7 +476,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int s, e;
                  g_match_info_fetch_pos(mi, 0, &s, &e);
-                 add_attr(attrs, s, e, COLOR_KEYWORD);
+                 add_attr(attrs, s, e, &color_keyword);
                  g_match_info_next(mi, NULL);
              }
          }
@@ -467,7 +487,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int s, e;
                  g_match_info_fetch_pos(mi, 0, &s, &e);
-                 add_attr(attrs, s, e, COLOR_BOOL);
+                 add_attr(attrs, s, e, &color_bool);
                  g_match_info_next(mi, NULL);
              }
          }
@@ -478,7 +498,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int s, e;
                  g_match_info_fetch_pos(mi, 0, &s, &e);
-                 add_attr(attrs, s, e, COLOR_FUNCTION);
+                 add_attr(attrs, s, e, &color_function);
                  g_match_info_next(mi, NULL);
              }
          }
@@ -489,7 +509,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int s, e;
                  g_match_info_fetch_pos(mi, 0, &s, &e);
-                 add_attr(attrs, s, e, COLOR_SELF);
+                 add_attr(attrs, s, e, &color_self);
                  g_match_info_next(mi, NULL);
              }
          }
@@ -500,7 +520,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int s, e;
                  g_match_info_fetch_pos(mi, 0, &s, &e);
-                 add_attr(attrs, s, e, COLOR_NUMBER);
+                 add_attr(attrs, s, e, &color_number);
                  g_match_info_next(mi, NULL);
              }
          }
@@ -523,7 +543,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                          cur++;
                      }
                      if (state == STATE_IN_TRIPLE_DQ_STRING) cur = len;
-                     add_attr(attrs, start_pos, cur, COLOR_STRING);
+                     add_attr(attrs, start_pos, cur, &color_string);
                  }
                  /* Triple single quote */
                  else if (g_str_has_prefix(text + cur, "'''")) {
@@ -539,7 +559,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                          cur++;
                      }
                      if (state == STATE_IN_TRIPLE_SQ_STRING) cur = len;
-                     add_attr(attrs, start_pos, cur, COLOR_STRING);
+                     add_attr(attrs, start_pos, cur, &color_string);
                  }
                  /* Double quote */
                  else if (text[cur] == '"') {
@@ -553,7 +573,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                          }
                          cur++;
                      }
-                     add_attr(attrs, start_pos, cur, COLOR_STRING);
+                     add_attr(attrs, start_pos, cur, &color_string);
                  }
                  /* Single quote */
                  else if (text[cur] == '\'') {
@@ -566,11 +586,11 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                          }
                          cur++;
                      }
-                     add_attr(attrs, start_pos, cur, COLOR_STRING);
+                     add_attr(attrs, start_pos, cur, &color_string);
                  }
                  /* Comment */
                  else if (text[cur] == '#') {
-                     add_attr(attrs, cur, len, COLOR_COMMENT);
+                     add_attr(attrs, cur, len, &color_comment);
                      cur = len;
                  }
                  else {
@@ -588,7 +608,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                      cur++;
                  }
                  if (state == STATE_IN_TRIPLE_DQ_STRING) cur = len;
-                 add_attr(attrs, start_pos, cur, COLOR_STRING);
+                 add_attr(attrs, start_pos, cur, &color_string);
              }
              else if (state == STATE_IN_TRIPLE_SQ_STRING) {
                  size_t start_pos = cur;
@@ -601,7 +621,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                      cur++;
                  }
                  if (state == STATE_IN_TRIPLE_SQ_STRING) cur = len;
-                 add_attr(attrs, start_pos, cur, COLOR_STRING);
+                 add_attr(attrs, start_pos, cur, &color_string);
              }
              else {
                  /* Should not happen if other states are handled or mapped */
@@ -616,7 +636,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int s, e;
                  g_match_info_fetch_pos(mi, 0, &s, &e);
-                 add_attr(attrs, s, e, COLOR_KEYWORD);
+                 add_attr(attrs, s, e, &color_keyword);
                  g_match_info_next(mi, NULL);
              }
          }
@@ -627,7 +647,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
              while (g_match_info_matches(mi)) {
                  int s, e;
                  g_match_info_fetch_pos(mi, 0, &s, &e);
-                 add_attr(attrs, s, e, COLOR_VARIABLE);
+                 add_attr(attrs, s, e, &color_variable);
                  g_match_info_next(mi, NULL);
              }
          }
@@ -650,7 +670,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                          }
                          cur++;
                      }
-                     add_attr(attrs, start_pos, cur, COLOR_STRING);
+                     add_attr(attrs, start_pos, cur, &color_string);
                  }
                  /* Single quote (strong) */
                  else if (text[cur] == '\'') {
@@ -665,14 +685,14 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                          }
                          cur++;
                      }
-                     add_attr(attrs, start_pos, cur, COLOR_STRING);
+                     add_attr(attrs, start_pos, cur, &color_string);
                  }
                  /* Comment */
                  else if (text[cur] == '#') {
                      /* Careful: # inside ${} or "..." handled by state logic above? 
                         In ROOT, # is comment. 
                      */
-                     add_attr(attrs, cur, len, COLOR_COMMENT);
+                     add_attr(attrs, cur, len, &color_comment);
                      cur = len;
                  }
                  else {
@@ -689,7 +709,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                      }
                      cur++;
                  }
-                 add_attr(attrs, start_pos, cur, COLOR_STRING);
+                 add_attr(attrs, start_pos, cur, &color_string);
              }
              else if (state == STATE_IN_SINGLE_QUOTE) {
                  size_t start_pos = cur;
@@ -701,7 +721,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                      }
                      cur++;
                  }
-                 add_attr(attrs, start_pos, cur, COLOR_STRING);
+                 add_attr(attrs, start_pos, cur, &color_string);
              }
              else {
                  state = STATE_ROOT;
