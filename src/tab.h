@@ -15,5 +15,7 @@ void vite_tab_set_active (ViteTab *self, gboolean active);
 void vite_tab_set_tab_bar (ViteTab *self, gpointer tab_bar);
 void vite_tab_set_separator_visible (ViteTab *self, gboolean visible);
 gboolean vite_tab_is_active (ViteTab *self);
+void vite_tab_set_anim_offset_x (ViteTab *self, double offset);
+double vite_tab_get_anim_offset_x (ViteTab *self);
 
 G_END_DECLS
