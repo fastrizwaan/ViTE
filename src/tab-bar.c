@@ -16,6 +16,9 @@ struct _ViteTabBar {
     int last_allocated_width;
     int cached_cols;
     gboolean is_overflowing;
+    
+    guint drag_autoscroll_id;
+    int drag_scroll_direction; /* -1 left, 0 none, 1 right */
 };
 
 G_DEFINE_TYPE(ViteTabBar, vite_tab_bar, GTK_TYPE_BOX)
@@ -79,6 +82,13 @@ static void
 vite_tab_bar_finalize (GObject *object)
 {
     ViteTabBar *self = VITE_TAB_BAR(object);
+    
+    /* Stop autoscroll timer if running */
+    if (self->drag_autoscroll_id) {
+        g_source_remove(self->drag_autoscroll_id);
+        self->drag_autoscroll_id = 0;
+    }
+    
     g_list_free(self->tabs);
     G_OBJECT_CLASS(vite_tab_bar_parent_class)->finalize(object);
 }
@@ -274,11 +284,62 @@ set_drop_target_at (ViteTabBar *self, int position)
     }
 }
 
+static gboolean
+drag_autoscroll_tick (gpointer user_data)
+{
+    ViteTabBar *self = VITE_TAB_BAR(user_data);
+    if (!self->scroller || self->drag_scroll_direction == 0) {
+        self->drag_autoscroll_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    
+    GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
+    double value = gtk_adjustment_get_value(adj);
+    double step = 80.0 * self->drag_scroll_direction;
+    gtk_adjustment_set_value(adj, value + step);
+    
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+stop_drag_autoscroll (ViteTabBar *self)
+{
+    if (self->drag_autoscroll_id) {
+        g_source_remove(self->drag_autoscroll_id);
+        self->drag_autoscroll_id = 0;
+    }
+    self->drag_scroll_direction = 0;
+}
+
+static void
+start_drag_autoscroll (ViteTabBar *self, int direction)
+{
+    if (self->drag_scroll_direction == direction && self->drag_autoscroll_id != 0) return;
+    
+    stop_drag_autoscroll(self);
+    self->drag_scroll_direction = direction;
+    self->drag_autoscroll_id = g_timeout_add(50, drag_autoscroll_tick, self);
+}
+
 static GdkDragAction
 on_drag_motion (GtkDropTarget *target, double x, double y, ViteTabBar *self)
 {
     const GValue *value = gtk_drop_target_get_value(target);
     if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return 0;
+    
+    /* Check for edge scrolling */
+    int widget_width = gtk_widget_get_width(GTK_WIDGET(self));
+    int edge_zone = 40; /* Pixels from edge to trigger scroll */
+    
+    if (self->is_overflowing) {
+        if (x < edge_zone) {
+            start_drag_autoscroll(self, -1); /* Scroll left */
+        } else if (x > widget_width - edge_zone) {
+            start_drag_autoscroll(self, 1); /* Scroll right */
+        } else {
+            stop_drag_autoscroll(self);
+        }
+    }
     
     int pos = calculate_drop_position(self, x, y);
     set_drop_target_at(self, pos);
@@ -287,12 +348,14 @@ on_drag_motion (GtkDropTarget *target, double x, double y, ViteTabBar *self)
 
 static void on_drag_leave (GtkDropTarget *t, ViteTabBar *self)
 {
+    stop_drag_autoscroll(self);
     clear_drop_targets(self);
 }
 
 static gboolean
 on_drag_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTabBar *self)
 {
+    stop_drag_autoscroll(self);
     clear_drop_targets(self);
     if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return FALSE;
     
@@ -316,15 +379,19 @@ on_drag_drop (GtkDropTarget *target, const GValue *value, double x, double y, Vi
         self->tabs = g_list_remove(self->tabs, tab);
         self->tabs = g_list_insert(self->tabs, tab, actual_new_pos);
         
-        /* Safely move tab in flowbox */
+        /* Hold a reference while reparenting */
         g_object_ref(tab);
         
-        GtkWidget *parent = gtk_widget_get_parent(GTK_WIDGET(tab));
-        if (parent && GTK_IS_FLOW_BOX_CHILD(parent)) {
-            gtk_widget_unparent(GTK_WIDGET(tab));
-            gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), parent);
+        /* Get the FlowBoxChild wrapper and unparent tab from it */
+        GtkWidget *child_wrapper = gtk_widget_get_parent(GTK_WIDGET(tab));
+        if (child_wrapper && GTK_IS_FLOW_BOX_CHILD(child_wrapper)) {
+            /* First unparent tab from wrapper */
+            gtk_flow_box_child_set_child(GTK_FLOW_BOX_CHILD(child_wrapper), NULL);
+            /* Then remove wrapper from flowbox */
+            gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), child_wrapper);
         }
         
+        /* Re-insert at new position */
         gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), actual_new_pos);
         g_object_unref(tab);
         
