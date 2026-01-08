@@ -5,6 +5,9 @@ struct _ViteTabBar {
     GtkWidget *scroller;
     GtkWidget *flowbox;
     
+    GtkWidget *start_button;
+    GtkWidget *end_button;
+    
     GList *tabs;
     
     GtkDropTarget *drop_target;
@@ -49,6 +52,24 @@ static const char *TAB_BAR_CSS =
 "    background: none;"
 "    border: none;"
 "    outline: none;"
+"}"
+".tab-bar-nav-button {"
+"    min-width: 24px;"
+"    min-height: 32px;"
+"    padding: 0;"
+"    margin: 0;"
+"    margin-bottom: 0px;"
+"    background: none;"
+"    border: none;"
+"    border-radius: 4px;"
+"    opacity: 0.7;"
+"}"
+".tab-bar-nav-button:hover {"
+"    background: alpha(@window_fg_color, 0.1);"
+"    opacity: 1.0;"
+"}"
+".tab-bar-nav-button:disabled {"
+"    opacity: 0.3;"
 "}";
 
 
@@ -128,14 +149,47 @@ update_tab_sizes (ViteTabBar *self)
     update_separators(self);
 }
 
+static gboolean
+update_buttons_idle (gpointer user_data)
+{
+    ViteTabBar *self = VITE_TAB_BAR(user_data);
+    if (!self->scroller || !self->start_button || !self->end_button) return G_SOURCE_REMOVE;
+    
+    GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
+    double upper = gtk_adjustment_get_upper(adj);
+    double page_size = gtk_adjustment_get_page_size(adj);
+    double value = gtk_adjustment_get_value(adj);
+    
+    gboolean overflowing = (upper > page_size + 0.1);
+    
+    gtk_widget_set_visible(self->start_button, overflowing);
+    gtk_widget_set_visible(self->end_button, overflowing);
+    
+    if (overflowing) {
+        gtk_widget_set_sensitive(self->start_button, value > 0.1);
+        gtk_widget_set_sensitive(self->end_button, value < (upper - page_size - 0.1));
+    }
+    
+    return G_SOURCE_REMOVE;
+}
+
+static void
+update_buttons (ViteTabBar *self)
+{
+    /* Defer to idle to avoid layout conflicts during resize */
+    g_idle_add(update_buttons_idle, self);
+}
+
 static void
 check_overflow (ViteTabBar *self)
 {
+    update_buttons(self);
+    
     GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
     double upper = gtk_adjustment_get_upper(adj);
     double page_size = gtk_adjustment_get_page_size(adj);
     
-    gboolean overflowing = (upper > page_size + 0.1); /* Epsilon for float layout */
+    gboolean overflowing = (upper > page_size + 0.1); /* Epsilon */
     
     if (overflowing != self->is_overflowing) {
         self->is_overflowing = overflowing;
@@ -297,11 +351,38 @@ on_scroll_controller_scroll (GtkEventControllerScroll *controller,
     return TRUE; /* Stop propagation */
 }
 
+
+
+static void
+on_scroll_start_clicked (GtkButton *btn, ViteTabBar *self)
+{
+    GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
+    double value = gtk_adjustment_get_value(adj);
+    gtk_adjustment_set_value(adj, value - 150.0); /* Scroll by about one tab width */
+}
+
+static void
+on_scroll_end_clicked (GtkButton *btn, ViteTabBar *self)
+{
+    GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
+    double value = gtk_adjustment_get_value(adj);
+    gtk_adjustment_set_value(adj, value + 150.0);
+}
+
 static void
 vite_tab_bar_init (ViteTabBar *self)
 {
     gtk_widget_add_css_class(GTK_WIDGET(self), "chrome-tab-bar-container");
-    gtk_orientable_set_orientation(GTK_ORIENTABLE(self), GTK_ORIENTATION_VERTICAL);
+    gtk_orientable_set_orientation(GTK_ORIENTABLE(self), GTK_ORIENTATION_HORIZONTAL);
+    
+    /* Start Button */
+    self->start_button = gtk_button_new_from_icon_name("go-previous-symbolic");
+    gtk_widget_add_css_class(self->start_button, "tab-bar-nav-button");
+    gtk_widget_set_size_request(self->start_button, 26, 32);
+    gtk_widget_set_tooltip_text(self->start_button, "Scroll Left");
+    gtk_widget_set_visible(self->start_button, FALSE);
+    g_signal_connect(self->start_button, "clicked", G_CALLBACK(on_scroll_start_clicked), self);
+    gtk_box_append(GTK_BOX(self), self->start_button);
     
     self->scroller = gtk_scrolled_window_new();
     /* EXTERNAL policy hides the scrollbar but keeps the adjustment active for wheel scrolling */
@@ -312,9 +393,19 @@ vite_tab_bar_init (ViteTabBar *self)
     g_signal_connect_swapped(adj, "changed", G_CALLBACK(check_overflow), self);
     g_signal_connect_swapped(adj, "notify::upper", G_CALLBACK(check_overflow), self);
     g_signal_connect_swapped(adj, "notify::page-size", G_CALLBACK(check_overflow), self);
+    g_signal_connect_swapped(adj, "value-changed", G_CALLBACK(update_buttons), self);
     
     gtk_widget_set_hexpand(self->scroller, TRUE);
     gtk_box_append(GTK_BOX(self), self->scroller);
+    
+    /* End Button */
+    self->end_button = gtk_button_new_from_icon_name("go-next-symbolic");
+    gtk_widget_add_css_class(self->end_button, "tab-bar-nav-button");
+    gtk_widget_set_size_request(self->end_button, 26, 32);
+    gtk_widget_set_tooltip_text(self->end_button, "Scroll Right");
+    gtk_widget_set_visible(self->end_button, FALSE);
+    g_signal_connect(self->end_button, "clicked", G_CALLBACK(on_scroll_end_clicked), self);
+    gtk_box_append(GTK_BOX(self), self->end_button);
     
     self->flowbox = gtk_flow_box_new();
     gtk_widget_add_css_class(self->flowbox, "chrome-tab-bar");
