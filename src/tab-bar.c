@@ -255,6 +255,46 @@ vite_tab_bar_is_overflowing (ViteTabBar *self)
     return self->is_overflowing;
 }
 
+/* Animation data for smooth interpolation */
+typedef struct {
+    ViteTab *tab;
+    double start_offset;
+    double target_offset;  /* Always 0 */
+    gint64 start_time;
+    gint64 duration_us;
+    guint tick_id;
+} TabAnimData;
+
+static gboolean
+tab_anim_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
+{
+    TabAnimData *anim = user_data;
+    
+    /* Check if widget is still valid and not destroyed */
+    if (!GTK_IS_WIDGET(anim->tab) || gtk_widget_in_destruction(GTK_WIDGET(anim->tab))) {
+        g_free(anim);
+        return G_SOURCE_REMOVE;
+    }
+    
+    gint64 now = g_get_monotonic_time();
+    double progress = (double)(now - anim->start_time) / anim->duration_us;
+    
+    if (progress >= 1.0) {
+        /* Animation complete - set final offset and cleanup */
+        vite_tab_set_anim_offset_x(anim->tab, anim->target_offset);
+        g_free(anim);
+        return G_SOURCE_REMOVE;
+    }
+    
+    /* Ease-out cubic: 1 - (1 - t)^3 */
+    double eased = 1.0 - pow(1.0 - progress, 3);
+    double current = anim->start_offset + (anim->target_offset - anim->start_offset) * eased;
+    
+    vite_tab_set_anim_offset_x(anim->tab, current);
+    
+    return G_SOURCE_CONTINUE;
+}
+
 /* Reorder tab to a new position - called by individual tabs during drag */
 void
 vite_tab_bar_reorder_tab_to (ViteTabBar *self, ViteTab *tab, int new_position)
@@ -268,6 +308,26 @@ vite_tab_bar_reorder_tab_to (ViteTabBar *self, ViteTab *tab, int new_position)
     
     /* No change needed */
     if (old_pos == new_position) return;
+    
+    /* Determine tab width for animation offset calculation */
+    int tab_width = gtk_widget_get_width(GTK_WIDGET(tab));
+    if (tab_width < 50) tab_width = 150; /* Fallback */
+    
+    /* Calculate direction and collect affected tabs */
+    gboolean moving_right = (new_position > old_pos);
+    int start_idx = MIN(old_pos, new_position);
+    int end_idx = MAX(old_pos, new_position);
+    
+    /* Collect tabs that will be displaced */
+    GArray *tabs_to_animate = g_array_new(FALSE, FALSE, sizeof(ViteTab*));
+    int idx = 0;
+    for (GList *l = self->tabs; l != NULL; l = l->next, idx++) {
+        ViteTab *t = VITE_TAB(l->data);
+        if (t == tab) continue;
+        if (idx >= start_idx && idx <= end_idx) {
+            g_array_append_val(tabs_to_animate, t);
+        }
+    }
     
     /* Update internal list */
     self->tabs = g_list_remove(self->tabs, tab);
@@ -287,6 +347,38 @@ vite_tab_bar_reorder_tab_to (ViteTabBar *self, ViteTab *tab, int new_position)
     gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), new_position);
     g_object_unref(tab);
     
+    /* Apply visual offset and animate to 0 for smooth sliding effect */
+    for (guint i = 0; i < tabs_to_animate->len; i++) {
+        ViteTab *t = g_array_index(tabs_to_animate, ViteTab*, i);
+        if (!GTK_IS_WIDGET(t)) continue;
+        
+        /* Calculate initial offset: 
+           If moving right (dragging e.g. 0->1), tab 1 shifts left to 0.
+           Visually it jumps from X+width to X.
+           We want it to appear at X+width and slide to X.
+           So offset should be +width (Right) relative to new position.
+           
+           If moving left (dragging e.g. 1->0), tab 0 shifts right to 1.
+           Visually it jumps from X to X+width.
+           We want it to appear at X and slide to X+width.
+           So offset should be -width (Left) relative to new position. 
+        */
+        double offset = moving_right ? tab_width : -tab_width;
+        
+        /* Set initial visual offset directly */
+        vite_tab_set_anim_offset_x(t, offset);
+        
+        /* Start animation to return offset to 0 */
+        TabAnimData *anim = g_new(TabAnimData, 1);
+        anim->tab = t;
+        anim->start_offset = offset;
+        anim->target_offset = 0;
+        anim->start_time = g_get_monotonic_time();
+        anim->duration_us = 250000; /* 250ms */
+        anim->tick_id = gtk_widget_add_tick_callback(GTK_WIDGET(t), tab_anim_tick, anim, NULL);
+    }
+    
+    g_array_free(tabs_to_animate, TRUE);
     update_separators(self);
 }
 

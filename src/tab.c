@@ -19,6 +19,7 @@ struct _ViteTab {
     gboolean is_active;
     gboolean is_modified;
     gboolean loading;
+    double anim_offset_x; /* For smooth reorder animation */
 };
 
 G_DEFINE_TYPE(ViteTab, vite_tab, GTK_TYPE_BOX)
@@ -388,10 +389,28 @@ vite_tab_init (ViteTab *self)
 }
 
 static void
+vite_tab_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
+{
+    ViteTab *self = VITE_TAB(widget);
+    
+    if (self->anim_offset_x != 0) {
+        gtk_snapshot_save(snapshot);
+        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(self->anim_offset_x, 0));
+        GTK_WIDGET_CLASS(vite_tab_parent_class)->snapshot(widget, snapshot);
+        gtk_snapshot_restore(snapshot);
+    } else {
+        GTK_WIDGET_CLASS(vite_tab_parent_class)->snapshot(widget, snapshot);
+    }
+}
+
+static void
 vite_tab_class_init (ViteTabClass *class)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(class);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(class);
+    
     object_class->finalize = vite_tab_finalize;
+    widget_class->snapshot = vite_tab_snapshot;
     
     signals[SIGNAL_CLOSE_CLICKED] = g_signal_new("close-clicked",
         G_TYPE_FROM_CLASS(class),
@@ -461,4 +480,19 @@ vite_tab_set_separator_visible (ViteTab *self, gboolean visible)
         gtk_widget_set_visible(self->separator, visible);
         gtk_widget_set_opacity(self->separator, visible ? 1.0 : 0.0);
     }
+}
+
+void
+vite_tab_set_anim_offset_x (ViteTab *self, double offset)
+{
+    if (self->anim_offset_x != offset) {
+        self->anim_offset_x = offset;
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+    }
+}
+
+double
+vite_tab_get_anim_offset_x (ViteTab *self)
+{
+    return self->anim_offset_x;
 }
