@@ -10,15 +10,14 @@ struct _ViteTabBar {
     
     GList *tabs;
     
-    GtkDropTarget *drop_target;
-    int drop_indicator_position;
-    
     int last_allocated_width;
     int cached_cols;
     gboolean is_overflowing;
     
     guint drag_autoscroll_id;
-    int drag_scroll_direction; /* -1 left, 0 none, 1 right */
+    int drag_scroll_direction;
+    
+    ViteTab *dragging_tab;
 };
 
 G_DEFINE_TYPE(ViteTabBar, vite_tab_bar, GTK_TYPE_BOX)
@@ -210,80 +209,6 @@ check_overflow (ViteTabBar *self)
 
 
 
-
-static int
-calculate_drop_position (ViteTabBar *self, double x, double y)
-{
-    int best_index = -1;
-    double min_dist = 1e9;
-    int insert_after = 0;
-       
-    int i = 0;
-    for (GList *l = self->tabs; l != NULL; l = l->next) {
-        GtkWidget *tab = GTK_WIDGET(l->data);
-        if (!gtk_widget_get_visible(tab)) { i++; continue; }
-        
-        graphene_rect_t bounds;
-        if (gtk_widget_compute_bounds(tab, GTK_WIDGET(self), &bounds)) {
-            /* Check Row Match */
-            if (y >= bounds.origin.y && y <= bounds.origin.y + bounds.size.height) {
-                 double cx = bounds.origin.x + bounds.size.width / 2.0;
-                 double dist = fabs(x - cx);
-                 if (dist < min_dist) {
-                     min_dist = dist;
-                     best_index = i;
-                     insert_after = (x > cx) ? 1 : 0;
-                 }
-            }
-        }
-        i++;
-    }
-    
-    if (best_index != -1) {
-        return best_index + insert_after;
-    }
-    
-    return g_list_length(self->tabs);
-}
-
-
-static void
-clear_drop_targets (ViteTabBar *self)
-{
-    for (GList *l = self->tabs; l != NULL; l = l->next) {
-        ViteTab *t = VITE_TAB(l->data);
-        if (!GTK_IS_WIDGET(t)) continue;
-        vite_tab_set_drop_indicator(t, FALSE);
-        gtk_widget_remove_css_class(GTK_WIDGET(t), "drop-target-end");
-    }
-    self->drop_indicator_position = -1;
-}
-
-static void
-set_drop_target_at (ViteTabBar *self, int position)
-{
-    if (position == self->drop_indicator_position) return;
-    
-    clear_drop_targets(self);
-    self->drop_indicator_position = position;
-    
-    int num_tabs = g_list_length(self->tabs);
-    
-    if (position >= num_tabs) {
-        /* Dropping at the end - highlight right edge of last tab */
-        ViteTab *last_tab = g_list_nth_data(self->tabs, num_tabs - 1);
-        if (last_tab && GTK_IS_WIDGET(last_tab)) {
-            gtk_widget_add_css_class(GTK_WIDGET(last_tab), "drop-target-end");
-        }
-    } else {
-        /* Highlight separator of the tab at the drop position */
-        ViteTab *target_tab = g_list_nth_data(self->tabs, position);
-        if (target_tab) {
-            vite_tab_set_drop_indicator(target_tab, TRUE);
-        }
-    }
-}
-
 static gboolean
 drag_autoscroll_tick (gpointer user_data)
 {
@@ -301,8 +226,10 @@ drag_autoscroll_tick (gpointer user_data)
     return G_SOURCE_CONTINUE;
 }
 
-static void
-stop_drag_autoscroll (ViteTabBar *self)
+
+/* Public function to stop autoscroll - called by tabs */
+void
+vite_tab_bar_stop_edge_scroll (ViteTabBar *self)
 {
     if (self->drag_autoscroll_id) {
         g_source_remove(self->drag_autoscroll_id);
@@ -311,94 +238,56 @@ stop_drag_autoscroll (ViteTabBar *self)
     self->drag_scroll_direction = 0;
 }
 
-static void
-start_drag_autoscroll (ViteTabBar *self, int direction)
+/* Public function to start autoscroll - called by tabs */
+void
+vite_tab_bar_start_edge_scroll (ViteTabBar *self, int direction)
 {
     if (self->drag_scroll_direction == direction && self->drag_autoscroll_id != 0) return;
     
-    stop_drag_autoscroll(self);
+    vite_tab_bar_stop_edge_scroll(self);
     self->drag_scroll_direction = direction;
     self->drag_autoscroll_id = g_timeout_add(50, drag_autoscroll_tick, self);
 }
 
-static GdkDragAction
-on_drag_motion (GtkDropTarget *target, double x, double y, ViteTabBar *self)
+gboolean
+vite_tab_bar_is_overflowing (ViteTabBar *self)
 {
-    const GValue *value = gtk_drop_target_get_value(target);
-    if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return 0;
-    
-    /* Check for edge scrolling */
-    int widget_width = gtk_widget_get_width(GTK_WIDGET(self));
-    int edge_zone = 40; /* Pixels from edge to trigger scroll */
-    
-    if (self->is_overflowing) {
-        if (x < edge_zone) {
-            start_drag_autoscroll(self, -1); /* Scroll left */
-        } else if (x > widget_width - edge_zone) {
-            start_drag_autoscroll(self, 1); /* Scroll right */
-        } else {
-            stop_drag_autoscroll(self);
-        }
-    }
-    
-    int pos = calculate_drop_position(self, x, y);
-    set_drop_target_at(self, pos);
-    return GDK_ACTION_MOVE;
+    return self->is_overflowing;
 }
 
-static void on_drag_leave (GtkDropTarget *t, ViteTabBar *self)
+/* Reorder tab to a new position - called by individual tabs during drag */
+void
+vite_tab_bar_reorder_tab_to (ViteTabBar *self, ViteTab *tab, int new_position)
 {
-    stop_drag_autoscroll(self);
-    clear_drop_targets(self);
-}
-
-static gboolean
-on_drag_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTabBar *self)
-{
-    stop_drag_autoscroll(self);
-    clear_drop_targets(self);
-    if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return FALSE;
-    
-    ViteTab *tab = VITE_TAB(g_value_get_object(value));
-    if (!GTK_IS_WIDGET(tab)) return FALSE;
-    
-    int pos = calculate_drop_position(self, x, y);
     int old_pos = g_list_index(self->tabs, tab);
+    if (old_pos == -1) return;
     
-    /* Calculate the actual insertion position after removal */
-    int actual_new_pos = pos;
-    if (old_pos != -1 && old_pos < pos) {
-        actual_new_pos = pos - 1;
+    int num_tabs = g_list_length(self->tabs);
+    if (new_position < 0) new_position = 0;
+    if (new_position >= num_tabs) new_position = num_tabs - 1;
+    
+    /* No change needed */
+    if (old_pos == new_position) return;
+    
+    /* Update internal list */
+    self->tabs = g_list_remove(self->tabs, tab);
+    self->tabs = g_list_insert(self->tabs, tab, new_position);
+    
+    /* Hold reference while reparenting */
+    g_object_ref(tab);
+    
+    /* Get the FlowBoxChild wrapper and unparent tab from it */
+    GtkWidget *child_wrapper = gtk_widget_get_parent(GTK_WIDGET(tab));
+    if (child_wrapper && GTK_IS_FLOW_BOX_CHILD(child_wrapper)) {
+        gtk_flow_box_child_set_child(GTK_FLOW_BOX_CHILD(child_wrapper), NULL);
+        gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), child_wrapper);
     }
     
-    g_print("Drag Drop: old=%d new=%d (actual=%d)\n", old_pos, pos, actual_new_pos);
+    /* Re-insert at new position */
+    gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), new_position);
+    g_object_unref(tab);
     
-    /* Only move if position actually changes */
-    if (old_pos != -1 && old_pos != actual_new_pos) {
-        /* Update internal list */
-        self->tabs = g_list_remove(self->tabs, tab);
-        self->tabs = g_list_insert(self->tabs, tab, actual_new_pos);
-        
-        /* Hold a reference while reparenting */
-        g_object_ref(tab);
-        
-        /* Get the FlowBoxChild wrapper and unparent tab from it */
-        GtkWidget *child_wrapper = gtk_widget_get_parent(GTK_WIDGET(tab));
-        if (child_wrapper && GTK_IS_FLOW_BOX_CHILD(child_wrapper)) {
-            /* First unparent tab from wrapper */
-            gtk_flow_box_child_set_child(GTK_FLOW_BOX_CHILD(child_wrapper), NULL);
-            /* Then remove wrapper from flowbox */
-            gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), child_wrapper);
-        }
-        
-        /* Re-insert at new position */
-        gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), actual_new_pos);
-        g_object_unref(tab);
-        
-        update_separators(self);
-    }
-    
-    return TRUE;
+    update_separators(self);
 }
 
 static gboolean
@@ -485,13 +374,7 @@ vite_tab_bar_init (ViteTabBar *self)
     gtk_widget_set_halign(self->flowbox, GTK_ALIGN_FILL);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(self->scroller), self->flowbox);
     
-    self->drop_target = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
-    gtk_drop_target_set_preload(self->drop_target, TRUE);
-    g_signal_connect(self->drop_target, "motion", G_CALLBACK(on_drag_motion), self);
-    g_signal_connect(self->drop_target, "leave", G_CALLBACK(on_drag_leave), self);
-    g_signal_connect(self->drop_target, "drop", G_CALLBACK(on_drag_drop), self);
-    g_signal_connect(self->drop_target, "drop", G_CALLBACK(on_drag_drop), self);
-    gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(self->drop_target));
+    /* Drop target is now on individual tabs, not the bar */
     
     /* Scroll Controller for Map Vertical Scroll -> Horizontal */
     GtkEventController *scroll_controller = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);

@@ -1,4 +1,5 @@
 #include "tab.h"
+#include "tab-bar.h"
 
 struct _ViteTab {
     GtkBox parent_instance;
@@ -41,6 +42,16 @@ static const char *TAB_CSS =
 "    margin-left: 0px;"
 "    margin-bottom: 0px;"
 "}"
+"box.chrome-tab:drop(active) {"
+"    border: none;"
+"    box-shadow: none;"
+"    outline: none;"
+"}"
+"flowboxchild:drop(active) {"
+"    border: none;"
+"    box-shadow: none;"
+"    outline: none;"
+"}"
 "box.chrome-tab label {"
 "    padding: 0;"
 "    margin-top: 1px;"
@@ -60,7 +71,8 @@ static const char *TAB_CSS =
 "    opacity: 1;"
 "}"
 "box.chrome-tab.dragging {"
-"    opacity: 0.5;"
+"    background: mix(@headerbar_bg_color, @window_fg_color, 0.15);"
+"    opacity: 0.8;"
 "}"
 ".chrome-tab-fade {"
 "    background: linear-gradient(to right, transparent 30%, @headerbar_bg_color 100%);"
@@ -118,14 +130,6 @@ static const char *TAB_CSS =
 "    background-color: alpha(@window_fg_color, 0.3);"
 "    margin-top: 4px;"
 "    margin-bottom: 4px;"
-"}"
-".chrome-tab.has-drop-target {"
-"    border-left: 4px solid #62a0ea;"
-"    border-radius: 0 8px 8px 0;"
-"}"
-".chrome-tab.drop-target-end {"
-"    border-right: 4px solid #62a0ea;"
-"    border-radius: 8px 0 0 8px;"
 "}";
 
 
@@ -155,6 +159,9 @@ vite_tab_set_tab_bar (ViteTab *self, gpointer tab_bar)
 static void
 on_drag_begin (GtkDragSource *source, GdkDrag *drag, ViteTab *self)
 {
+    /* Activate this tab immediately when starting to drag */
+    g_signal_emit(self, signals[SIGNAL_CLICKED], 0);
+    
     GtkWidget *widget = GTK_WIDGET(self);
     GdkPaintable *paintable = gtk_widget_paintable_new(widget);
     gtk_drag_source_set_icon(source, paintable, 0, 0);
@@ -176,15 +183,9 @@ on_close_clicked (GtkButton *btn, ViteTab *self)
 }
 
 static void
-on_click_released (GtkGestureClick *gesture, int n_press, double x, double y, ViteTab *self)
+on_click_pressed (GtkGestureClick *gesture, int n_press, double x, double y, ViteTab *self)
 {
-    /* If we clicked the close button, the button's 'clicked' signal handled it. 
-       Use coordinates or something? 
-       Actually, GtkButton stops propagation if handled? 
-       If GtkButton handles it, this might still fire depending on phase.
-    */
-    /* Simple check: If close button is hovered/active? */
-    /* Let's rely on GtkButton eating the event if it's clicked. */
+    /* Activate tab immediately on mouse button press */
     g_signal_emit(self, signals[SIGNAL_CLICKED], 0);
 }
 
@@ -215,6 +216,72 @@ on_leave (GtkEventControllerMotion *controller, ViteTab *self)
 {
     self->is_hovered = FALSE;
     update_close_button_state(self);
+}
+
+/* Drop target handlers for tab reordering */
+static GdkDragAction
+on_drop_motion (GtkDropTarget *target, double x, double y, ViteTab *self)
+{
+    const GValue *value = gtk_drop_target_get_value(target);
+    if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return 0;
+    
+    ViteTab *dragged_tab = VITE_TAB(g_value_get_object(value));
+    if (!GTK_IS_WIDGET(dragged_tab) || dragged_tab == self) return GDK_ACTION_MOVE;
+    
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (!tab_bar) return 0;
+    
+    /* Get my position in the tab bar */
+    GList *tabs = vite_tab_bar_get_tabs(tab_bar);
+    int my_pos = g_list_index(tabs, self);
+    g_list_free(tabs);
+    
+    if (my_pos >= 0) {
+        /* Reorder the dragged tab to this tab's position */
+        vite_tab_bar_reorder_tab_to(tab_bar, dragged_tab, my_pos);
+    }
+    
+    /* Handle edge scrolling - check position in tab bar widget */
+    if (vite_tab_bar_is_overflowing(tab_bar)) {
+        graphene_rect_t bounds;
+        if (gtk_widget_compute_bounds(GTK_WIDGET(self), GTK_WIDGET(tab_bar), &bounds)) {
+            double tab_x = bounds.origin.x + x;
+            int bar_width = gtk_widget_get_width(GTK_WIDGET(tab_bar));
+            int edge_zone = 40;
+            
+            if (tab_x < edge_zone) {
+                vite_tab_bar_start_edge_scroll(tab_bar, -1);
+            } else if (tab_x > bar_width - edge_zone) {
+                vite_tab_bar_start_edge_scroll(tab_bar, 1);
+            } else {
+                vite_tab_bar_stop_edge_scroll(tab_bar);
+            }
+        }
+    }
+    
+    return GDK_ACTION_MOVE;
+}
+
+static void
+on_drop_leave (GtkDropTarget *target, ViteTab *self)
+{
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (tab_bar) {
+        vite_tab_bar_stop_edge_scroll(tab_bar);
+    }
+}
+
+static gboolean
+on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTab *self)
+{
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (tab_bar) {
+        vite_tab_bar_stop_edge_scroll(tab_bar);
+    }
+    
+    /* The tab was already reordered in motion handler, just return success */
+    if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return FALSE;
+    return TRUE;
 }
 
 static void
@@ -303,13 +370,21 @@ vite_tab_init (ViteTab *self)
     
     GtkGesture *click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
-    g_signal_connect(click, "released", G_CALLBACK(on_click_released), self);
+    g_signal_connect(click, "pressed", G_CALLBACK(on_click_pressed), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(click));
     
     GtkEventController *motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "enter", G_CALLBACK(on_enter), self);
     g_signal_connect(motion, "leave", G_CALLBACK(on_leave), self);
     gtk_widget_add_controller(GTK_WIDGET(self), motion);
+    
+    /* Drop target for receiving dragged tabs */
+    GtkDropTarget *drop_target = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
+    gtk_drop_target_set_preload(drop_target, TRUE);
+    g_signal_connect(drop_target, "motion", G_CALLBACK(on_drop_motion), self);
+    g_signal_connect(drop_target, "leave", G_CALLBACK(on_drop_leave), self);
+    g_signal_connect(drop_target, "drop", G_CALLBACK(on_drop_drop), self);
+    gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(drop_target));
 }
 
 static void
@@ -385,15 +460,5 @@ vite_tab_set_separator_visible (ViteTab *self, gboolean visible)
     if (self->separator) {
         gtk_widget_set_visible(self->separator, visible);
         gtk_widget_set_opacity(self->separator, visible ? 1.0 : 0.0);
-    }
-}
-
-void
-vite_tab_set_drop_indicator (ViteTab *self, gboolean is_target)
-{
-    if (is_target) {
-        gtk_widget_add_css_class(GTK_WIDGET(self), "has-drop-target");
-    } else {
-        gtk_widget_remove_css_class(GTK_WIDGET(self), "has-drop-target");
     }
 }
