@@ -20,6 +20,8 @@ struct _ViteTab {
     gboolean is_modified;
     gboolean loading;
     double anim_offset_x; /* For smooth reorder animation */
+    double drag_start_x;  /* Drag start position for ghost icon positioning */
+    double drag_start_y;
 };
 
 G_DEFINE_TYPE(ViteTab, vite_tab, GTK_TYPE_BOX)
@@ -72,8 +74,7 @@ static const char *TAB_CSS =
 "    opacity: 1;"
 "}"
 "box.chrome-tab.dragging {"
-"    background: mix(@headerbar_bg_color, @window_fg_color, 0.15);"
-"    opacity: 0.8;"
+"    opacity: 0;"
 "}"
 ".chrome-tab-fade {"
 "    background: linear-gradient(to right, transparent 30%, @headerbar_bg_color 100%);"
@@ -145,9 +146,10 @@ vite_tab_finalize (GObject *object)
 static GdkContentProvider *
 on_drag_prepare (GtkDragSource *source, double x, double y, ViteTab *self)
 {
-    /* Use G_TYPE_OBJECT or VITE_TYPE_TAB? 
-       gdk_content_provider_new_typed requires a GType and instance. 
-       This passes the object pointer. */
+    /* Store drag start position for use in on_drag_begin */
+    self->drag_start_x = x;
+    self->drag_start_y = y;
+    
     return gdk_content_provider_new_typed(VITE_TYPE_TAB, self);
 }
 void
@@ -164,9 +166,19 @@ on_drag_begin (GtkDragSource *source, GdkDrag *drag, ViteTab *self)
     g_signal_emit(self, signals[SIGNAL_CLICKED], 0);
     
     GtkWidget *widget = GTK_WIDGET(self);
-    GdkPaintable *paintable = gtk_widget_paintable_new(widget);
-    gtk_drag_source_set_icon(source, paintable, 0, 0);
-    g_object_unref(paintable);
+    
+    /* Create the drag icon before hiding the tab.
+     * GtkWidgetPaintable is dynamic - it updates when the widget changes.
+     * We need to capture the CURRENT image as a static paintable. */
+    GtkWidgetPaintable *widget_paintable = GTK_WIDGET_PAINTABLE(gtk_widget_paintable_new(widget));
+    GdkPaintable *static_paintable = gdk_paintable_get_current_image(GDK_PAINTABLE(widget_paintable));
+    
+    /* Set hotspot to the drag start point so ghost appears in place */
+    gtk_drag_source_set_icon(source, static_paintable, self->drag_start_x, self->drag_start_y);
+    g_object_unref(static_paintable);
+    g_object_unref(widget_paintable);
+    
+    /* Hide the original tab - the ghost will appear in its place */
     gtk_widget_add_css_class(widget, "dragging");
 }
 
