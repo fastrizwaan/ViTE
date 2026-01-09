@@ -23,4 +23,8 @@ void vite_tab_bar_start_edge_scroll(ViteTabBar *self, int direction);
 void vite_tab_bar_stop_edge_scroll(ViteTabBar *self);
 gboolean vite_tab_bar_is_overflowing(ViteTabBar *self);
 
+/* Drag state management */
+void vite_tab_bar_set_dragging_tab(ViteTabBar *self, ViteTab *tab);
+void vite_tab_bar_clear_dragging_tab(ViteTabBar *self);
+
 G_END_DECLS

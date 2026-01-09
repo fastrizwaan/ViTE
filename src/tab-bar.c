@@ -255,6 +255,32 @@ vite_tab_bar_is_overflowing (ViteTabBar *self)
     return self->is_overflowing;
 }
 
+/* Drop handler for flowbox (catches drops on empty space) */
+static GdkDragAction
+on_flowbox_drop_enter (GtkDropTarget *target, double x, double y, ViteTabBar *self)
+{
+    g_print("[FLOWBOX] Drop target entered\n");
+    return GDK_ACTION_MOVE;
+}
+
+static gboolean
+on_flowbox_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTabBar *self)
+{
+    g_print("\n[FLOWBOX DROP] Drop on empty space\n");
+    
+    /* Stop edge scrolling */
+    vite_tab_bar_stop_edge_scroll(self);
+    
+    /* Just acknowledge the drop - tab was already reordered during motion */
+    if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) {
+        g_print("[FLOWBOX DROP] Invalid value, returning FALSE\n");
+        return FALSE;
+    }
+    
+    g_print("[FLOWBOX DROP] Accepting drop\n");
+    return TRUE;
+}
+
 /* Animation data for smooth interpolation */
 typedef struct {
     ViteTab *tab;
@@ -336,6 +362,9 @@ vite_tab_bar_reorder_tab_to (ViteTabBar *self, ViteTab *tab, int new_position)
     /* Hold reference while reparenting */
     g_object_ref(tab);
     
+    /* Check if this is the currently dragging tab */
+    gboolean is_dragging = (tab == self->dragging_tab);
+    
     /* Get the FlowBoxChild wrapper and unparent tab from it */
     GtkWidget *child_wrapper = gtk_widget_get_parent(GTK_WIDGET(tab));
     if (child_wrapper && GTK_IS_FLOW_BOX_CHILD(child_wrapper)) {
@@ -345,6 +374,12 @@ vite_tab_bar_reorder_tab_to (ViteTabBar *self, ViteTab *tab, int new_position)
     
     /* Re-insert at new position */
     gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), new_position);
+    
+    /* If this is the dragging tab, apply the dragging CSS class to keep it as a placeholder */
+    if (is_dragging) {
+        gtk_widget_add_css_class(GTK_WIDGET(tab), "dragging");
+    }
+    
     g_object_unref(tab);
     
     /* Apply visual offset and animate to 0 for smooth sliding effect */
@@ -457,12 +492,18 @@ vite_tab_bar_init (ViteTabBar *self)
     
     self->flowbox = gtk_flow_box_new();
     gtk_widget_add_css_class(self->flowbox, "chrome-tab-bar");
+    gtk_orientable_set_orientation(GTK_ORIENTABLE(self->flowbox), GTK_ORIENTATION_HORIZONTAL);
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(self->flowbox), TRUE);
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(self->flowbox), GTK_SELECTION_NONE);
     gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(self->flowbox), 1);
-    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(self->flowbox), 1000);
-    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(self->flowbox), 3);
-    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(self->flowbox), 3);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(self->flowbox), 100);
     gtk_widget_set_hexpand(self->flowbox, TRUE);
+    
+    /* Add drop target to flowbox for drops on empty space */
+    GtkDropTarget *flowbox_drop = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
+    g_signal_connect(flowbox_drop, "enter", G_CALLBACK(on_flowbox_drop_enter), self);
+    g_signal_connect(flowbox_drop, "drop", G_CALLBACK(on_flowbox_drop), self);
+    gtk_widget_add_controller(self->flowbox, GTK_EVENT_CONTROLLER(flowbox_drop));
     gtk_widget_set_halign(self->flowbox, GTK_ALIGN_FILL);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(self->scroller), self->flowbox);
     
@@ -664,4 +705,16 @@ GList *
 vite_tab_bar_get_tabs (ViteTabBar *self)
 {
     return g_list_copy(self->tabs);
+}
+
+void
+vite_tab_bar_set_dragging_tab (ViteTabBar *self, ViteTab *tab)
+{
+    self->dragging_tab = tab;
+}
+
+void
+vite_tab_bar_clear_dragging_tab (ViteTabBar *self)
+{
+    self->dragging_tab = NULL;
 }

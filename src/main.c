@@ -726,9 +726,14 @@ setup_window(GtkWindow *window)
 {
     load_css();
 
+    /* Create overlay for titlebar to support drag ghosts */
+    GtkWidget *titlebar_overlay = gtk_overlay_new();
+    
     GtkWidget *titlebar_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(titlebar_container, "titlebar-box");
-    gtk_window_set_titlebar(window, titlebar_container);
+    gtk_overlay_set_child(GTK_OVERLAY(titlebar_overlay), titlebar_container);
+    
+    gtk_window_set_titlebar(window, titlebar_overlay);
     
     GtkWidget *header = adw_header_bar_new();
     gtk_widget_add_css_class(header, "flat");
@@ -868,8 +873,12 @@ activate(GtkApplication *app, gpointer user_data)
     
     setup_window(GTK_WINDOW(window));
     
+    /* Create overlay container for the window to support drag ghost */
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_window_set_child(GTK_WINDOW(window), overlay);
+    
     GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_window_set_child(GTK_WINDOW(window), vbox);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), vbox);
     
     /* Tab Bar already created in setup_window and assigned to main_tab_bar global */
     
