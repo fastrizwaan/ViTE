@@ -1,5 +1,6 @@
 #include "tab.h"
 #include "tab-bar.h"
+#include <math.h>
 
 struct _ViteTab {
     GtkBox parent_instance;
@@ -22,6 +23,15 @@ struct _ViteTab {
     double anim_offset_x; /* For smooth reorder animation */
     double drag_start_x;  /* Drag start position for ghost icon positioning */
     double drag_start_y;
+    
+    /* Hybrid drag approach: invisible GTK icon + custom visual overlay */
+    GtkWidget *visual_overlay;     /* Custom visual ghost (Y-constrained) */
+    GtkWidget *visual_picture;     /* Picture widget inside overlay */
+    guint visual_tick_id;          /* Tick callback for updating visual position */
+    double cursor_start_y;         /* Cursor Y at drag start (for threshold) */
+    double tab_bar_y;              /* Tab bar Y in root coords (for locking) */
+    double initial_overlay_y;      /* Initial overlay Y in titlebar coords */
+    gboolean is_detached;          /* Whether >20px from start */
 };
 
 G_DEFINE_TYPE(ViteTab, vite_tab, GTK_TYPE_BOX)
@@ -132,6 +142,10 @@ static const char *TAB_CSS =
 "    background-color: alpha(@window_fg_color, 0.3);"
 "    margin-top: 4px;"
 "    margin-bottom: 4px;"
+"}"
+".drag-ghost {"
+"    opacity: 0.9;"
+"    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);"
 "}";
 
 
@@ -159,32 +173,133 @@ vite_tab_set_tab_bar (ViteTab *self, gpointer tab_bar)
     g_object_set_data(G_OBJECT(self), "tab-bar", tab_bar);
 }
 
+/* Tick callback for visual overlay - applies Y constraints */
+static gboolean
+on_visual_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    
+    if (!self->visual_overlay) {
+        return G_SOURCE_REMOVE;
+    }
+    
+    GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(GTK_WIDGET(self)));
+    if (!root) return G_SOURCE_CONTINUE;
+    
+    GtkWidget *titlebar_overlay = gtk_window_get_titlebar(GTK_WINDOW(root));
+    if (!titlebar_overlay) return G_SOURCE_CONTINUE;
+    
+    /* Get cursor position in root coords */
+    GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(root));
+    GdkDevice *device = gdk_seat_get_pointer(gdk_display_get_default_seat(gdk_surface_get_display(surface)));
+    double cursor_x, cursor_y;
+    gdk_surface_get_device_position(surface, device, &cursor_x, &cursor_y, NULL);
+    
+    /* Check threshold for detachment */
+    double v_offset = fabs(cursor_y - self->cursor_start_y);
+    if (v_offset > 20.0) {
+        self->is_detached = TRUE;
+    } else if (fabs(cursor_y - self->tab_bar_y) < 5.0) {
+        /* Re-attach if cursor comes back near tab bar */
+        self->is_detached = FALSE;
+    }
+    
+    /* Convert cursor to titlebar overlay coords */
+    graphene_point_t cursor_in_root = GRAPHENE_POINT_INIT(cursor_x, cursor_y);
+    graphene_point_t cursor_in_titlebar;
+    if (!gtk_widget_compute_point(root, titlebar_overlay, &cursor_in_root, &cursor_in_titlebar)) {
+        return G_SOURCE_CONTINUE;
+    }
+    
+    /* Apply Y constraint */
+    double final_x = cursor_in_titlebar.x - self->drag_start_x;
+    double final_y;
+    
+    if (self->is_detached) {
+        /* Free movement */
+        final_y = cursor_in_titlebar.y - self->drag_start_y;
+    } else {
+        /* Locked to tab bar line */
+        final_y = self->initial_overlay_y;
+    }
+    
+    /* Update visual overlay position */
+    gtk_fixed_move(GTK_FIXED(gtk_widget_get_parent(self->visual_overlay)),
+                   self->visual_overlay, final_x, final_y);
+    
+    return G_SOURCE_CONTINUE;
+}
+
 static void
 on_drag_begin (GtkDragSource *source, GdkDrag *drag, ViteTab *self)
 {
     /* Activate this tab immediately when starting to drag */
     g_signal_emit(self, signals[SIGNAL_CLICKED], 0);
     
-    GtkWidget *widget = GTK_WIDGET(self);
+    g_print("[DRAG] Starting drag\n");
     
-    /* Create the drag icon before hiding the tab.
-     * GtkWidgetPaintable is dynamic - it updates when the widget changes.
-     * We need to capture the CURRENT image as a static paintable. */
+    GtkWidget *widget = GTK_WIDGET(self);
+    GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(widget));
+    
+    /* Create the drag icon snapshot before hiding the tab */
     GtkWidgetPaintable *widget_paintable = GTK_WIDGET_PAINTABLE(gtk_widget_paintable_new(widget));
     GdkPaintable *static_paintable = gdk_paintable_get_current_image(GDK_PAINTABLE(widget_paintable));
     
-    /* Set hotspot to the drag start point so ghost appears in place */
-    gtk_drag_source_set_icon(source, static_paintable, self->drag_start_x, self->drag_start_y);
+    /* Use real GTK drag icon (for drop targets) with CSS for visual Y-constraint */
+    GdkPaintable *icon_paintable = gdk_paintable_get_current_image(GDK_PAINTABLE(widget_paintable));
+    
+    /* Get the drag icon widget that GTK will create */
+    GtkWidget *drag_icon = gtk_drag_icon_get_for_drag(drag);
+    if (drag_icon) {
+        /* Add CSS class for transform-based Y constraint */
+        gtk_widget_add_css_class(drag_icon, "tab-drag-constrained");
+    }
+    
+    gtk_drag_source_set_icon(source, icon_paintable, self->drag_start_x, self->drag_start_y);
+    
+    g_object_unref(icon_paintable);
+    
     g_object_unref(static_paintable);
     g_object_unref(widget_paintable);
     
-    /* Hide the original tab - the ghost will appear in its place */
+    /* Notify tab bar that this tab is being dragged */
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (tab_bar) {
+        vite_tab_bar_set_dragging_tab(tab_bar, self);
+    }
+    
+    /* Hide the tab content with CSS (wrapper stays visible = shows empty space) */
     gtk_widget_add_css_class(widget, "dragging");
 }
 
 static void
 on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab *self)
 {
+    g_print("[DRAG] Drag ended, delete_data=%d\n", delete_data);
+    /* Remove visual overlay */
+    if (self->visual_tick_id) {
+        gtk_widget_remove_tick_callback(GTK_WIDGET(self), self->visual_tick_id);
+        self->visual_tick_id = 0;
+    }
+    
+    if (self->visual_overlay) {
+        GtkWidget *parent = gtk_widget_get_parent(self->visual_overlay);
+        if (parent) {
+            gtk_fixed_remove(GTK_FIXED(parent), self->visual_overlay);
+        }
+        self->visual_overlay = NULL;
+        self->visual_picture = NULL;
+    }
+    
+    self->is_detached = FALSE;
+    
+    /* Notify tab bar that drag ended */
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (tab_bar) {
+        vite_tab_bar_clear_dragging_tab(tab_bar);
+    }
+    
+    /* Remove the dragging CSS class */
     gtk_widget_remove_css_class(GTK_WIDGET(self), "dragging");
 }
 
@@ -232,6 +347,13 @@ on_leave (GtkEventControllerMotion *controller, ViteTab *self)
 }
 
 /* Drop target handlers for tab reordering */
+static GdkDragAction
+on_drop_enter (GtkDropTarget *target, double x, double y, ViteTab *self)
+{
+    g_print("[TAB DROP] Enter on tab\n");
+    return GDK_ACTION_MOVE;
+}
+
 static GdkDragAction
 on_drop_motion (GtkDropTarget *target, double x, double y, ViteTab *self)
 {
@@ -287,13 +409,24 @@ on_drop_leave (GtkDropTarget *target, ViteTab *self)
 static gboolean
 on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTab *self)
 {
+    g_print("\n[DROP] ========== DROP OCCURRED ==========\n");
+    g_print("[DROP] x=%.1f y=%.1f value=%p\n", x, y, value);
+    
+    /* Stop edge scrolling */
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
     if (tab_bar) {
+        g_print("[DROP] Stopping edge scroll\n");
         vite_tab_bar_stop_edge_scroll(tab_bar);
     }
     
-    /* The tab was already reordered in motion handler, just return success */
-    if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return FALSE;
+    /* The tab was already reordered during motion, just return success */
+    if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) {
+        g_print("[DROP] Invalid value, returning FALSE\n");
+        return FALSE;
+    }
+    
+    g_print("[DROP] Returning TRUE - drop accepted\n");
+    g_print("[DROP] ========== DROP COMPLETE ==========\n\n");
     return TRUE;
 }
 
@@ -394,6 +527,7 @@ vite_tab_init (ViteTab *self)
     /* Drop target for receiving dragged tabs */
     GtkDropTarget *drop_target = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
     gtk_drop_target_set_preload(drop_target, TRUE);
+    g_signal_connect(drop_target, "enter", G_CALLBACK(on_drop_enter), self);
     g_signal_connect(drop_target, "motion", G_CALLBACK(on_drop_motion), self);
     g_signal_connect(drop_target, "leave", G_CALLBACK(on_drop_leave), self);
     g_signal_connect(drop_target, "drop", G_CALLBACK(on_drop_drop), self);
