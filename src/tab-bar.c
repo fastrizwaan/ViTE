@@ -92,24 +92,31 @@ vite_tab_bar_finalize (GObject *object)
     G_OBJECT_CLASS(vite_tab_bar_parent_class)->finalize(object);
 }
 
-static void
-update_separators (ViteTabBar *self)
+void
+vite_tab_bar_update_separators (ViteTabBar *self)
 {
     if (!self->tabs) return;
     
-    int cols = self->cached_cols;
-    if (cols < 1) cols = 1;
-    
     int active_index = -1;
+    int hovered_index = -1;
     int idx = 0;
+    
     for (GList *l = self->tabs; l != NULL; l = l->next) {
         ViteTab *t = VITE_TAB(l->data);
         if (gtk_widget_has_css_class(GTK_WIDGET(t), "active")) {
             active_index = idx;
         }
+        if (vite_tab_is_hovered(t)) {
+            hovered_index = idx;
+        }
         idx++;
     }
     
+    int total_tabs = 0;
+    for (GList *l = self->tabs; l != NULL; l = l->next) {
+        total_tabs++;
+    }
+
     idx = 0;
     for (GList *l = self->tabs; l != NULL; l = l->next) {
         ViteTab *t = VITE_TAB(l->data);
@@ -117,9 +124,20 @@ update_separators (ViteTabBar *self)
         
         gboolean visible = TRUE;
         
-        if (idx % cols == 0) visible = FALSE;
+        /* Rule 1: No separator for end of last tab */
+        if (idx == total_tabs - 1) visible = FALSE;
+        
+        /* Rule 2: Active Tab should have no separators on either side.
+           Since we are controlling the RIGHT separator:
+           - Hide RIGHT separator of the Active Tab.
+           - Hide RIGHT separator of the Previous Tab (Active - 1). 
+        */
         if (idx == active_index) visible = FALSE;
-        if (idx == active_index + 1) visible = FALSE;
+        if (idx == active_index - 1) visible = FALSE;
+        
+        /* Rule 3: Hovered Tab logic (same as active) */
+        if (idx == hovered_index) visible = FALSE;
+        if (idx == hovered_index - 1) visible = FALSE;
         
         vite_tab_set_separator_visible(t, visible);
         idx++;
@@ -155,7 +173,7 @@ update_tab_sizes (ViteTabBar *self)
         }
     }
     
-    update_separators(self);
+    vite_tab_bar_update_separators(self);
 }
 
 static gboolean
@@ -414,7 +432,7 @@ vite_tab_bar_reorder_tab_to (ViteTabBar *self, ViteTab *tab, int new_position)
     }
     
     g_array_free(tabs_to_animate, TRUE);
-    update_separators(self);
+    vite_tab_bar_update_separators(self);
 }
 
 static gboolean
@@ -559,7 +577,7 @@ vite_tab_bar_add_tab (ViteTabBar *self, ViteTab *tab)
     gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
     
     update_tab_sizes(self);
-    update_separators(self);
+    vite_tab_bar_update_separators(self);
 }
 
 void
@@ -585,7 +603,7 @@ vite_tab_bar_remove_tab (ViteTabBar *self, ViteTab *tab)
         g_signal_emit_by_name(next_tab, "clicked");
     }
     
-    update_separators(self);
+    vite_tab_bar_update_separators(self);
     update_tab_sizes(self);
     gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
 }
@@ -680,6 +698,8 @@ vite_tab_bar_set_active_tab (ViteTabBar *self, ViteTab *tab)
         data->attempts = 0;
         g_timeout_add(20, scroll_retry_timeout, data);
     }
+    
+    vite_tab_bar_update_separators(self);
 }
 
 int
