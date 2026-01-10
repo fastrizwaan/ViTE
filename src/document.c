@@ -9,6 +9,10 @@ struct _Document {
     void *saved_command; /* Pointer to the undo command representing the saved state */
     void (*mod_callback)(Document *doc, gboolean modified, void *user_data);
     void *mod_user_data;
+
+    /* Content Observation */
+    void (*content_callback)(Document *doc, void *user_data);
+    void *content_user_data;
 };
 
 static void
@@ -32,6 +36,8 @@ document_new(const char *filename)
     doc->saved_command = NULL;
     doc->mod_callback = NULL;
     doc->mod_user_data = NULL;
+    doc->content_callback = NULL;
+    doc->content_user_data = NULL;
     return doc;
 }
 
@@ -107,6 +113,7 @@ document_insert(Document *doc, size_t offset, const char *text, size_t len)
     undo_stack_push_insert(doc->undo_stack, offset, text, len);
     piece_table_insert(doc->pt, offset, text, len);
     check_modification_state(doc);
+    if (doc->content_callback) doc->content_callback(doc, doc->content_user_data);
 }
 
 void
@@ -119,6 +126,7 @@ document_delete(Document *doc, size_t offset, size_t len)
     
     piece_table_delete(doc->pt, offset, len);
     check_modification_state(doc);
+    if (doc->content_callback) doc->content_callback(doc, doc->content_user_data);
 }
 
 /* Proxy UndoInfo type manually to avoid cyclic dep header hell if needed, 
@@ -130,6 +138,7 @@ document_undo(Document *doc)
 {
     UndoInfo info = undo_stack_undo(doc->undo_stack, doc->pt);
     check_modification_state(doc);
+    if (doc->content_callback) doc->content_callback(doc, doc->content_user_data);
     return info;
 }
 
@@ -138,6 +147,7 @@ document_redo(Document *doc)
 {
     UndoInfo info = undo_stack_redo(doc->undo_stack, doc->pt);
     check_modification_state(doc);
+    if (doc->content_callback) doc->content_callback(doc, doc->content_user_data);
     return info;
 }
 
@@ -185,4 +195,11 @@ document_set_modification_callback(Document *doc, void (*func)(Document *doc, gb
 {
     doc->mod_callback = func;
     doc->mod_user_data = user_data;
+}
+
+void
+document_set_content_callback(Document *doc, DocumentContentCallback callback, void *user_data)
+{
+    doc->content_callback = callback;
+    doc->content_user_data = user_data;
 }

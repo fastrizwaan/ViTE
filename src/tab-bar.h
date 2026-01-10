@@ -11,6 +11,7 @@ G_DECLARE_FINAL_TYPE(ViteTabBar, vite_tab_bar, VITE, TAB_BAR, GtkBox)
 
 GtkWidget *vite_tab_bar_new(void);
 void vite_tab_bar_add_tab(ViteTabBar *self, ViteTab *tab);
+void vite_tab_bar_insert_tab(ViteTabBar *self, ViteTab *tab, int position);
 void vite_tab_bar_remove_tab(ViteTabBar *self, ViteTab *tab);
 int vite_tab_bar_get_n_tabs(ViteTabBar *self);
 void vite_tab_bar_set_active_tab(ViteTabBar *self, ViteTab *tab);
