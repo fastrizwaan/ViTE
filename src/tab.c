@@ -437,6 +437,10 @@ on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, Vi
         return FALSE;
     }
     
+    if (tab_bar) {
+        vite_tab_bar_notify_drop_done(tab_bar);
+    }
+    
     g_print("[DROP] Returning TRUE - drop accepted\n");
     g_print("[DROP] ========== DROP COMPLETE ==========\n\n");
     return TRUE;

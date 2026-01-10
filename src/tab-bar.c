@@ -18,6 +18,8 @@ struct _ViteTabBar {
     int drag_scroll_direction;
     
     ViteTab *dragging_tab;
+    int drag_original_pos;
+    gboolean drop_occurred;
 };
 
 G_DEFINE_TYPE(ViteTabBar, vite_tab_bar, GTK_TYPE_BOX)
@@ -296,6 +298,7 @@ on_flowbox_drop (GtkDropTarget *target, const GValue *value, double x, double y,
     }
     
     g_print("[FLOWBOX DROP] Accepting drop\n");
+    vite_tab_bar_notify_drop_done(self);
     return TRUE;
 }
 
@@ -763,10 +766,26 @@ void
 vite_tab_bar_set_dragging_tab (ViteTabBar *self, ViteTab *tab)
 {
     self->dragging_tab = tab;
+    self->drag_original_pos = g_list_index(self->tabs, tab);
+    self->drop_occurred = FALSE;
+}
+
+void
+vite_tab_bar_notify_drop_done (ViteTabBar *self)
+{
+    self->drop_occurred = TRUE;
 }
 
 void
 vite_tab_bar_clear_dragging_tab (ViteTabBar *self)
 {
+    /* If drop didn't occur (drag cancelled/outside), revert to original position */
+    if (self->dragging_tab && !self->drop_occurred && self->drag_original_pos != -1) {
+        g_print("[TAB BAR] Drag cancelled/outside - Reverting tab to position %d\n", self->drag_original_pos);
+        vite_tab_bar_reorder_tab_to(self, self->dragging_tab, self->drag_original_pos);
+    }
+
     self->dragging_tab = NULL;
+    self->drop_occurred = FALSE;
+    self->drag_original_pos = -1;
 }

@@ -27,5 +27,6 @@ gboolean vite_tab_bar_is_overflowing(ViteTabBar *self);
 /* Drag state management */
 void vite_tab_bar_set_dragging_tab(ViteTabBar *self, ViteTab *tab);
 void vite_tab_bar_clear_dragging_tab(ViteTabBar *self);
+void vite_tab_bar_notify_drop_done(ViteTabBar *self);
 
 G_END_DECLS
