@@ -299,6 +299,31 @@ on_flowbox_drop (GtkDropTarget *target, const GValue *value, double x, double y,
     return TRUE;
 }
 
+static GdkDragAction
+on_tab_bar_drop_motion (GtkDropTarget *target, double x, double y, ViteTabBar *self)
+{
+    /* Handle edge scrolling */
+    if (vite_tab_bar_is_overflowing(self)) {
+        int bar_width = gtk_widget_get_width(GTK_WIDGET(self));
+        int edge_zone = 40;
+        
+        if (x < edge_zone) {
+            vite_tab_bar_start_edge_scroll(self, -1);
+        } else if (x > bar_width - edge_zone) {
+            vite_tab_bar_start_edge_scroll(self, 1);
+        } else {
+            vite_tab_bar_stop_edge_scroll(self);
+        }
+    }
+    return GDK_ACTION_MOVE;
+}
+
+static void
+on_tab_bar_drop_leave (GtkDropTarget *target, ViteTabBar *self)
+{
+    vite_tab_bar_stop_edge_scroll(self);
+}
+
 /* Animation data for smooth interpolation */
 typedef struct {
     ViteTab *tab;
@@ -524,6 +549,13 @@ vite_tab_bar_init (ViteTabBar *self)
     gtk_widget_add_controller(self->flowbox, GTK_EVENT_CONTROLLER(flowbox_drop));
     gtk_widget_set_halign(self->flowbox, GTK_ALIGN_FILL);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(self->scroller), self->flowbox);
+    
+    /* Add drop target to the main TabBar container to handle drags over buttons */
+    GtkDropTarget *bar_drop = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
+    g_signal_connect(bar_drop, "motion", G_CALLBACK(on_tab_bar_drop_motion), self);
+    g_signal_connect(bar_drop, "leave", G_CALLBACK(on_tab_bar_drop_leave), self);
+    g_signal_connect(bar_drop, "drop", G_CALLBACK(on_flowbox_drop), self); /* Reuse same drop logic */
+    gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(bar_drop));
     
     /* Drop target is now on individual tabs, not the bar */
     
