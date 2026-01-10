@@ -234,3 +234,10 @@ undo_stack_redo(UndoStack *stack, PieceTable *pt)
     get_command_info(cmd, FALSE, &info);
     return info;
 }
+
+void *
+undo_stack_peek(UndoStack *stack)
+{
+    if (!stack || !stack->undo_stack) return NULL;
+    return stack->undo_stack->data;
+}

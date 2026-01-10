@@ -72,13 +72,26 @@ update_window_title(Document *doc)
 
     const char *path = document_get_file_path(doc);
     if (!path) {
-        adw_window_title_set_title(main_window_title, "Untitled");
+        if (document_is_modified(doc)) {
+             adw_window_title_set_title(main_window_title, "• Untitled");
+        } else {
+             adw_window_title_set_title(main_window_title, "Untitled");
+        }
         adw_window_title_set_subtitle(main_window_title, NULL);
         return;
     }
 
     char *display_name = g_path_get_basename(path);
-    adw_window_title_set_title(main_window_title, display_name);
+    
+    char *final_title;
+    if (document_is_modified(doc)) {
+        final_title = g_strconcat("• ", display_name, NULL);
+    } else {
+        final_title = g_strdup(display_name);
+    }
+    
+    adw_window_title_set_title(main_window_title, final_title);
+    g_free(final_title);
     g_free(display_name);
 
     char *dir = g_path_get_dirname(path);
@@ -94,6 +107,18 @@ update_window_title(Document *doc)
 
     adw_window_title_set_subtitle(main_window_title, subtitle);
     g_free(subtitle);
+}
+
+static void
+on_document_modified(Document *doc, gboolean modified, void *user_data)
+{
+    ViteTab *tab = VITE_TAB(user_data);
+    vite_tab_set_modified(tab, modified);
+    
+    /* Update window title if this is the active tab */
+    if (vite_tab_is_active(tab)) {
+        update_window_title(doc);
+    }
 }
 
 static void
@@ -755,6 +780,9 @@ create_new_tab (GtkApplication *app, const char *title, Document *doc)
     
     g_signal_connect(tab, "clicked", G_CALLBACK(on_tab_clicked), NULL);
     g_signal_connect(tab, "close-clicked", G_CALLBACK(on_tab_close_clicked), NULL);
+    
+    /* Connect modification callback */
+    document_set_modification_callback(doc, on_document_modified, tab);
     
     vite_tab_bar_add_tab(main_tab_bar, VITE_TAB(tab));
     vite_tab_bar_set_active_tab(main_tab_bar, VITE_TAB(tab));

@@ -615,6 +615,9 @@ vite_tab_set_title (ViteTab *self, const char *title)
     self->title = g_strdup(title);
     gtk_label_set_text(GTK_LABEL(self->label), title);
     gtk_widget_set_tooltip_text(GTK_WIDGET(self), title);
+    
+    /* Re-apply modification state to update label */
+    vite_tab_set_modified(self, self->is_modified);
 }
 
 gboolean
@@ -663,4 +666,24 @@ gboolean
 vite_tab_is_hovered (ViteTab *self)
 {
     return self->is_hovered;
+}
+
+void
+vite_tab_set_modified(ViteTab *self, gboolean modified)
+{
+    self->is_modified = modified;
+    
+    /* Update label with bullet if modified */
+    if (modified) {
+        char *safe_title = g_markup_escape_text(self->title, -1);
+        /* Use smaller font size for the dot U+25CF */
+        char *markup = g_strdup_printf("<span size='smaller'>●</span> %s", safe_title);
+        gtk_label_set_markup(GTK_LABEL(self->label), markup);
+        g_free(markup);
+        g_free(safe_title);
+    } else {
+        gtk_label_set_text(GTK_LABEL(self->label), self->title);
+    }
+    
+    update_close_button_state(self);
 }

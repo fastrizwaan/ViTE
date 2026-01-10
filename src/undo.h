@@ -62,4 +62,7 @@ typedef struct {
 UndoInfo undo_stack_undo(UndoStack *stack, PieceTable *pt);
 UndoInfo undo_stack_redo(UndoStack *stack, PieceTable *pt);
 
+/* For modification tracking */
+void *undo_stack_peek(UndoStack *stack);
+
 #endif
