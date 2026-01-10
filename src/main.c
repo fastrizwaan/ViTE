@@ -10,6 +10,7 @@
 static GtkWindow *main_window = NULL;
 static ViteTabBar *main_tab_bar = NULL;
 static GtkStack *main_stack = NULL;
+static AdwWindowTitle *main_window_title = NULL;
 
 static void open_file(GtkApplication *app, GFile *file);
 static void create_new_tab (GtkApplication *app, const char *title, Document *doc);
@@ -59,6 +60,43 @@ on_prefs_btn_clicked(GtkButton *btn, gpointer user_data)
 }
 
 static void
+update_window_title(Document *doc)
+{
+    if (!main_window_title) return;
+    
+    if (!doc) {
+        adw_window_title_set_title(main_window_title, "ViTE");
+        adw_window_title_set_subtitle(main_window_title, NULL);
+        return;
+    }
+
+    const char *path = document_get_file_path(doc);
+    if (!path) {
+        adw_window_title_set_title(main_window_title, "Untitled");
+        adw_window_title_set_subtitle(main_window_title, NULL);
+        return;
+    }
+
+    char *display_name = g_path_get_basename(path);
+    adw_window_title_set_title(main_window_title, display_name);
+    g_free(display_name);
+
+    char *dir = g_path_get_dirname(path);
+    const char *home = g_get_home_dir();
+    char *subtitle = NULL;
+
+    if (g_str_has_prefix(dir, home)) {
+        subtitle = g_strconcat("~", dir + strlen(home), NULL);
+    } else {
+        subtitle = g_strdup(dir);
+    }
+    g_free(dir);
+
+    adw_window_title_set_subtitle(main_window_title, subtitle);
+    g_free(subtitle);
+}
+
+static void
 on_tab_clicked (ViteTab *tab, gpointer user_data)
 {
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
@@ -68,6 +106,12 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
         
         GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
         if (editor) {
+            /* Update title */
+            if (EDITOR_IS_WIDGET(editor)) {
+                Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+                update_window_title(doc);
+            }
+
             /* Use idle to ensure focus sticks after stack transition */
             g_idle_add_once((GSourceOnceFunc)gtk_widget_grab_focus, editor);
         }
@@ -719,6 +763,8 @@ create_new_tab (GtkApplication *app, const char *title, Document *doc)
     
     /* Use idle to ensure focus sticks after stack transition */
     g_idle_add_once((GSourceOnceFunc)gtk_widget_grab_focus, editor);
+
+    update_window_title(doc);
 }
 
 static void
@@ -740,6 +786,7 @@ setup_window(GtkWindow *window)
     gtk_box_append(GTK_BOX(titlebar_container), header);
     
     GtkWidget *title = adw_window_title_new("ViTE", NULL);
+    main_window_title = ADW_WINDOW_TITLE(title);
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title);
     
     /* Open Split Button */
