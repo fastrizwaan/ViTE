@@ -337,6 +337,12 @@ on_enter (GtkEventControllerMotion *controller, double x, double y, ViteTab *sel
 {
     self->is_hovered = TRUE;
     update_close_button_state(self);
+    
+    // Update separators to hide adjacent ones
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (tab_bar) {
+        vite_tab_bar_update_separators(tab_bar);
+    }
 }
 
 static void
@@ -344,6 +350,12 @@ on_leave (GtkEventControllerMotion *controller, ViteTab *self)
 {
     self->is_hovered = FALSE;
     update_close_button_state(self);
+    
+    // Restore separators
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (tab_bar) {
+        vite_tab_bar_update_separators(tab_bar);
+    }
 }
 
 /* Drop target handlers for tab reordering */
@@ -439,18 +451,18 @@ vite_tab_init (ViteTab *self)
     gtk_widget_set_size_request(GTK_WIDGET(self), 150, 32); 
     gtk_widget_set_hexpand(GTK_WIDGET(self), TRUE); 
     
-    /* Separator (Left) */
+    /* Overlay */
+    self->overlay = GTK_OVERLAY(gtk_overlay_new());
+    gtk_widget_set_hexpand(GTK_WIDGET(self->overlay), TRUE);
+    gtk_box_append(GTK_BOX(self), GTK_WIDGET(self->overlay));
+    
+    /* Separator (Right) - Appended AFTER overlay so it appears on the right */
     self->separator = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(self->separator, "vite-tab-separator");
     gtk_widget_set_size_request(self->separator, 1, 20);
     gtk_widget_set_valign(self->separator, GTK_ALIGN_CENTER);
     gtk_widget_set_margin_end(self->separator, 0);
     gtk_box_append(GTK_BOX(self), self->separator);
-    
-    /* Overlay */
-    self->overlay = GTK_OVERLAY(gtk_overlay_new());
-    gtk_widget_set_hexpand(GTK_WIDGET(self->overlay), TRUE);
-    gtk_box_append(GTK_BOX(self), GTK_WIDGET(self->overlay));
     
     /* Scrolled Wrapper for Label */
     self->scroll_wrapper = gtk_scrolled_window_new();
@@ -623,7 +635,7 @@ void
 vite_tab_set_separator_visible (ViteTab *self, gboolean visible)
 {
     if (self->separator) {
-        gtk_widget_set_visible(self->separator, visible);
+        /* Always keep visible for layout stability, just toggle opacity */
         gtk_widget_set_opacity(self->separator, visible ? 1.0 : 0.0);
     }
 }
@@ -641,4 +653,10 @@ double
 vite_tab_get_anim_offset_x (ViteTab *self)
 {
     return self->anim_offset_x;
+}
+
+gboolean
+vite_tab_is_hovered (ViteTab *self)
+{
+    return self->is_hovered;
 }

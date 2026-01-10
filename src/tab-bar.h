@@ -16,6 +16,7 @@ int vite_tab_bar_get_n_tabs(ViteTabBar *self);
 void vite_tab_bar_set_active_tab(ViteTabBar *self, ViteTab *tab);
 ViteTab *vite_tab_bar_get_active_tab(ViteTabBar *self);
 GList *vite_tab_bar_get_tabs(ViteTabBar *self);
+void vite_tab_bar_update_separators(ViteTabBar *self);
 
 /* Tab reordering during drag */
 void vite_tab_bar_reorder_tab_to(ViteTabBar *self, ViteTab *tab, int new_position);
