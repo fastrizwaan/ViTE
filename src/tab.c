@@ -46,16 +46,16 @@ static guint signals[N_SIGNALS] = {0};
 
 /* CSS ported from vitetab.py + Separator */
 static const char *TAB_CSS = 
-"box.chrome-tab {"
+"box.vite-tab {"
 "    background: @headerbar_bg_color;"
-"    color: alpha(@window_fg_color, 0.85);"
+"    color: alpha(@window_fg_color, 0.95);"
 "    min-height: 32px;"
 "    padding: 0;"
-"    border-radius: 8px 8px 8px 8px;"
+"    border-radius: 9px 9px 9px 9px;"
 "    margin-left: 0px;"
 "    margin-bottom: 0px;"
 "}"
-"box.chrome-tab:drop(active) {"
+"box.vite-tab:drop(active) {"
 "    border: none;"
 "    box-shadow: none;"
 "    outline: none;"
@@ -65,40 +65,40 @@ static const char *TAB_CSS =
 "    box-shadow: none;"
 "    outline: none;"
 "}"
-"box.chrome-tab label {"
+"box.vite-tab label {"
 "    padding: 0;"
 "    margin-top: 1px;"
 "    opacity: 0.9;"
 "    font-weight: normal;"
 "}"
-"box.chrome-tab:hover {"
+"box.vite-tab:hover {"
 "    color: @window_fg_color;"
 "    background: mix(@headerbar_bg_color, @window_fg_color, 0.1);"
 "}"
-"box.chrome-tab.active {"
+"box.vite-tab.active {"
 "    background: mix(@headerbar_bg_color, @window_fg_color, 0.15);"
 "    color: @window_fg_color;"
 "}"
-"box.chrome-tab.active label {"
+"box.vite-tab.active label {"
 "    font-weight: normal;"
 "    opacity: 1;"
 "}"
-"box.chrome-tab.dragging {"
+"box.vite-tab.dragging {"
 "    opacity: 0;"
 "}"
-".chrome-tab-fade {"
+".vite-tab-fade {"
 "    background: linear-gradient(to right, transparent 30%, @headerbar_bg_color 100%);"
 "    min-width: 15px;"
 "    opacity: 1;"
 "    transition: opacity 0.1s;"
 "}"
-"box.chrome-tab:hover .chrome-tab-fade {"
+"box.vite-tab:hover .vite-tab-fade {"
 "    background: linear-gradient(to right, transparent 0%, mix(@headerbar_bg_color, @window_fg_color, 0.1) 60%, mix(@headerbar_bg_color, @window_fg_color, 0.1) 100%);"
 "}"
-"box.chrome-tab.active .chrome-tab-fade {"
+"box.vite-tab.active .vite-tab-fade {"
 "    background: linear-gradient(to right, transparent 0%, mix(@headerbar_bg_color, @window_fg_color, 0.15) 60%, mix(@headerbar_bg_color, @window_fg_color, 0.15) 100%);"
 "}"
-".chrome-tab-close-button {"
+".vite-tab-close-button {"
 "    min-width: 20px;"
 "    min-height: 20px;"
 "    padding: 2px;"
@@ -109,16 +109,16 @@ static const char *TAB_CSS =
 "    background-color: transparent;"
 "    color: @window_fg_color;"
 "}"
-".chrome-tab-close-button:hover {"
+".vite-tab-close-button:hover {"
 "    background-color: alpha(@window_fg_color, 0.1);"
 "}"
-".chrome-tab.active .chrome-tab-close-button {"
+".vite-tab.active .vite-tab-close-button {"
 "    background-color: transparent;"
 "}"
-".chrome-tab.active:hover .chrome-tab-close-button {"
+".vite-tab.active:hover .vite-tab-close-button {"
 "    background-color: transparent;"
 "}"
-".chrome-tab.active .chrome-tab-close-button:hover {"
+".vite-tab.active .vite-tab-close-button:hover {"
 "    background-color: alpha(@window_fg_color, 0.1);"
 "}"
 ".progress-bar {"
@@ -135,7 +135,7 @@ static const char *TAB_CSS =
 "    background-color: #62a0ea;"
 "    border-radius: 0;"
 "}"
-".chrome-tab-separator {"
+".vite-tab-separator {"
 "    min-width: 1px;"
 "    margin-left: 0px;"
 "    margin-right: 0px;"
@@ -433,7 +433,7 @@ on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, Vi
 static void
 vite_tab_init (ViteTab *self)
 {
-    gtk_widget_add_css_class(GTK_WIDGET(self), "chrome-tab");
+    gtk_widget_add_css_class(GTK_WIDGET(self), "vite-tab");
     gtk_orientable_set_orientation(GTK_ORIENTABLE(self), GTK_ORIENTATION_HORIZONTAL);
     gtk_widget_set_overflow(GTK_WIDGET(self), GTK_OVERFLOW_HIDDEN);
     gtk_widget_set_size_request(GTK_WIDGET(self), 150, 32); 
@@ -441,7 +441,7 @@ vite_tab_init (ViteTab *self)
     
     /* Separator (Left) */
     self->separator = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(self->separator, "chrome-tab-separator");
+    gtk_widget_add_css_class(self->separator, "vite-tab-separator");
     gtk_widget_set_size_request(self->separator, 1, 20);
     gtk_widget_set_valign(self->separator, GTK_ALIGN_CENTER);
     gtk_widget_set_margin_end(self->separator, 0);
@@ -477,13 +477,13 @@ vite_tab_init (ViteTab *self)
     gtk_widget_set_halign(self->fade_overlay, GTK_ALIGN_END);
     gtk_widget_set_hexpand(self->fade_overlay, FALSE);
     gtk_widget_set_size_request(self->fade_overlay, 30, -1);
-    gtk_widget_add_css_class(self->fade_overlay, "chrome-tab-fade");
+    gtk_widget_add_css_class(self->fade_overlay, "vite-tab-fade");
     gtk_widget_set_can_target(self->fade_overlay, FALSE);
     gtk_overlay_add_overlay(self->overlay, self->fade_overlay);
     
     /* Close Button */
     self->close_button = gtk_button_new_from_icon_name("window-close-symbolic");
-    gtk_widget_add_css_class(self->close_button, "chrome-tab-close-button");
+    gtk_widget_add_css_class(self->close_button, "vite-tab-close-button");
     gtk_widget_set_halign(self->close_button, GTK_ALIGN_END);
     gtk_widget_set_valign(self->close_button, GTK_ALIGN_CENTER);
     gtk_widget_set_opacity(self->close_button, 0);
