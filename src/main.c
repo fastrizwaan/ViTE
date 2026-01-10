@@ -898,6 +898,31 @@ open_file(GtkApplication *app, GFile *file)
     if (!main_window) activate(app, NULL);
     char *path = g_file_get_path(file);
     if (!path) return;
+
+    /* Check if file is already open */
+    if (main_tab_bar) {
+        GList *tabs = vite_tab_bar_get_tabs(main_tab_bar);
+        for (GList *l = tabs; l != NULL; l = l->next) {
+            ViteTab *tab = VITE_TAB(l->data);
+            GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+            if (page) {
+                GtkWidget *scroll_child = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
+                if (EDITOR_IS_WIDGET(scroll_child)) {
+                    Document *d = editor_widget_get_document(EDITOR_WIDGET(scroll_child));
+                    const char *p = document_get_file_path(d);
+                    if (g_strcmp0(path, p) == 0) {
+                        /* Switch to existing tab */
+                        on_tab_clicked(tab, NULL);
+                        
+                        g_free(path);
+                        g_list_free(tabs);
+                        return;
+                    }
+                }
+            }
+        }
+        g_list_free(tabs);
+    }
     Document *doc = document_new(path);
     if (!doc) {
         g_warning("Failed to open %s", path);
