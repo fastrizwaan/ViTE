@@ -11,6 +11,7 @@ static GtkWindow *main_window = NULL;
 static ViteTabBar *main_tab_bar = NULL;
 static GtkStack *main_stack = NULL;
 static AdwWindowTitle *main_window_title = NULL;
+static int untitled_count = 1;
 
 static void open_file(GtkApplication *app, GFile *file);
 static void create_new_tab (GtkApplication *app, const char *title, Document *doc);
@@ -71,12 +72,28 @@ update_window_title(Document *doc)
     }
 
     const char *path = document_get_file_path(doc);
-    if (!path) {
-        if (document_is_modified(doc)) {
-             adw_window_title_set_title(main_window_title, "• Untitled");
-        } else {
-             adw_window_title_set_title(main_window_title, "Untitled");
+    
+    /* Check for single unmodified untitled tab */
+    if (!path && !document_is_modified(doc)) {
+        if (vite_tab_bar_get_n_tabs(main_tab_bar) == 1) {
+             adw_window_title_set_title(main_window_title, "Virtual Text Editor");
+             adw_window_title_set_subtitle(main_window_title, NULL);
+             return;
         }
+    }
+
+    if (!path) {
+        ViteTab *tab = vite_tab_bar_get_active_tab(main_tab_bar);
+        const char *title = tab ? vite_tab_get_title(tab) : "Untitled";
+        
+        char *final_title;
+        if (document_is_modified(doc)) {
+             final_title = g_strconcat("• ", title, NULL);
+        } else {
+             final_title = g_strdup(title);
+        }
+        adw_window_title_set_title(main_window_title, final_title);
+        g_free(final_title);
         adw_window_title_set_subtitle(main_window_title, NULL);
         return;
     }
@@ -107,6 +124,49 @@ update_window_title(Document *doc)
 
     adw_window_title_set_subtitle(main_window_title, subtitle);
     g_free(subtitle);
+}
+
+static void
+on_document_content_changed(Document *doc, void *user_data)
+{
+    ViteTab *tab = VITE_TAB(user_data);
+    if (!document_get_file_path(doc)) {
+        size_t len;
+        char *line = document_get_line(doc, 0, &len);
+        if (line && len > 0) {
+            /* Truncate to 20 chars if needed (just for reading, logic below handles usage) */
+            if (len > 20) line[20] = '\0';
+            else line[len] = '\0'; 
+            
+            /* Basic hygiene: remove newlines */
+            char *nl = strchr(line, '\n');
+            if (nl) *nl = '\0';
+            
+            /* Check for leading whitespace/empty after strip */
+            char *stripped = g_strstrip(g_strdup(line)); /* Duplicate because g_strstrip modifies in place */
+            
+            if (stripped[0] != '\0') {
+                /* Use the STRIPPED version or original? User said: "when non white space is entered use it". 
+                   "if the starting text is white space do not use it".
+                   I'll use the STRIPPED version for the title, it looks cleaner. */
+                vite_tab_set_title(tab, stripped);
+            } else {
+                 /* Text is all whitespace or empty - Restore original title */
+                 const char *orig = g_object_get_data(G_OBJECT(tab), "original_title");
+                 if (orig) vite_tab_set_title(tab, orig);
+            }
+            g_free(stripped);
+        } else {
+             /* Empty document */
+             const char *orig = g_object_get_data(G_OBJECT(tab), "original_title");
+             if (orig) vite_tab_set_title(tab, orig);
+        }
+        g_free(line);
+        
+        if (vite_tab_is_active(tab)) {
+            update_window_title(doc);
+        }
+    }
 }
 
 static void
@@ -774,17 +834,41 @@ create_new_tab (GtkApplication *app, const char *title, Document *doc)
     sprintf(id, "page_%p", scrolled);
     gtk_stack_add_named(main_stack, scrolled, id);
     
-    GtkWidget *tab = vite_tab_new(title);
+    char *final_title = g_strdup(title);
+    
+    /* Handle untitled numbering */
+    if (g_strcmp0(title, "Untitled") == 0) {
+        g_free(final_title);
+        final_title = g_strdup_printf("Untitled %d", untitled_count++);
+    }
+    
+    GtkWidget *tab = vite_tab_new(final_title);
+    g_object_set_data_full(G_OBJECT(tab), "original_title", g_strdup(final_title), g_free);
+    g_free(final_title);
+
     g_object_set_data(G_OBJECT(tab), "page", scrolled);
     g_object_set_data(G_OBJECT(scrolled), "tab", tab); /* Link back for close button */
     
     g_signal_connect(tab, "clicked", G_CALLBACK(on_tab_clicked), NULL);
     g_signal_connect(tab, "close-clicked", G_CALLBACK(on_tab_close_clicked), NULL);
     
-    /* Connect modification callback */
+    /* Connect modification and content callbacks */
     document_set_modification_callback(doc, on_document_modified, tab);
+    document_set_content_callback(doc, on_document_content_changed, tab);
     
-    vite_tab_bar_add_tab(main_tab_bar, VITE_TAB(tab));
+    /* Calculate insertion position (next to active) */
+    int position = -1;
+    if (main_tab_bar) {
+        ViteTab *active = vite_tab_bar_get_active_tab(main_tab_bar);
+        if (active) {
+            GList *tabs = vite_tab_bar_get_tabs(main_tab_bar);
+            int idx = g_list_index(tabs, active);
+            if (idx != -1) position = idx + 1;
+            g_list_free(tabs);
+        }
+    }
+    
+    vite_tab_bar_insert_tab(main_tab_bar, VITE_TAB(tab), position);
     vite_tab_bar_set_active_tab(main_tab_bar, VITE_TAB(tab));
     
     gtk_stack_set_visible_child(main_stack, scrolled);
@@ -997,7 +1081,68 @@ open_file(GtkApplication *app, GFile *file)
             }
         }
         g_list_free(tabs);
+        
+        /* Check if we can reuse the active tab if it is untitled and unmodified */
+        if (TRUE) { /* Removed single tab check */
+             ViteTab *tab = vite_tab_bar_get_active_tab(main_tab_bar);
+             if (tab) {
+                 GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+                 if (page) {
+                      GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
+                      if (EDITOR_IS_WIDGET(editor)) {
+                           Document *current_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+                           /* Check if untitled (no path) and unmodified */
+                           if (!document_get_file_path(current_doc) && !document_is_modified(current_doc)) {
+                               /* Reuse this tab! */
+                               Document *doc = document_new(path);
+                               if (!doc) { 
+                                   g_warning("Failed to open %s", path); 
+                                   g_free(path); 
+                                   return; 
+                               }
+                               
+                               /* Free old doc */
+                               document_free(current_doc);
+                               
+                               /* Set new doc */
+                               editor_widget_set_document(EDITOR_WIDGET(editor), doc);
+                               
+                               /* Setup callbacks */
+                               document_set_modification_callback(doc, on_document_modified, tab);
+                               document_set_content_callback(doc, on_document_content_changed, tab);
+
+                               /* Set language for syntax highlighting */
+                               const char *dot = strrchr(path, '.');
+                               if (dot) editor_widget_set_language(EDITOR_WIDGET(editor), dot + 1);
+                               
+                               /* Update title */
+                               char *name = g_file_get_basename(file);
+                               vite_tab_set_title(tab, name);
+                               
+                               /* Update original_title */
+                               g_object_set_data_full(G_OBJECT(tab), "original_title", g_strdup(name), g_free);
+                               g_free(name);
+                               
+                               /* Add to recents */
+                               char *uri = g_file_get_uri(file);
+                               add_to_local_recents(uri);
+                               g_free(uri);
+                               
+                               g_free(path);
+                               
+                               update_window_title(doc);
+                               
+                               /* Ensure focus is grabbed */
+                               g_idle_add_once((GSourceOnceFunc)gtk_widget_grab_focus, editor);
+                               
+                               return;
+                           }
+                      }
+                 }
+             }
+        }
     }
+    
     Document *doc = document_new(path);
     if (!doc) {
         g_warning("Failed to open %s", path);

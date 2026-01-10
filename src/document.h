@@ -16,6 +16,10 @@ gboolean document_is_modified(Document *doc);
 void document_mark_saved(Document *doc);
 void document_set_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data);
 
+/* Content Observation */
+typedef void (*DocumentContentCallback)(Document *doc, void *user_data);
+void document_set_content_callback(Document *doc, DocumentContentCallback callback, void *user_data);
+
 /* Content Access */
 char *document_get_line(Document *doc, size_t line_index, size_t *len);
 size_t document_get_line_length(Document *doc, size_t line_index);

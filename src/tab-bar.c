@@ -615,6 +615,21 @@ vite_tab_bar_add_tab (ViteTabBar *self, ViteTab *tab)
     vite_tab_bar_update_separators(self);
 }
 
+
+
+void
+vite_tab_bar_insert_tab (ViteTabBar *self, ViteTab *tab, int position)
+{
+    vite_tab_set_tab_bar(tab, self);
+    gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), position);
+    self->tabs = g_list_insert(self->tabs, tab, position);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(self->flowbox), 2);
+    gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
+    
+    update_tab_sizes(self);
+    vite_tab_bar_update_separators(self);
+}
+
 void
 vite_tab_bar_remove_tab (ViteTabBar *self, ViteTab *tab)
 {
