@@ -30,18 +30,18 @@ enum {
 static guint signals[N_SIGNALS] = {0};
 
 static const char *TAB_BAR_CSS = 
-".chrome-tab-bar-container:drop(active), .chrome-tab-bar:drop(active) {"
+".vite-tab-bar-container:drop(active), .vite-tab-bar:drop(active) {"
 "    border: none;"
 "    box-shadow: none;"
 "    background: none;"
 "    outline: none;"
 "}"
-".chrome-tab-bar-container {"
+".vite-tab-bar-container {"
 "    margin-top: 1px;"
 "    padding: 0;"
 "    margin-bottom: 0px;"
 "}"
-".chrome-tab-bar {"
+".vite-tab-bar {"
 "    padding-left: 6px;"
 "    padding-right: 6px;"
 "    padding-top: 0;"
@@ -143,7 +143,7 @@ update_tab_sizes (ViteTabBar *self)
         if (!GTK_IS_WIDGET(tab)) continue;
         
         /* Set flexible size request to allow shrinking */
-        gtk_widget_set_size_request(tab, 50, 32);
+        gtk_widget_set_size_request(tab, 90, 32);
         gtk_widget_set_hexpand(tab, TRUE);
         gtk_widget_set_halign(tab, GTK_ALIGN_FILL);
         
@@ -455,7 +455,7 @@ on_scroll_end_clicked (GtkButton *btn, ViteTabBar *self)
 static void
 vite_tab_bar_init (ViteTabBar *self)
 {
-    gtk_widget_add_css_class(GTK_WIDGET(self), "chrome-tab-bar-container");
+    gtk_widget_add_css_class(GTK_WIDGET(self), "vite-tab-bar-container");
     gtk_orientable_set_orientation(GTK_ORIENTABLE(self), GTK_ORIENTATION_HORIZONTAL);
     
     /* Start Button */
@@ -491,7 +491,7 @@ vite_tab_bar_init (ViteTabBar *self)
     gtk_box_append(GTK_BOX(self), self->end_button);
     
     self->flowbox = gtk_flow_box_new();
-    gtk_widget_add_css_class(self->flowbox, "chrome-tab-bar");
+    gtk_widget_add_css_class(self->flowbox, "vite-tab-bar");
     gtk_orientable_set_orientation(GTK_ORIENTABLE(self->flowbox), GTK_ORIENTATION_HORIZONTAL);
     gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(self->flowbox), TRUE);
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(self->flowbox), GTK_SELECTION_NONE);
@@ -555,7 +555,7 @@ vite_tab_bar_add_tab (ViteTabBar *self, ViteTab *tab)
     vite_tab_set_tab_bar(tab, self);
     gtk_flow_box_insert(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab), -1);
     self->tabs = g_list_append(self->tabs, tab);
-    
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(self->flowbox), 2);
     gtk_widget_set_visible(GTK_WIDGET(self), g_list_length(self->tabs) > 1);
     
     update_tab_sizes(self);
