@@ -4,7 +4,23 @@ struct _Document {
     PieceTable *pt;
     UndoStack *undo_stack;
     char *file_path;
+    
+    /* Modification State */
+    void *saved_command; /* Pointer to the undo command representing the saved state */
+    void (*mod_callback)(Document *doc, gboolean modified, void *user_data);
+    void *mod_user_data;
 };
+
+static void
+check_modification_state(Document *doc)
+{
+    void *current = undo_stack_peek(doc->undo_stack);
+    gboolean modified = (current != doc->saved_command);
+    
+    if (doc->mod_callback) {
+        doc->mod_callback(doc, modified, doc->mod_user_data);
+    }
+}
 
 Document *
 document_new(const char *filename)
@@ -13,6 +29,9 @@ document_new(const char *filename)
     doc->pt = piece_table_new(filename);
     doc->undo_stack = undo_stack_new();
     doc->file_path = filename ? g_strdup(filename) : NULL;
+    doc->saved_command = NULL;
+    doc->mod_callback = NULL;
+    doc->mod_user_data = NULL;
     return doc;
 }
 
@@ -87,6 +106,7 @@ document_insert(Document *doc, size_t offset, const char *text, size_t len)
     if (len == 0) return;
     undo_stack_push_insert(doc->undo_stack, offset, text, len);
     piece_table_insert(doc->pt, offset, text, len);
+    check_modification_state(doc);
 }
 
 void
@@ -98,6 +118,7 @@ document_delete(Document *doc, size_t offset, size_t len)
     g_free(deleted);
     
     piece_table_delete(doc->pt, offset, len);
+    check_modification_state(doc);
 }
 
 /* Proxy UndoInfo type manually to avoid cyclic dep header hell if needed, 
@@ -107,13 +128,17 @@ document_delete(Document *doc, size_t offset, size_t len)
 UndoInfo
 document_undo(Document *doc)
 {
-    return undo_stack_undo(doc->undo_stack, doc->pt);
+    UndoInfo info = undo_stack_undo(doc->undo_stack, doc->pt);
+    check_modification_state(doc);
+    return info;
 }
 
 UndoInfo
 document_redo(Document *doc)
 {
-    return undo_stack_redo(doc->undo_stack, doc->pt);
+    UndoInfo info = undo_stack_redo(doc->undo_stack, doc->pt);
+    check_modification_state(doc);
+    return info;
 }
 
 void
@@ -126,6 +151,7 @@ void
 document_end_undo_group(Document *doc)
 {
     undo_stack_end_group(doc->undo_stack);
+    check_modification_state(doc);
 }
 
 void
@@ -138,4 +164,25 @@ void
 document_set_redo_group_selection(Document *doc, size_t start, size_t end)
 {
     undo_stack_set_group_selection_after(doc->undo_stack, start, end);
+}
+
+gboolean
+document_is_modified(Document *doc)
+{
+    void *current = undo_stack_peek(doc->undo_stack);
+    return (current != doc->saved_command);
+}
+
+void
+document_mark_saved(Document *doc)
+{
+    doc->saved_command = undo_stack_peek(doc->undo_stack);
+    check_modification_state(doc);
+}
+
+void
+document_set_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data)
+{
+    doc->mod_callback = func;
+    doc->mod_user_data = user_data;
 }

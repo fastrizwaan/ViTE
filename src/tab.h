@@ -18,5 +18,6 @@ gboolean vite_tab_is_active (ViteTab *self);
 void vite_tab_set_anim_offset_x (ViteTab *self, double offset);
 double vite_tab_get_anim_offset_x (ViteTab *self);
 gboolean vite_tab_is_hovered (ViteTab *self);
+void vite_tab_set_modified(ViteTab *self, gboolean modified);
 
 G_END_DECLS
