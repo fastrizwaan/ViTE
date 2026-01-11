@@ -930,9 +930,74 @@ on_tab_move_to_new_window (ViteTab *tab, gpointer user_data)
     gtk_window_present(new_win->window);
     
     /* Close old window if empty? */
+    /* Check if source window empty */
     if (vite_tab_bar_get_n_tabs(current_win->tab_bar) == 0) {
         gtk_window_destroy(current_win->window);
     }
+}
+
+static void
+move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
+{
+    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
+    if (!root) return; /* Already Detached? */
+    
+    ViteWindow *source_win = g_object_get_data(G_OBJECT(root), "vite-window");
+    if (!source_win) return;
+    
+    if (source_win == target_win) return; 
+
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    if (!page) return;
+    
+    g_object_ref(tab);
+    g_object_ref(page);
+    
+    /* Remove from source */
+    vite_tab_bar_remove_tab(source_win->tab_bar, tab);
+    gtk_stack_remove(source_win->stack, page);
+    
+    /* Add to target */
+    char id[32];
+    sprintf(id, "page_%p", page);
+    gtk_stack_add_named(target_win->stack, page, id);
+    
+    /* Handle append case */
+    if (position < 0) position = vite_tab_bar_get_n_tabs(target_win->tab_bar);
+    
+    vite_tab_bar_insert_tab(target_win->tab_bar, tab, position);
+    vite_tab_bar_set_active_tab(target_win->tab_bar, tab);
+    
+    gtk_stack_set_visible_child(target_win->stack, page);
+    
+    update_window_title_for_tab(tab);
+    gtk_window_present(target_win->window);
+
+    g_object_unref(tab);
+    g_object_unref(page);
+    
+    /* Check if source window empty */
+    if (vite_tab_bar_get_n_tabs(source_win->tab_bar) == 0) {
+        gtk_window_destroy(source_win->window);
+    }
+}
+
+static void
+on_tab_dropped(ViteTabBar *tab_bar, ViteTab *tab, int position, ViteWindow *target_win)
+{
+    move_tab_to_window(target_win, tab, position);
+}
+
+static gboolean
+on_window_drop(GtkDropTarget *target, const GValue *value, double x, double y, ViteWindow *win)
+{
+    if (value && G_VALUE_HOLDS(value, VITE_TYPE_TAB)) {
+        ViteTab *tab = VITE_TAB(g_value_get_object(value));
+        /* Move to end of tab list */
+        move_tab_to_window(win, tab, -1);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 static void
@@ -1038,6 +1103,11 @@ setup_window(GtkWindow *window)
     gtk_overlay_set_child(GTK_OVERLAY(titlebar_overlay), titlebar_container);
     
     gtk_window_set_titlebar(window, titlebar_overlay);
+    
+    /* Add drop target to window to accept tabs */
+    GtkDropTarget *window_drop = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
+    g_signal_connect(window_drop, "drop", G_CALLBACK(on_window_drop), win);
+    gtk_widget_add_controller(GTK_WIDGET(window), GTK_EVENT_CONTROLLER(window_drop));
     
     GtkWidget *header = adw_header_bar_new();
     gtk_widget_add_css_class(header, "flat");
@@ -1187,6 +1257,7 @@ setup_window(GtkWindow *window)
     g_object_set_data(G_OBJECT(tabs_popover), "list", tabs_list);
     
     g_signal_connect(win->tab_bar, "overflow-changed", G_CALLBACK(on_overflow_changed), btn_tabs);
+    g_signal_connect(win->tab_bar, "tab-dropped", G_CALLBACK(on_tab_dropped), win);
     g_signal_connect(tabs_popover, "map", G_CALLBACK(update_open_tabs_list), tabs_list);
     
     /* Initialize Stack */

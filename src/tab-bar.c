@@ -26,6 +26,7 @@ G_DEFINE_TYPE(ViteTabBar, vite_tab_bar, GTK_TYPE_BOX)
 
 enum {
     SIGNAL_OVERFLOW_CHANGED,
+    SIGNAL_TAB_DROPPED,
     N_SIGNALS
 };
 
@@ -298,7 +299,17 @@ on_flowbox_drop (GtkDropTarget *target, const GValue *value, double x, double y,
     }
     
     g_print("[FLOWBOX DROP] Accepting drop\n");
-    vite_tab_bar_notify_drop_done(self);
+    
+    /* Check if tab is foreign */
+    ViteTab *dropped_tab = VITE_TAB(g_value_get_object(value));
+    if (!g_list_find(self->tabs, dropped_tab)) {
+        g_print("[FLOWBOX DROP] Foreign tab detected - emitting signal\n");
+        /* -1 means append (end) */
+        vite_tab_bar_drop_foreign_tab(self, dropped_tab, -1);
+    } else {
+        vite_tab_bar_notify_drop_done(self);
+    }
+    
     return TRUE;
 }
 
@@ -587,6 +598,12 @@ vite_tab_bar_class_init (ViteTabBarClass *class)
         G_SIGNAL_RUN_LAST,
         0, NULL, NULL, NULL,
         G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
+
+    signals[SIGNAL_TAB_DROPPED] = g_signal_new("tab-dropped",
+        G_TYPE_FROM_CLASS(class),
+        G_SIGNAL_RUN_LAST,
+        0, NULL, NULL, NULL,
+        G_TYPE_NONE, 2, VITE_TYPE_TAB, G_TYPE_INT);
     
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, TAB_BAR_CSS);
@@ -801,15 +818,31 @@ vite_tab_bar_notify_drop_done (ViteTabBar *self)
 }
 
 void
-vite_tab_bar_clear_dragging_tab (ViteTabBar *self)
+vite_tab_bar_clear_dragging_tab (ViteTabBar *self, gboolean success)
 {
+    /* If drop successful, assume handled (e.g. moved to another window). 
+       Only revert if NOT success logic and NOT drop logic. */
+    if (success) {
+         g_print("[TAB BAR] Drag successful (delete_data=1) - skipping revert\n");
+    }
     /* If drop didn't occur (drag cancelled/outside), revert to original position */
-    if (self->dragging_tab && !self->drop_occurred && self->drag_original_pos != -1) {
-        g_print("[TAB BAR] Drag cancelled/outside - Reverting tab to position %d\n", self->drag_original_pos);
-        vite_tab_bar_reorder_tab_to(self, self->dragging_tab, self->drag_original_pos);
+    else if (self->dragging_tab && !self->drop_occurred && self->drag_original_pos != -1) {
+        /* Verify tab is still in list before reverting */
+        if (g_list_find(self->tabs, self->dragging_tab)) {
+            g_print("[TAB BAR] Drag cancelled/outside - Reverting tab to position %d\n", self->drag_original_pos);
+            vite_tab_bar_reorder_tab_to(self, self->dragging_tab, self->drag_original_pos);
+        } else {
+            g_print("[TAB BAR] Drag cancelled but tab removed (moved to new win?) - skipping revert\n");
+        }
     }
 
     self->dragging_tab = NULL;
     self->drop_occurred = FALSE;
     self->drag_original_pos = -1;
+}
+
+void
+vite_tab_bar_drop_foreign_tab(ViteTabBar *self, ViteTab *tab, int position)
+{
+    g_signal_emit(self, signals[SIGNAL_TAB_DROPPED], 0, tab, position);
 }
