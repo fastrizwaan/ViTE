@@ -646,7 +646,16 @@ vite_tab_bar_remove_tab (ViteTabBar *self, ViteTab *tab)
     }
     
     self->tabs = g_list_delete_link(self->tabs, l);
-    gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab));
+    
+    GtkWidget *parent = gtk_widget_get_parent(GTK_WIDGET(tab));
+    if (parent && GTK_IS_FLOW_BOX_CHILD(parent)) {
+        /* Explicitly detach to ensure tab->parent is NULL immediately */
+        gtk_flow_box_child_set_child(GTK_FLOW_BOX_CHILD(parent), NULL);
+        gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), parent);
+    } else {
+        /* Fallback if somehow not wrapped (unlikely) */
+        gtk_flow_box_remove(GTK_FLOW_BOX(self->flowbox), GTK_WIDGET(tab));
+    }
     
     if (was_active && sibling) {
         ViteTab *next_tab = VITE_TAB(sibling->data);

@@ -2,6 +2,8 @@
 #include "tab-bar.h"
 #include <math.h>
 
+static void on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
+
 struct _ViteTab {
     GtkBox parent_instance;
     
@@ -535,6 +537,11 @@ vite_tab_init (ViteTab *self)
     g_signal_connect(click, "pressed", G_CALLBACK(on_click_pressed), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(click));
     
+    GtkGesture *right_click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(right_click), GDK_BUTTON_SECONDARY);
+    g_signal_connect(right_click, "pressed", G_CALLBACK(on_context_menu), self);
+    gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(right_click));
+    
     GtkEventController *motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "enter", G_CALLBACK(on_enter), self);
     g_signal_connect(motion, "leave", G_CALLBACK(on_leave), self);
@@ -586,12 +593,216 @@ vite_tab_class_init (ViteTabClass *class)
         0, NULL, NULL, NULL,
         G_TYPE_NONE, 0);
         
+    g_signal_new("move-to-new-window",
+        G_TYPE_FROM_CLASS(class),
+        G_SIGNAL_RUN_LAST,
+        0, NULL, NULL, NULL,
+        G_TYPE_NONE, 0);
+        
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, TAB_CSS);
     gtk_style_context_add_provider_for_display(gdk_display_get_default(),
         GTK_STYLE_PROVIDER(provider),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(provider);
+}
+
+static void
+on_context_menu_move_left (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (!tab_bar) return;
+    
+    GList *tabs = vite_tab_bar_get_tabs(tab_bar);
+    int idx = g_list_index(tabs, self);
+    g_list_free(tabs);
+    
+    if (idx > 0) {
+        vite_tab_bar_reorder_tab_to(tab_bar, self, idx - 1);
+    }
+}
+
+static void
+on_context_menu_move_right (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (!tab_bar) return;
+    
+    GList *tabs = vite_tab_bar_get_tabs(tab_bar);
+    int idx = g_list_index(tabs, self);
+    int n_tabs = g_list_length(tabs);
+    g_list_free(tabs);
+    
+    if (idx < n_tabs - 1) {
+        vite_tab_bar_reorder_tab_to(tab_bar, self, idx + 1);
+    }
+}
+
+static void
+on_context_menu_move_new_window (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    g_signal_emit_by_name(self, "move-to-new-window");
+}
+
+static void
+on_context_menu_close_left (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (!tab_bar) return;
+    
+    GList *tabs = vite_tab_bar_get_tabs(tab_bar);
+    int self_idx = g_list_index(tabs, self);
+    
+    /* Iterate safely using a copy or careful index handling since we are removing */
+    /* Remove tabs 0 to self_idx-1 */
+    int i = 0;
+    GList *l = tabs;
+    while (l && i < self_idx) {
+        ViteTab *t = VITE_TAB(l->data);
+        l = l->next;
+        /* Emit close-clicked signal on the tab to trigger proper cleanup in main.c */
+        g_signal_emit_by_name(t, "close-clicked");
+        i++;
+    }
+    g_list_free(tabs);
+}
+
+static void
+on_context_menu_close_right (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (!tab_bar) return;
+    
+    GList *tabs = vite_tab_bar_get_tabs(tab_bar);
+    int self_idx = g_list_index(tabs, self);
+    
+    /* Remove all tabs after self */
+    GList *l = g_list_nth(tabs, self_idx + 1);
+    while (l) {
+        ViteTab *t = VITE_TAB(l->data);
+        l = l->next; /* Get next before potential destruction */
+        g_signal_emit_by_name(t, "close-clicked");
+    }
+    g_list_free(tabs);
+}
+
+static void
+on_context_menu_close_other (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
+    if (!tab_bar) return;
+    
+    GList *tabs = vite_tab_bar_get_tabs(tab_bar);
+    for (GList *l = tabs; l != NULL; l = l->next) {
+        ViteTab *t = VITE_TAB(l->data);
+        if (t != self) {
+            g_signal_emit_by_name(t, "close-clicked");
+        }
+    }
+    g_list_free(tabs);
+}
+
+static void
+on_context_menu_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    g_signal_emit_by_name(self, "close-clicked");
+}
+
+static void on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
+
+static void
+on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    
+    GMenu *menu = g_menu_new();
+    GSimpleActionGroup *group = g_simple_action_group_new();
+    
+    /* Section 1: Movement */
+    GMenu *s1 = g_menu_new();
+    g_menu_append(s1, "Move Left", "ctx.move-left");
+    g_menu_append(s1, "Move Right", "ctx.move-right");
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(s1));
+    g_object_unref(s1);
+    
+    GSimpleAction *act_ml = g_simple_action_new("move-left", NULL);
+    g_signal_connect(act_ml, "activate", G_CALLBACK(on_context_menu_move_left), self);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_ml));
+    
+    GSimpleAction *act_mr = g_simple_action_new("move-right", NULL);
+    g_signal_connect(act_mr, "activate", G_CALLBACK(on_context_menu_move_right), self);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_mr));
+    
+    /* Section 2: Split View (Placeholder) & New Window */
+    GMenu *s2 = g_menu_new();
+    g_menu_append(s2, "Split View Horizontally", "ctx.split-h");
+    g_menu_append(s2, "Split View Vertically", "ctx.split-v");
+    g_menu_append(s2, "Move to New Window", "ctx.new-window");
+    
+    GMenuItem *item_sh = g_menu_item_new("Split View Horizontally", "ctx.split-h");
+    g_menu_item_set_attribute(item_sh, "disabled", "b", TRUE);
+    // g_menu_append_item(s2, item_sh); // Re-enable when implemented
+    
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(s2));
+    g_object_unref(s2);
+    
+    /* Split actions - disabled for now or no-op */
+    GSimpleAction *act_sh = g_simple_action_new("split-h", NULL);
+    g_simple_action_set_enabled(act_sh, FALSE);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_sh));
+    
+    GSimpleAction *act_sv = g_simple_action_new("split-v", NULL);
+    g_simple_action_set_enabled(act_sv, FALSE);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_sv));
+
+    GSimpleAction *act_nw = g_simple_action_new("new-window", NULL);
+    g_signal_connect(act_nw, "activate", G_CALLBACK(on_context_menu_move_new_window), self);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_nw));
+
+    /* Section 3: Closing */
+    GMenu *s3 = g_menu_new();
+    g_menu_append(s3, "Close Tabs to Left", "ctx.close-left");
+    g_menu_append(s3, "Close Tabs to Right", "ctx.close-right");
+    g_menu_append(s3, "Close Other Tabs", "ctx.close-other");
+    g_menu_append(s3, "Close", "ctx.close");
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(s3));
+    g_object_unref(s3);
+    
+    GSimpleAction *act_cl = g_simple_action_new("close-left", NULL);
+    g_signal_connect(act_cl, "activate", G_CALLBACK(on_context_menu_close_left), self);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_cl));
+    
+    GSimpleAction *act_cr = g_simple_action_new("close-right", NULL);
+    g_signal_connect(act_cr, "activate", G_CALLBACK(on_context_menu_close_right), self);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_cr));
+    
+    GSimpleAction *act_co = g_simple_action_new("close-other", NULL);
+    g_signal_connect(act_co, "activate", G_CALLBACK(on_context_menu_close_other), self);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_co));
+    
+    GSimpleAction *act_c = g_simple_action_new("close", NULL);
+    g_signal_connect(act_c, "activate", G_CALLBACK(on_context_menu_close), self);
+    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_c));
+
+    GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    gtk_widget_set_parent(popover, GTK_WIDGET(self));
+    gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
+    
+    GdkRectangle rect = { (int)x, (int)y, 1, 1 };
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    
+    gtk_widget_insert_action_group(popover, "ctx", G_ACTION_GROUP(group));
+    gtk_popover_popup(GTK_POPOVER(popover));
+    
+    g_object_unref(menu);
+    g_object_unref(group);
 }
 
 GtkWidget *
