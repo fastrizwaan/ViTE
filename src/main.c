@@ -103,117 +103,202 @@ on_open_btn_clicked(GtkButton *btn, gpointer user_data)
 
 static void update_window_title_for_tab(ViteTab *tab);
 
+/* ============================================================================
+ * Widget Lifecycle Helper Functions
+ * These provide safe, consistent patterns for GtkStack widget manipulation.
+ * ============================================================================ */
+
+/**
+ * Safely removes a child from a GtkStack with transition locking.
+ * Prevents snapshot assertions by disabling transitions during removal.
+ */
+static void
+stack_safe_remove_child(GtkStack *stack, GtkWidget *child)
+{
+    if (!stack || !child) return;
+    
+    guint dur = gtk_stack_get_transition_duration(stack);
+    gtk_stack_set_transition_duration(stack, 0);
+    gtk_widget_set_visible(child, FALSE);
+    gtk_widget_unparent(child);
+    gtk_stack_set_transition_duration(stack, dur);
+}
+
+/**
+ * Safely adds a child to a GtkStack and makes it visible.
+ * Prevents snapshot assertions by disabling transitions during addition.
+ * Always generates a unique name to avoid collisions.
+ */
+static void
+stack_safe_add_child(GtkStack *stack, GtkWidget *child, const char *base_name)
+{
+    if (!stack || !child) return;
+    
+    /* If already parented to this stack, just make visible */
+    if (gtk_widget_get_parent(child) == GTK_WIDGET(stack)) {
+        gtk_widget_set_visible(child, TRUE);
+        gtk_stack_set_visible_child(stack, child);
+        return;
+    }
+    
+    guint dur = gtk_stack_get_transition_duration(stack);
+    gtk_stack_set_transition_duration(stack, 0);
+    
+    /* Always generate unique name to prevent any collision */
+    char name[128];
+    snprintf(name, sizeof(name), "%s_%u", base_name, g_random_int());
+    
+    gtk_stack_add_named(stack, child, name);
+    gtk_widget_set_visible(child, TRUE);
+    gtk_stack_set_visible_child(stack, child);
+    gtk_stack_set_transition_duration(stack, dur);
+}
+
+/**
+ * Callback for deferred focus restoration.
+ * Runs after the current event loop iteration when hierarchy is stable.
+ */
+static gboolean
+focus_widget_idle_cb(gpointer user_data)
+{
+    GtkWidget *widget = GTK_WIDGET(user_data);
+    if (widget && GTK_IS_WIDGET(widget)) {
+        GtkRoot *root = gtk_widget_get_root(widget);
+        if (root && GTK_IS_WINDOW(root)) {
+            gtk_widget_grab_focus(widget);
+        }
+    }
+    g_object_unref(widget);
+    return G_SOURCE_REMOVE;
+}
+
+/**
+ * Schedules focus restoration to run after the current event loop.
+ * This avoids gtk_window_get_focus assertions during hierarchy changes.
+ */
+static void
+defer_focus(GtkWidget *widget)
+{
+    if (widget && GTK_IS_WIDGET(widget)) {
+        g_object_ref(widget);
+        g_idle_add(focus_widget_idle_cb, widget);
+    }
+}
 
 
 /* Retry logic with correct pre-fetch */
 static void
 handle_view_close(GtkWidget *overlay) {
-    ViteWindow *win = g_object_get_data(G_OBJECT(overlay), "vite-window");
-    GtkWidget *parent = gtk_widget_get_parent(overlay);
+    if (!overlay || !GTK_IS_WIDGET(overlay)) return;
     
+    ViteWindow *win = g_object_get_data(G_OBJECT(overlay), "vite-window");
+    if (!win) return;
+    
+    GtkWidget *parent = gtk_widget_get_parent(overlay);
+    if (!parent) return;
+    
+    /* Case 1: Overlay is direct child of Stack (closing last split or single view) */
     if (GTK_IS_STACK(parent)) {
          GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
          for (GList *l = tabs; l != NULL; l = l->next) {
-             ViteTab *t = VITE_TAB(l->data);
-             if (g_object_get_data(G_OBJECT(t), "page") == overlay) {
-                 vite_tab_bar_remove_tab(win->tab_bar, t);
-                 break;
-             }
+              ViteTab *t = VITE_TAB(l->data);
+              if (g_object_get_data(G_OBJECT(t), "page") == overlay) {
+                   vite_tab_bar_remove_tab(win->tab_bar, t);
+                   break;
+              }
          }
          g_list_free(tabs);
          return;
     }
     
-    if (GTK_IS_PANED(parent)) {
-         GtkPaned *paned = GTK_PANED(parent);
-         GtkWidget *grandparent = gtk_widget_get_parent(GTK_WIDGET(paned));
-         
-         GtkWidget *sibling = (gtk_paned_get_start_child(paned) == overlay) ? 
-                               gtk_paned_get_end_child(paned) : 
-                               gtk_paned_get_start_child(paned);
-         
-         if (!sibling) {
-             /* Should not happen if split correctly, but safe fallback: just remove paned */
-             gtk_widget_unparent(GTK_WIDGET(paned));
-             return;
-         }
-         g_object_ref(sibling);
-         
-         /* Hide widgets to prevent snapshot issues */
-         gtk_widget_set_visible(sibling, FALSE);
-         gtk_widget_set_visible(overlay, FALSE); /* Hide the closing view too */
-         gtk_widget_set_visible(GTK_WIDGET(paned), FALSE);
-         
-         /* CRITICAL: We must determine where 'paned' is in grandparent BEFORE unparenting it */
-         gboolean paned_was_start = FALSE;
-         if (GTK_IS_PANED(grandparent)) {
-              paned_was_start = (gtk_paned_get_start_child(GTK_PANED(grandparent)) == GTK_WIDGET(paned));
-         }
-         
-         /* Detach sibling from the dying paned */
-         gtk_widget_unparent(sibling);
-         
-         /* Detect owning tab if at root */
-         ViteTab *owning_tab = NULL;
+    /* Case 2: Overlay is child of Paned (closing one side of split) */
+    if (!GTK_IS_PANED(parent)) return;
+    
+    GtkPaned *paned = GTK_PANED(parent);
+    GtkWidget *grandparent = gtk_widget_get_parent(GTK_WIDGET(paned));
+    if (!grandparent) return;
+    
+    /* Find the sibling (the other child of the paned) */
+    GtkWidget *sibling = (gtk_paned_get_start_child(paned) == overlay) 
+                          ? gtk_paned_get_end_child(paned) 
+                          : gtk_paned_get_start_child(paned);
+    
+    if (!sibling) {
+         /* Fallback: just remove the paned */
          if (GTK_IS_STACK(grandparent)) {
-             GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
-             for (GList *l = tabs; l != NULL; l = l->next) {
-                 ViteTab *t = VITE_TAB(l->data);
-                 GtkWidget *t_page = g_object_get_data(G_OBJECT(t), "page");
-                 if (t_page == GTK_WIDGET(paned)) {
-                     owning_tab = t;
-                     break;
-                 }
-             }
-             g_list_free(tabs);
+              stack_safe_remove_child(GTK_STACK(grandparent), GTK_WIDGET(paned));
+         } else {
+              gtk_widget_unparent(GTK_WIDGET(paned));
          }
-         
-         /* Now destroy the paned */
-         gtk_widget_unparent(GTK_WIDGET(paned));
-         
-         if (owning_tab) {
-             /* We are at stack level */
-             char id[32];
-             sprintf(id, "page_%p", sibling);
-             
-             GtkWidget *collision = gtk_stack_get_child_by_name(GTK_STACK(grandparent), id);
-             if (collision) {
-                 /* Check if collision is actually the sibling and if it is parented correctly */
-                 if (collision == sibling && gtk_widget_get_parent(sibling) == grandparent) {
-                     /* Sibling is already in stack correctly. */
-                 } else {
-                      sprintf(id, "page_%p_u%u", sibling, g_random_int());
-                      gtk_stack_add_named(GTK_STACK(grandparent), sibling, id);
-                 }
-             } else {
-                 gtk_stack_add_named(GTK_STACK(grandparent), sibling, id);
-             }
-             
-             g_object_set_data(G_OBJECT(owning_tab), "page", sibling);
-             
-             /* Ensure visibility TRUE before setting as visible child? */
-             gtk_widget_set_visible(sibling, TRUE);
-             gtk_stack_set_visible_child(GTK_STACK(grandparent), sibling);
-         } else if (GTK_IS_PANED(grandparent)) {
-              /* Restore sibling to the slot passing 'paned' occupied */
-              if (paned_was_start)
-                  gtk_paned_set_start_child(GTK_PANED(grandparent), sibling);
-              else
-                  gtk_paned_set_end_child(GTK_PANED(grandparent), sibling);
-              gtk_widget_set_visible(sibling, TRUE);
-         }
-         
-         gtk_widget_set_visible(sibling, TRUE);
-         
-         /* Restore focus to the surviving sibling */
-         GtkWidget *survivor_editor = get_editor_from_page(sibling);
-         if (survivor_editor) {
-             gtk_widget_grab_focus(survivor_editor);
-         }
-         
-         g_object_unref(sibling);
+         return;
     }
+    
+    /* Hold reference to sibling during reparenting */
+    g_object_ref(sibling);
+    
+    /* Hide all involved widgets */
+    gtk_widget_set_visible(sibling, FALSE);
+    gtk_widget_set_visible(overlay, FALSE);
+    gtk_widget_set_visible(GTK_WIDGET(paned), FALSE);
+    
+    /* Determine paned's position in grandparent (for nested splits) */
+    gboolean paned_was_start = FALSE;
+    if (GTK_IS_PANED(grandparent)) {
+         paned_was_start = (gtk_paned_get_start_child(GTK_PANED(grandparent)) == GTK_WIDGET(paned));
+    }
+    
+    /* Detach sibling from paned */
+    gtk_widget_unparent(sibling);
+    
+    /* Find owning tab if grandparent is Stack */
+    ViteTab *owning_tab = NULL;
+    if (GTK_IS_STACK(grandparent)) {
+         GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+         for (GList *l = tabs; l != NULL; l = l->next) {
+              ViteTab *t = VITE_TAB(l->data);
+              if (g_object_get_data(G_OBJECT(t), "page") == GTK_WIDGET(paned)) {
+                   owning_tab = t;
+                   break;
+              }
+         }
+         g_list_free(tabs);
+    }
+    
+    /* Remove the paned using helper if Stack, else directly */
+    if (GTK_IS_STACK(grandparent)) {
+         stack_safe_remove_child(GTK_STACK(grandparent), GTK_WIDGET(paned));
+    } else {
+         gtk_widget_unparent(GTK_WIDGET(paned));
+    }
+    
+    /* Reparent sibling */
+    if (owning_tab && GTK_IS_STACK(grandparent)) {
+         char id[64];
+         snprintf(id, sizeof(id), "page_%p", (void *)sibling);
+         
+         /* Use helper to add sibling to stack */
+         stack_safe_add_child(GTK_STACK(grandparent), sibling, id);
+         
+         /* Update tab's page pointer */
+         g_object_set_data(G_OBJECT(owning_tab), "page", sibling);
+    } else if (GTK_IS_PANED(grandparent)) {
+         /* Restore sibling to grandparent paned */
+         if (paned_was_start)
+              gtk_paned_set_start_child(GTK_PANED(grandparent), sibling);
+         else
+              gtk_paned_set_end_child(GTK_PANED(grandparent), sibling);
+         gtk_widget_set_visible(sibling, TRUE);
+    }
+    
+    /* Defer focus restoration to avoid window assertions */
+    GtkWidget *survivor_editor = get_editor_from_page(sibling);
+    if (survivor_editor) {
+         defer_focus(survivor_editor);
+    }
+    
+    g_object_unref(sibling);
 }
+
 
 static void on_view_close_clicked(GtkButton *btn, GtkWidget *overlay) {
     handle_view_close(overlay);
@@ -254,7 +339,11 @@ split_view(ViteWindow *win, GtkOrientation orientation)
     GtkWidget *page_root = g_object_get_data(G_OBJECT(active_tab), "page");
     if (!page_root) return;
     
-    GtkWidget *focus = gtk_window_get_focus(win->window);
+    /* Find the target overlay to split (based on focus) */
+    GtkWidget *focus = NULL;
+    if (win->window && GTK_IS_WINDOW(win->window)) {
+        focus = gtk_window_get_focus(win->window);
+    }
     GtkWidget *target = NULL;
     GtkWidget *iter = focus;
     
@@ -268,10 +357,12 @@ split_view(ViteWindow *win, GtkOrientation orientation)
     if (!target && gtk_widget_has_css_class(page_root, "view-split")) target = page_root;
     if (!target) return;
     
+    /* Get document from current editor */
     GtkWidget *scrolled = gtk_overlay_get_child(GTK_OVERLAY(target));
     GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
     Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
     
+    /* Create new editor view */
     GtkWidget *new_editor = editor_widget_new();
     editor_widget_set_document(EDITOR_WIDGET(new_editor), doc);
     
@@ -279,7 +370,10 @@ split_view(ViteWindow *win, GtkOrientation orientation)
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(new_scrolled), new_editor);
     GtkWidget *new_overlay = create_view_container(win, new_scrolled, TRUE);
     
+    /* Determine parent context */
     GtkWidget *parent = gtk_widget_get_parent(target);
+    if (!parent) return;
+    
     gboolean was_start = FALSE;
     gboolean is_root = GTK_IS_STACK(parent);
     
@@ -287,37 +381,39 @@ split_view(ViteWindow *win, GtkOrientation orientation)
         was_start = (gtk_paned_get_start_child(GTK_PANED(parent)) == target);
     }
     
+    /* Hold reference during reparenting */
     g_object_ref(target);
     
-    guint transition_dur = 0;
+    /* Remove target from parent using helper if Stack */
+    gtk_widget_set_visible(target, FALSE);
     if (is_root) {
-        transition_dur = gtk_stack_get_transition_duration(GTK_STACK(parent));
-        gtk_stack_set_transition_duration(GTK_STACK(parent), 0);
+        stack_safe_remove_child(GTK_STACK(parent), target);
+    } else {
+        gtk_widget_unparent(target);
     }
-
-    gtk_widget_set_visible(target, FALSE); /* Hide to prevent snapshot issues during move */
-    gtk_widget_unparent(target);
     
+    /* Create new paned container */
     GtkWidget *paned = gtk_paned_new(orientation);
-    
     gtk_paned_set_start_child(GTK_PANED(paned), target);
     gtk_paned_set_end_child(GTK_PANED(paned), new_overlay);
     
+    /* Add paned to parent */
     if (is_root) {
-        char id[32];
-        sprintf(id, "page_%p", paned);
-        gtk_stack_add_named(GTK_STACK(parent), paned, id);
+        char id[64];
+        snprintf(id, sizeof(id), "page_%p", (void *)paned);
+        stack_safe_add_child(GTK_STACK(parent), paned, id);
         g_object_set_data(G_OBJECT(active_tab), "page", paned);
-        gtk_stack_set_visible_child(GTK_STACK(parent), paned);
-        
-        gtk_stack_set_transition_duration(GTK_STACK(parent), transition_dur);
     } else if (GTK_IS_PANED(parent)) {
-        if (was_start) gtk_paned_set_start_child(GTK_PANED(parent), paned);
-        else gtk_paned_set_end_child(GTK_PANED(parent), paned);
+        if (was_start) 
+            gtk_paned_set_start_child(GTK_PANED(parent), paned);
+        else 
+            gtk_paned_set_end_child(GTK_PANED(parent), paned);
     }
     
+    /* Restore visibility */
     gtk_widget_set_visible(target, TRUE);
     gtk_widget_set_visible(paned, TRUE);
+    
     g_object_unref(target);
 }
 
@@ -331,7 +427,10 @@ on_preferences_action(GSimpleAction *action, GVariant *parameter, gpointer user_
     if (!win) return;
     
     /* Try to find editor from focus first */
-    GtkWidget *focus = gtk_window_get_focus(win->window);
+    GtkWidget *focus = NULL;
+    if (win->window && GTK_IS_WINDOW(win->window)) {
+        focus = gtk_window_get_focus(win->window);
+    }
     GtkWidget *editor = NULL;
     
     GtkWidget *iter = focus;
@@ -652,52 +751,40 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
 {
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
     if (!root) return;
+    
     ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
     if (!win) return;
 
-    /* Keep page alive */
+    /* Get the page widget associated with this tab */
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    GtkWidget *parent = NULL;
+    
     if (page && GTK_IS_WIDGET(page)) {
         g_object_ref(page);
+        parent = gtk_widget_get_parent(page);
     } else {
         page = NULL;
     }
     
-    /* Lock Stack transitions to prevent snapshotting the outgoing widget during removal */
-    GtkWidget *parent = NULL;
-    guint transition_dur = 0;
-    
-    if (page && GTK_IS_WIDGET(page)) {
-        parent = gtk_widget_get_parent(page);
-    }
-
-    if (parent && GTK_IS_STACK(parent)) {
-         transition_dur = gtk_stack_get_transition_duration(GTK_STACK(parent));
-         gtk_stack_set_transition_duration(GTK_STACK(parent), 0);
-    }
-    
-    /* Remove tab first. This updates selection in TabBar/Stack. 
-       With duration 0, this is an instant switch, dropping 'page' from render list. */
+    /* Remove tab from tab bar (this triggers selection change) */
     vite_tab_bar_remove_tab(win->tab_bar, tab);
     
-    if (parent && GTK_IS_STACK(parent)) {
-         gtk_stack_set_transition_duration(GTK_STACK(parent), transition_dur);
+    /* Safely remove page from stack */
+    if (page && parent) {
+        if (GTK_IS_STACK(parent)) {
+            stack_safe_remove_child(GTK_STACK(parent), page);
+        } else {
+            gtk_widget_unparent(page);
+        }
     }
     
-    /* Now safely unparent the page */
     if (page) {
-        if (parent) {
-             gtk_widget_unparent(page);
-        }
         g_object_unref(page);
     }
     
+    /* Close window if no tabs remain */
     if (vite_tab_bar_get_n_tabs(win->tab_bar) == 0) { 
          if (win->window) {
-              /* Reset split mode state to none since no tabs */
-              /* GAction check? */
-              
-              /* Standard behavior: close window */
               gtk_window_close(win->window);
          }
     }
@@ -1269,23 +1356,27 @@ move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     if (!page) return;
     
-    /* Remove from source window */
+    /* Hold references during transfer */
     g_object_ref(tab);
     g_object_ref(page);
     
+    /* Remove from source window using safe helper */
     vite_tab_bar_remove_tab(source_win->tab_bar, tab);
-    gtk_stack_remove(source_win->stack, page);
+    if (source_win->stack && GTK_IS_STACK(source_win->stack)) {
+        stack_safe_remove_child(source_win->stack, page);
+    }
     
-    /* Add to target window */
-    char id[32];
-    sprintf(id, "page_%p", page);
-    gtk_stack_add_named(target_win->stack, page, id);
+    /* Add to target window using safe helper */
+    char id[64];
+    snprintf(id, sizeof(id), "page_%p", (void *)page);
+    if (target_win->stack && GTK_IS_STACK(target_win->stack)) {
+        stack_safe_add_child(target_win->stack, page, id);
+    }
     
     if (position < 0) position = vite_tab_bar_get_n_tabs(target_win->tab_bar);
     vite_tab_bar_insert_tab(target_win->tab_bar, tab, position);
     
     /* Activate */
-    gtk_stack_set_visible_child(target_win->stack, page);
     vite_tab_bar_set_active_tab(target_win->tab_bar, tab);
     
     update_window_title_for_tab(tab);
@@ -1296,7 +1387,10 @@ move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
     
     /* Check if source window empty */
     if (vite_tab_bar_get_n_tabs(source_win->tab_bar) == 0) {
-        /* destroy window? */
+        /* Close source window if empty */
+        if (source_win->window && GTK_IS_WINDOW(source_win->window)) {
+            gtk_window_close(source_win->window);
+        }
     }
 }
 
@@ -1388,8 +1482,8 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
         gtk_stack_set_visible_child(win->stack, page_root);
     }
     
-    /* Use idle to ensure focus sticks after stack transition */
-    g_idle_add_once((GSourceOnceFunc)gtk_widget_grab_focus, editor);
+    /* Use defer_focus to safely grab focus after hierarchy is stable */
+    defer_focus(editor);
 
     update_window_title_for_tab(VITE_TAB(tab));
 }
@@ -1678,8 +1772,7 @@ on_split_mode_change(GSimpleAction *action, GVariant *value, gpointer user_data)
                Arbitrarily close the 'new' side (usually end/bottom)? 
                Or just trigger handle_view_close on one of the children? */
              GtkWidget *child2 = gtk_paned_get_end_child(GTK_PANED(current_split_widget));
-             if (child2) {
-                 /* Verify it's a view-split overlay or contains one */
+             if (child2 && GTK_IS_WIDGET(child2) && gtk_widget_has_css_class(child2, "view-split")) {
                  handle_view_close(child2); 
              }
         }
@@ -1693,7 +1786,7 @@ on_split_mode_change(GSimpleAction *action, GVariant *value, gpointer user_data)
             if (cur_orient != req_orient) {
                  /* Different orientation! Reset (Close) then Split. */
                  GtkWidget *child2 = gtk_paned_get_end_child(GTK_PANED(current_split_widget));
-                 if (child2) {
+                 if (child2 && GTK_IS_WIDGET(child2) && gtk_widget_has_css_class(child2, "view-split")) {
                      handle_view_close(child2);
                      /* Now we are 'none'. Proceed to split. */
                      /* Force update handling? active_tab->page might have changed! Refresh. */
@@ -1815,8 +1908,8 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
                                update_window_title_for_tab(tab);
                                gtk_window_present(target_window->window);
                                
-                               /* Ensure focus is grabbed */
-                               g_idle_add_once((GSourceOnceFunc)gtk_widget_grab_focus, editor);
+                               /* Ensure focus is grabbed safely */
+                               defer_focus(editor);
                                
                                return;
                            }
