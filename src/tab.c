@@ -195,11 +195,26 @@ on_visual_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
     GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(root));
     GdkDevice *device = gdk_seat_get_pointer(gdk_display_get_default_seat(gdk_surface_get_display(surface)));
     double cursor_x, cursor_y;
-    gdk_surface_get_device_position(surface, device, &cursor_x, &cursor_y, NULL);
+    gboolean inside = gdk_surface_get_device_position(surface, device, &cursor_x, &cursor_y, NULL);
+    
+    if (!inside) {
+        self->is_detached = TRUE;
+        /* If outside, we can't really update the visual overlay position relative to window easily, 
+           but that's fine, the cursor has the drag icon. 
+           We just mark it detached so drop triggers new window. */
+        return G_SOURCE_CONTINUE;
+    }
     
     /* Check threshold for detachment */
     double v_offset = fabs(cursor_y - self->cursor_start_y);
-    if (v_offset > 20.0) {
+    
+    /* Also check if outside window bounds */
+    int win_width = gtk_widget_get_width(root);
+    int win_height = gtk_widget_get_height(root);
+    
+    if (v_offset > 20.0 || 
+        cursor_x < 0 || cursor_x > win_width || 
+        cursor_y < 0 || cursor_y > win_height) {
         self->is_detached = TRUE;
     } else if (fabs(cursor_y - self->tab_bar_y) < 5.0) {
         /* Re-attach if cursor comes back near tab bar */
@@ -293,14 +308,45 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
         self->visual_picture = NULL;
     }
     
-    self->is_detached = FALSE;
-    
     /* Notify tab bar that drag ended */
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
     if (tab_bar) {
-        vite_tab_bar_clear_dragging_tab(tab_bar);
+        gboolean moved_to_new = FALSE;
+        
+        /* Robustness Check: Verify cursor position right now */
+        GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(GTK_WIDGET(self)));
+        if (root) {
+             GdkSurface *surface = gtk_native_get_surface(GTK_NATIVE(root));
+             GdkDevice *device = gdk_seat_get_pointer(gdk_display_get_default_seat(gdk_surface_get_display(surface)));
+             double cursor_x, cursor_y;
+             gboolean inside = gdk_surface_get_device_position(surface, device, &cursor_x, &cursor_y, NULL);
+             
+             if (!inside) {
+                 g_print("[DRAG] Drag end: Cursor outside surface -> Force Detach\n");
+                 self->is_detached = TRUE;
+             } else {
+                 /* Check bounds manually too */
+                 int w = gtk_widget_get_width(root);
+                 int h = gtk_widget_get_height(root);
+                 if (cursor_x < 0 || cursor_x > w || cursor_y < 0 || cursor_y > h) {
+                     g_print("[DRAG] Drag end: Cursor outside bounds (%.1f, %.1f) -> Force Detach\n", cursor_x, cursor_y);
+                     self->is_detached = TRUE;
+                 }
+             }
+        }
+    
+        /* If drag was not accepted (delete_data is FALSE) AND we are detached > 20px */
+        if (!delete_data && self->is_detached) {
+            g_print("[DRAG] Drag ended outside - triggering move-to-new-window\n");
+            g_signal_emit_by_name(self, "move-to-new-window");
+            moved_to_new = TRUE;
+        }
+    
+        vite_tab_bar_clear_dragging_tab(tab_bar, delete_data || moved_to_new);
     }
     
+    self->is_detached = FALSE;
+
     /* Remove the dragging CSS class */
     gtk_widget_remove_css_class(GTK_WIDGET(self), "dragging");
 }
@@ -440,6 +486,24 @@ on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, Vi
     }
     
     if (tab_bar) {
+        /* Check if tab is foreign by looking for it in my tab bar's list */
+        ViteTab *dragged_tab = VITE_TAB(g_value_get_object(value));
+        GList *tabs = vite_tab_bar_get_tabs(tab_bar);
+        gboolean is_local = (g_list_find(tabs, dragged_tab) != NULL);
+        
+        if (!is_local) {
+             /* Foreign drop! Emit signal on my tab bar */
+             /* Get my position to drop *before* or *after* me?
+                Usually drop on left half = before, right half = after.
+                For simplicity, let's insert at my position (pushing me right) */
+             int my_pos = g_list_index(tabs, self);
+             g_print("[TAB DROP] Foreign tab dropped on non-empty bar at pos %d\n", my_pos);
+             vite_tab_bar_drop_foreign_tab(tab_bar, dragged_tab, my_pos);
+             g_list_free(tabs);
+             return TRUE;
+        }
+        g_list_free(tabs);
+    
         vite_tab_bar_notify_drop_done(tab_bar);
     }
     
