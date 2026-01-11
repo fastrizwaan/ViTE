@@ -804,27 +804,16 @@ on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     g_signal_connect(act_mr, "activate", G_CALLBACK(on_context_menu_move_right), self);
     g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_mr));
     
-    /* Section 2: Split View (Placeholder) & New Window */
+    /* Section 2: Split View & New Window */
     GMenu *s2 = g_menu_new();
-    g_menu_append(s2, "Split View Horizontally", "ctx.split-h");
-    g_menu_append(s2, "Split View Vertically", "ctx.split-v");
+    g_menu_append(s2, "Split View Horizontally", "win.split-right");
+    g_menu_append(s2, "Split View Vertically", "win.split-down");
     g_menu_append(s2, "Move to New Window", "ctx.new-window");
-    
-    GMenuItem *item_sh = g_menu_item_new("Split View Horizontally", "ctx.split-h");
-    g_menu_item_set_attribute(item_sh, "disabled", "b", TRUE);
-    // g_menu_append_item(s2, item_sh); // Re-enable when implemented
     
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s2));
     g_object_unref(s2);
     
-    /* Split actions - disabled for now or no-op */
-    GSimpleAction *act_sh = g_simple_action_new("split-h", NULL);
-    g_simple_action_set_enabled(act_sh, FALSE);
-    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_sh));
-    
-    GSimpleAction *act_sv = g_simple_action_new("split-v", NULL);
-    g_simple_action_set_enabled(act_sv, FALSE);
-    g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_sv));
+    /* Split actions - Handled by window actions (win.split-right/down) */
 
     GSimpleAction *act_nw = g_simple_action_new("new-window", NULL);
     g_signal_connect(act_nw, "activate", G_CALLBACK(on_context_menu_move_new_window), self);
