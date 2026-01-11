@@ -137,11 +137,11 @@ handle_view_close(GtkWidget *overlay) {
              gtk_widget_unparent(GTK_WIDGET(paned));
              return;
          }
-         
          g_object_ref(sibling);
          
-         /* Hide widgets to prevent snapshot issues during hierarchy change */
+         /* Hide widgets to prevent snapshot issues */
          gtk_widget_set_visible(sibling, FALSE);
+         gtk_widget_set_visible(overlay, FALSE); /* Hide the closing view too */
          gtk_widget_set_visible(GTK_WIDGET(paned), FALSE);
          
          /* CRITICAL: We must determine where 'paned' is in grandparent BEFORE unparenting it */
@@ -159,7 +159,8 @@ handle_view_close(GtkWidget *overlay) {
              GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
              for (GList *l = tabs; l != NULL; l = l->next) {
                  ViteTab *t = VITE_TAB(l->data);
-                 if (g_object_get_data(G_OBJECT(t), "page") == GTK_WIDGET(paned)) {
+                 GtkWidget *t_page = g_object_get_data(G_OBJECT(t), "page");
+                 if (t_page == GTK_WIDGET(paned)) {
                      owning_tab = t;
                      break;
                  }
@@ -287,13 +288,19 @@ split_view(ViteWindow *win, GtkOrientation orientation)
     }
     
     g_object_ref(target);
+    
+    guint transition_dur = 0;
+    if (is_root) {
+        transition_dur = gtk_stack_get_transition_duration(GTK_STACK(parent));
+        gtk_stack_set_transition_duration(GTK_STACK(parent), 0);
+    }
+
     gtk_widget_set_visible(target, FALSE); /* Hide to prevent snapshot issues during move */
     gtk_widget_unparent(target);
     
     GtkWidget *paned = gtk_paned_new(orientation);
     
     gtk_paned_set_start_child(GTK_PANED(paned), target);
-    gtk_widget_set_visible(target, TRUE); /* Restore visibility */
     gtk_paned_set_end_child(GTK_PANED(paned), new_overlay);
     
     if (is_root) {
@@ -302,11 +309,15 @@ split_view(ViteWindow *win, GtkOrientation orientation)
         gtk_stack_add_named(GTK_STACK(parent), paned, id);
         g_object_set_data(G_OBJECT(active_tab), "page", paned);
         gtk_stack_set_visible_child(GTK_STACK(parent), paned);
+        
+        gtk_stack_set_transition_duration(GTK_STACK(parent), transition_dur);
     } else if (GTK_IS_PANED(parent)) {
         if (was_start) gtk_paned_set_start_child(GTK_PANED(parent), paned);
         else gtk_paned_set_end_child(GTK_PANED(parent), paned);
     }
     
+    gtk_widget_set_visible(target, TRUE);
+    gtk_widget_set_visible(paned, TRUE);
     g_object_unref(target);
 }
 
@@ -515,7 +526,34 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
     vite_tab_bar_set_active_tab(win->tab_bar, tab);
     
     /* Update title based on active view in this page */
+    /* Update title based on active view in this page */
     update_window_title_for_tab(tab);
+    
+    /* Sync Split Mode State */
+    GAction *act = g_action_map_lookup_action(G_ACTION_MAP(win->window), "split-mode");
+    if (act && G_IS_SIMPLE_ACTION(act)) {
+         const char *state = "none";
+         GtkWidget *page_root = page;
+         if (GTK_IS_PANED(page_root) || (gtk_widget_get_parent(page_root) && GTK_IS_PANED(gtk_widget_get_parent(page_root)))) {
+             /* Check hierarchy more robustly? Step 1580 logic? */
+             /* split_view creates an overlay. But if we split, we replace overlay's parent slot with PANED. */
+             /* Wait, split_view removes 'target' (which is overlay) and puts it into paned. */
+             /* So if page_root (from tab data) is an Overlay, and we split it... */
+             /* The `page` data on tab is NOT updated in split_view? */
+             /* Check split_view logic: */
+             /* It sets tab 'page' data IF is_root (Stack). */
+             /* If page_root became a child of Paned, then page_root is still Overlay. */
+             /* But tab->page pointer might be stale if we destroyed parent? */
+             /* split_view: if Stack was parent, we replace stack child with Paned. And update tab->page to Paned. */
+             /* So if tab->page IS Paned, we are split. */
+             if (GTK_IS_PANED(page_root)) {
+                 GtkOrientation orient = gtk_orientable_get_orientation(GTK_ORIENTABLE(page_root));
+                 state = (orient == GTK_ORIENTATION_HORIZONTAL) ? "right" : "down";
+             }
+         }
+         
+         g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(state));
+    }
 }
 
 static void
@@ -617,29 +655,51 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
     ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
     if (!win) return;
 
+    /* Keep page alive */
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     if (page && GTK_IS_WIDGET(page)) {
-        gtk_widget_unparent(page);
+        g_object_ref(page);
+    } else {
+        page = NULL;
     }
+    
+    /* Lock Stack transitions to prevent snapshotting the outgoing widget during removal */
+    GtkWidget *parent = NULL;
+    guint transition_dur = 0;
+    
+    if (page && GTK_IS_WIDGET(page)) {
+        parent = gtk_widget_get_parent(page);
+    }
+
+    if (parent && GTK_IS_STACK(parent)) {
+         transition_dur = gtk_stack_get_transition_duration(GTK_STACK(parent));
+         gtk_stack_set_transition_duration(GTK_STACK(parent), 0);
+    }
+    
+    /* Remove tab first. This updates selection in TabBar/Stack. 
+       With duration 0, this is an instant switch, dropping 'page' from render list. */
     vite_tab_bar_remove_tab(win->tab_bar, tab);
     
-    if (vite_tab_bar_get_n_tabs(win->tab_bar) == 0) { 
-        if (win->window) {
-             /* If it was the last tab, close the window? 
-                Or create new untitled? 
-                User likely expects window close if all tabs closed? 
-                Or keep empty? 
-                Let's match GEdit/TextEditor behavior: closing last tab closes window usually.
-                But for now let's create untitled to keep window open if it's the only one?
-                Actually, standard behavior is closing window if last tab closed.
-             */
-             /* GtkWindow close? */
-             gtk_window_close(win->window);
-             /* If we want to keep window open with untitled:
-             Document *doc = document_new(NULL);
-             create_new_tab(win, "Untitled", doc);
-             */
+    if (parent && GTK_IS_STACK(parent)) {
+         gtk_stack_set_transition_duration(GTK_STACK(parent), transition_dur);
+    }
+    
+    /* Now safely unparent the page */
+    if (page) {
+        if (parent) {
+             gtk_widget_unparent(page);
         }
+        g_object_unref(page);
+    }
+    
+    if (vite_tab_bar_get_n_tabs(win->tab_bar) == 0) { 
+         if (win->window) {
+              /* Reset split mode state to none since no tabs */
+              /* GAction check? */
+              
+              /* Standard behavior: close window */
+              gtk_window_close(win->window);
+         }
     }
 }
 
@@ -1353,6 +1413,8 @@ on_close_curr_tab_clicked (GtkButton *btn, gpointer user_data)
 }
 
 
+static void on_split_mode_change(GSimpleAction *action, GVariant *value, gpointer user_data);
+
 static ViteWindow *
 setup_window(GtkWindow *window)
 {
@@ -1469,18 +1531,27 @@ setup_window(GtkWindow *window)
     /* Main Menu */
     GMenu *main_menu = g_menu_new();
     
-    /* Section 1: Window Actions */
+    /* Section 1: Window Actions (View, etc) */
     GMenu *s1 = g_menu_new();
     g_menu_append(s1, "New Window", "win.new-window");
+    
+    /* View Submenu */
+    GMenu *view_menu = g_menu_new();
+    
+    /* Split Submenu inside View */
+    GMenu *split_menu = g_menu_new();
+    g_menu_append(split_menu, "Right", "win.split-mode::right");
+    g_menu_append(split_menu, "Down", "win.split-mode::down");
+    g_menu_append(split_menu, "Close", "win.split-mode::none");
+    
+    g_menu_append_submenu(view_menu, "Split", G_MENU_MODEL(split_menu));
+    g_object_unref(split_menu);
+    
+    g_menu_append_submenu(s1, "View", G_MENU_MODEL(view_menu));
+    g_object_unref(view_menu);
+    
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s1));
     g_object_unref(s1);
-    
-    /* Section Split */
-    GMenu *s_split = g_menu_new();
-    g_menu_append(s_split, "Split Right", "win.split-right");
-    g_menu_append(s_split, "Split Down", "win.split-down");
-    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_split));
-    g_object_unref(s_split);
     
     /* Section 2: App Actions */
     GMenu *s2 = g_menu_new();
@@ -1491,8 +1562,7 @@ setup_window(GtkWindow *window)
     /* Actions */
     const GActionEntry win_entries[] = {
         { "new-window", on_new_window_action, NULL, NULL, NULL },
-        { "split-right", on_split_horizontal_action, NULL, NULL, NULL },
-        { "split-down", on_split_vertical_action, NULL, NULL, NULL },
+        { "split-mode", NULL, "s", "'none'", on_split_mode_change },
         { "preferences", on_preferences_action, NULL, NULL, NULL }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
@@ -1568,17 +1638,75 @@ activate(GtkApplication *app, gpointer user_data)
 }
 
 static void
-on_split_horizontal_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_split_mode_change(GSimpleAction *action, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
-    split_view(win, GTK_ORIENTATION_HORIZONTAL);
-}
+    const char *new_state = g_variant_get_string(value, NULL);
+    
+    /* Update state immediately (optimistic) */
+    g_simple_action_set_state(action, value);
+    
+    /* 1. Determine Current State */
+    ViteTab *active_tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!active_tab) return;
+    
+    GtkWidget *page_root = g_object_get_data(G_OBJECT(active_tab), "page");
+    GtkWidget *potential_split = NULL; /* The Paned or Split Overlay */
+    
+    /* Check if page is currently split */
+    /* Assuming Single Split Level: page_root is either Overlay (no split) or Paned (split) or Overlay wrapping Paned?
+       Actually split_view replaces 'target' (overlay) with Paned.
+       And puts 'target' in one child, and new overlay in other.
+       So if 'page_root' is a GtkPaned, we are split. */
+    
+    gboolean is_split = GTK_IS_PANED(page_root) || (gtk_widget_get_parent(page_root) && GTK_IS_PANED(gtk_widget_get_parent(page_root))); 
+    /* Wait, checking hierarchy. */
+    /* If root is stack, page_root is child. */
+    
+    GtkWidget *current_split_widget = NULL;
+    if (GTK_IS_PANED(page_root)) {
+        current_split_widget = page_root;
+    } else {
+        /* Maybe strict single split isn't enforced yet in structure, detecting... */
+        /* If page_root is NOT Paned, it's detecting 'none'. */
+    }
 
-static void
-on_split_vertical_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
-{
-    ViteWindow *win = (ViteWindow *)user_data;
-    split_view(win, GTK_ORIENTATION_VERTICAL);
+    if (g_strcmp0(new_state, "none") == 0) {
+        /* Request: Close Split */
+        if (current_split_widget) {
+            /* We have a pane. We need to close one side. 
+               Arbitrarily close the 'new' side (usually end/bottom)? 
+               Or just trigger handle_view_close on one of the children? */
+             GtkWidget *child2 = gtk_paned_get_end_child(GTK_PANED(current_split_widget));
+             if (child2) {
+                 /* Verify it's a view-split overlay or contains one */
+                 handle_view_close(child2); 
+             }
+        }
+    } else {
+        /* Request: Right or Down */
+        GtkOrientation req_orient = (g_strcmp0(new_state, "right") == 0) ? GTK_ORIENTATION_HORIZONTAL : GTK_ORIENTATION_VERTICAL;
+        
+        if (current_split_widget) {
+            /* Already split. Check orientation. */
+            GtkOrientation cur_orient = gtk_orientable_get_orientation(GTK_ORIENTABLE(current_split_widget));
+            if (cur_orient != req_orient) {
+                 /* Different orientation! Reset (Close) then Split. */
+                 GtkWidget *child2 = gtk_paned_get_end_child(GTK_PANED(current_split_widget));
+                 if (child2) {
+                     handle_view_close(child2);
+                     /* Now we are 'none'. Proceed to split. */
+                     /* Force update handling? active_tab->page might have changed! Refresh. */
+                     /* split_view uses 'active_tab', so it should pick up the new survivor. */
+                     split_view(win, req_orient);
+                 }
+            }
+            /* Else: Same orientation. Do nothing. */
+        } else {
+            /* Not split. Create split. */
+            split_view(win, req_orient);
+        }
+    }
 }
 
 static void

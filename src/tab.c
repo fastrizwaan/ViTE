@@ -805,9 +805,17 @@ on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_mr));
     
     /* Section 2: Split View & New Window */
+    /* Section 2: Split View & New Window */
     GMenu *s2 = g_menu_new();
-    g_menu_append(s2, "Split View Horizontally", "win.split-right");
-    g_menu_append(s2, "Split View Vertically", "win.split-down");
+    
+    GMenu *s2_split = g_menu_new();
+    g_menu_append(s2_split, "Split Right", "win.split-mode::right");
+    g_menu_append(s2_split, "Split Down", "win.split-mode::down");
+    g_menu_append(s2_split, "Close Split", "win.split-mode::none");
+    
+    g_menu_append_submenu(s2, "Split", G_MENU_MODEL(s2_split));
+    g_object_unref(s2_split);
+    
     g_menu_append(s2, "Move to New Window", "ctx.new-window");
     
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s2));
