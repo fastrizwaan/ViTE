@@ -7,12 +7,14 @@
 #include "tab-bar.h"
 #include "tab.h"
 
-typedef struct {
+typedef struct _ViteWindow ViteWindow;
+
+struct _ViteWindow {
     GtkWindow *window;
     ViteTabBar *tab_bar;
     GtkStack *stack;
     AdwWindowTitle *window_title;
-} ViteWindow;
+};
 
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
 static int untitled_count = 1;
@@ -31,6 +33,10 @@ static void save_local_recents(GList *uris);
 static void on_close_recent_btn_clicked(GtkButton *btn, gpointer user_data);
 static void on_open_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer user_data);
 
+static void move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position);
+static void on_split_horizontal_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_split_vertical_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+
 static void
 on_file_opened (GObject* source_object, GAsyncResult* res, gpointer user_data)
 {
@@ -42,6 +48,26 @@ on_file_opened (GObject* source_object, GAsyncResult* res, gpointer user_data)
         g_object_unref(file);
     }
 }
+
+static void split_view(ViteWindow *win, GtkOrientation orientation);
+static GtkWidget *get_editor_from_page(GtkWidget *page);
+static void on_tab_clicked (ViteTab *tab, gpointer user_data);
+static void on_new_tab_clicked_header(GtkButton *btn, gpointer user_data);
+static void on_new_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_preferences_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_overflow_changed(ViteTabBar *bar, gboolean overflowing, gpointer user_data);
+static void on_tab_dropped(ViteTabBar *bar, ViteTab *tab, int position, gpointer user_data);
+static void update_open_tabs_list(GtkWidget *widget, gpointer user_data);
+static GtkWidget *create_view_container(ViteWindow *win, GtkWidget *editor, gboolean show_close);
+static void on_document_modified(Document *doc, gboolean modified, void *user_data);
+static void on_document_content_changed(Document *doc, void *user_data);
+static void on_recent_item_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data);
+static void on_recent_popover_unmap(GtkWidget *popover, gpointer user_data);
+static void on_tab_close_clicked(ViteTab *tab, gpointer user_data);
+static void on_tab_move_to_new_window(ViteTab *tab, gpointer user_data);
+static void load_css(void);
+static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
+static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
 
 static void
 on_open_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer user_data)
@@ -75,19 +101,276 @@ on_open_btn_clicked(GtkButton *btn, gpointer user_data)
     gtk_file_dialog_open_multiple(dialog, win->window, NULL, (GAsyncReadyCallback)on_open_dialog_response, win);
 }
 
+static void update_window_title_for_tab(ViteTab *tab);
+
+
+
+/* Retry logic with correct pre-fetch */
+static void
+handle_view_close(GtkWidget *overlay) {
+    ViteWindow *win = g_object_get_data(G_OBJECT(overlay), "vite-window");
+    GtkWidget *parent = gtk_widget_get_parent(overlay);
+    
+    if (GTK_IS_STACK(parent)) {
+         GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+         for (GList *l = tabs; l != NULL; l = l->next) {
+             ViteTab *t = VITE_TAB(l->data);
+             if (g_object_get_data(G_OBJECT(t), "page") == overlay) {
+                 vite_tab_bar_remove_tab(win->tab_bar, t);
+                 break;
+             }
+         }
+         g_list_free(tabs);
+         return;
+    }
+    
+    if (GTK_IS_PANED(parent)) {
+         GtkPaned *paned = GTK_PANED(parent);
+         GtkWidget *grandparent = gtk_widget_get_parent(GTK_WIDGET(paned));
+         
+         GtkWidget *sibling = (gtk_paned_get_start_child(paned) == overlay) ? 
+                               gtk_paned_get_end_child(paned) : 
+                               gtk_paned_get_start_child(paned);
+         
+         if (!sibling) {
+             /* Should not happen if split correctly, but safe fallback: just remove paned */
+             gtk_widget_unparent(GTK_WIDGET(paned));
+             return;
+         }
+         
+         g_object_ref(sibling);
+         
+         /* Hide widgets to prevent snapshot issues during hierarchy change */
+         gtk_widget_set_visible(sibling, FALSE);
+         gtk_widget_set_visible(GTK_WIDGET(paned), FALSE);
+         
+         /* CRITICAL: We must determine where 'paned' is in grandparent BEFORE unparenting it */
+         gboolean paned_was_start = FALSE;
+         if (GTK_IS_PANED(grandparent)) {
+              paned_was_start = (gtk_paned_get_start_child(GTK_PANED(grandparent)) == GTK_WIDGET(paned));
+         }
+         
+         /* Detach sibling from the dying paned */
+         gtk_widget_unparent(sibling);
+         
+         /* Detect owning tab if at root */
+         ViteTab *owning_tab = NULL;
+         if (GTK_IS_STACK(grandparent)) {
+             GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+             for (GList *l = tabs; l != NULL; l = l->next) {
+                 ViteTab *t = VITE_TAB(l->data);
+                 if (g_object_get_data(G_OBJECT(t), "page") == GTK_WIDGET(paned)) {
+                     owning_tab = t;
+                     break;
+                 }
+             }
+             g_list_free(tabs);
+         }
+         
+         /* Now destroy the paned */
+         gtk_widget_unparent(GTK_WIDGET(paned));
+         
+         if (owning_tab) {
+             /* We are at stack level */
+             char id[32];
+             sprintf(id, "page_%p", sibling);
+             
+             GtkWidget *collision = gtk_stack_get_child_by_name(GTK_STACK(grandparent), id);
+             if (collision) {
+                 /* Check if collision is actually the sibling and if it is parented correctly */
+                 if (collision == sibling && gtk_widget_get_parent(sibling) == grandparent) {
+                     /* Sibling is already in stack correctly. */
+                 } else {
+                      sprintf(id, "page_%p_u%u", sibling, g_random_int());
+                      gtk_stack_add_named(GTK_STACK(grandparent), sibling, id);
+                 }
+             } else {
+                 gtk_stack_add_named(GTK_STACK(grandparent), sibling, id);
+             }
+             
+             g_object_set_data(G_OBJECT(owning_tab), "page", sibling);
+             
+             /* Ensure visibility TRUE before setting as visible child? */
+             gtk_widget_set_visible(sibling, TRUE);
+             gtk_stack_set_visible_child(GTK_STACK(grandparent), sibling);
+         } else if (GTK_IS_PANED(grandparent)) {
+              /* Restore sibling to the slot passing 'paned' occupied */
+              if (paned_was_start)
+                  gtk_paned_set_start_child(GTK_PANED(grandparent), sibling);
+              else
+                  gtk_paned_set_end_child(GTK_PANED(grandparent), sibling);
+              gtk_widget_set_visible(sibling, TRUE);
+         }
+         
+         gtk_widget_set_visible(sibling, TRUE);
+         
+         /* Restore focus to the surviving sibling */
+         GtkWidget *survivor_editor = get_editor_from_page(sibling);
+         if (survivor_editor) {
+             gtk_widget_grab_focus(survivor_editor);
+         }
+         
+         g_object_unref(sibling);
+    }
+}
+
+static void on_view_close_clicked(GtkButton *btn, GtkWidget *overlay) {
+    handle_view_close(overlay);
+}
+
+static GtkWidget *
+create_view_container(ViteWindow *win, GtkWidget *editor, gboolean show_close)
+{
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_widget_add_css_class(overlay, "view-split");
+    
+    gtk_widget_set_hexpand(editor, TRUE);
+    gtk_widget_set_vexpand(editor, TRUE);
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), editor);
+    
+    g_object_set_data(G_OBJECT(overlay), "vite-window", win);
+    
+    if (show_close) {
+        GtkWidget *btn = gtk_button_new_from_icon_name("window-close-symbolic");
+        gtk_widget_add_css_class(btn, "split-close-btn");
+        gtk_widget_set_halign(btn, GTK_ALIGN_END);
+        gtk_widget_set_valign(btn, GTK_ALIGN_START);
+        gtk_widget_set_margin_top(btn, 8);
+        gtk_widget_set_margin_end(btn, 8);
+        
+        g_signal_connect(btn, "clicked", G_CALLBACK(on_view_close_clicked), overlay);
+        gtk_overlay_add_overlay(GTK_OVERLAY(overlay), btn);
+    }
+    return overlay;
+}
+
+static void
+split_view(ViteWindow *win, GtkOrientation orientation)
+{
+    ViteTab *active_tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!active_tab) return;
+    
+    GtkWidget *page_root = g_object_get_data(G_OBJECT(active_tab), "page");
+    if (!page_root) return;
+    
+    GtkWidget *focus = gtk_window_get_focus(win->window);
+    GtkWidget *target = NULL;
+    GtkWidget *iter = focus;
+    
+    while (iter && iter != page_root) {
+        if (gtk_widget_has_css_class(iter, "view-split")) {
+            target = iter;
+            break;
+        }
+        iter = gtk_widget_get_parent(iter);
+    }
+    if (!target && gtk_widget_has_css_class(page_root, "view-split")) target = page_root;
+    if (!target) return;
+    
+    GtkWidget *scrolled = gtk_overlay_get_child(GTK_OVERLAY(target));
+    GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
+    Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+    
+    GtkWidget *new_editor = editor_widget_new();
+    editor_widget_set_document(EDITOR_WIDGET(new_editor), doc);
+    
+    GtkWidget *new_scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(new_scrolled), new_editor);
+    GtkWidget *new_overlay = create_view_container(win, new_scrolled, TRUE);
+    
+    GtkWidget *parent = gtk_widget_get_parent(target);
+    gboolean was_start = FALSE;
+    gboolean is_root = GTK_IS_STACK(parent);
+    
+    if (GTK_IS_PANED(parent)) {
+        was_start = (gtk_paned_get_start_child(GTK_PANED(parent)) == target);
+    }
+    
+    g_object_ref(target);
+    gtk_widget_set_visible(target, FALSE); /* Hide to prevent snapshot issues during move */
+    gtk_widget_unparent(target);
+    
+    GtkWidget *paned = gtk_paned_new(orientation);
+    
+    gtk_paned_set_start_child(GTK_PANED(paned), target);
+    gtk_widget_set_visible(target, TRUE); /* Restore visibility */
+    gtk_paned_set_end_child(GTK_PANED(paned), new_overlay);
+    
+    if (is_root) {
+        char id[32];
+        sprintf(id, "page_%p", paned);
+        gtk_stack_add_named(GTK_STACK(parent), paned, id);
+        g_object_set_data(G_OBJECT(active_tab), "page", paned);
+        gtk_stack_set_visible_child(GTK_STACK(parent), paned);
+    } else if (GTK_IS_PANED(parent)) {
+        if (was_start) gtk_paned_set_start_child(GTK_PANED(parent), paned);
+        else gtk_paned_set_end_child(GTK_PANED(parent), paned);
+    }
+    
+    g_object_unref(target);
+}
+
+
+
 static void
 on_preferences_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     /* connected with window as user_data */
-    GtkWindow *window = GTK_WINDOW(user_data);
-    ViteWindow *win = g_object_get_data(G_OBJECT(window), "vite-window");
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win) return;
     
-    if (!win || !win->stack) return;
+    /* Try to find editor from focus first */
+    GtkWidget *focus = gtk_window_get_focus(win->window);
+    GtkWidget *editor = NULL;
     
-    GtkWidget *scrolled = gtk_stack_get_visible_child(win->stack);
-    if (!scrolled) return;
-    GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
-    show_preferences_dialog(win->window, EDITOR_WIDGET(editor));
+    GtkWidget *iter = focus;
+    while (iter) {
+        if (EDITOR_IS_WIDGET(iter)) {
+            editor = iter;
+            break;
+        }
+        iter = gtk_widget_get_parent(iter);
+    }
+    
+    /* Fallback: Active Tab */
+    if (!editor) {
+        ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+        if (tab) {
+            GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+            if (page) {
+                /* If page is Overlay (simple) */
+                if (gtk_widget_has_css_class(page, "view-split")) {
+                     GtkWidget *scrolled = gtk_overlay_get_child(GTK_OVERLAY(page));
+                     GtkWidget *child = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
+                     if (EDITOR_IS_WIDGET(child)) editor = child;
+                }
+                /* If page is Paned (split), getting "first" editor is harder but acceptable fallback. */
+            }
+        }
+    }
+    
+    if (editor) {
+        show_preferences_dialog(win->window, EDITOR_WIDGET(editor));
+    }
+}
+
+static GtkWidget *
+get_editor_from_page(GtkWidget *page) {
+    if (!page) return NULL;
+    
+    GtkWidget *target = page;
+    /* Basic loop to find first leaf */
+    while (GTK_IS_PANED(target)) {
+        target = gtk_paned_get_start_child(GTK_PANED(target));
+    }
+    
+    if (gtk_widget_has_css_class(target, "view-split")) {
+         GtkWidget *scrolled = gtk_overlay_get_child(GTK_OVERLAY(target));
+         /* Verify scanned widget type just in case */
+         if (GTK_IS_SCROLLED_WINDOW(scrolled))
+            return gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
+    }
+    return NULL;
 }
 
 static void
@@ -101,7 +384,10 @@ update_window_title_for_tab(ViteTab *tab)
     
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     if (!page) return;
-    GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
+    
+    GtkWidget *editor = get_editor_from_page(page);
+    if (!EDITOR_IS_WIDGET(editor)) return;
+    
     Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
     
     char *title = NULL;
@@ -130,6 +416,17 @@ update_window_title_for_tab(ViteTab *tab)
         char *tmp = g_strdup_printf("• %s", title);
         g_free(title);
         title = tmp;
+    } else if (!doc_path) {
+        /* Check if this is the only tab */
+        GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+        if (g_list_length(tabs) == 1) {
+            /* Single untitled, unmodified tab -> Default Title */
+            g_free(title);
+            g_free(subtitle);
+            title = g_strdup("Virtual Text Editor");
+            subtitle = NULL;
+        }
+        g_list_free(tabs);
     }
     
     adw_window_title_set_title(win->window_title, title);
@@ -205,23 +502,20 @@ static void
 on_tab_clicked (ViteTab *tab, gpointer user_data)
 {
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
+    if (!root) return; 
+
     ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
     if (!win) return;
 
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
-    if (page) {
-        gtk_stack_set_visible_child(win->stack, page);
-        vite_tab_bar_set_active_tab(win->tab_bar, tab);
-        
-        GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
-        if (editor) {
-             /* Update title */
-             update_window_title_for_tab(tab);
+    if (!page) return;
 
-            /* Use idle to ensure focus sticks after stack transition */
-            g_idle_add_once((GSourceOnceFunc)gtk_widget_grab_focus, editor);
-        }
-    }
+    /* Per-Tab Split Model: Just switch the stack to this tab's page */
+    gtk_stack_set_visible_child(win->stack, page);
+    vite_tab_bar_set_active_tab(win->tab_bar, tab);
+    
+    /* Update title based on active view in this page */
+    update_window_title_for_tab(tab);
 }
 
 static void
@@ -319,15 +613,13 @@ static void
 on_tab_close_clicked (ViteTab *tab, gpointer user_data)
 {
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
+    if (!root) return;
     ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
-    if (!win) return; /* Should not happen if attached */
+    if (!win) return;
 
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     if (page && GTK_IS_WIDGET(page)) {
-        GtkWidget *parent = gtk_widget_get_parent(page);
-        if (parent == GTK_WIDGET(win->stack)) {
-             gtk_stack_remove(win->stack, page);
-        }
+        gtk_widget_unparent(page);
     }
     vite_tab_bar_remove_tab(win->tab_bar, tab);
     
@@ -364,6 +656,7 @@ on_new_tab_clicked_header (GtkButton *btn, gpointer user_data)
         create_new_tab(win, "Untitled", doc);
     }
 }
+
 
 static void
 on_action_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data)
@@ -876,7 +1169,8 @@ on_recent_context_menu(GtkGestureClick *gesture, int n_press, double x, double y
 static void
 on_new_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
-    GtkApplication *app = GTK_APPLICATION(user_data);
+    ViteWindow *win = (ViteWindow *)user_data;
+    GtkApplication *app = gtk_window_get_application(win->window);
     activate(app, NULL);
 }
 static void
@@ -895,46 +1189,11 @@ on_tab_move_to_new_window (ViteTab *tab, gpointer user_data)
     ViteWindow *new_win = setup_window(w);
     gtk_window_set_default_size(w, 800, 600);
     
-    /* 2. Reparent Tab and Page */
-    /* We must hold references because remove will drop them */
-    g_object_ref(tab);
-    g_object_ref(page);
-    
-    /* Remove from current window */
-    vite_tab_bar_remove_tab(current_win->tab_bar, tab);
-    gtk_stack_remove(current_win->stack, page);
-    
-    /* Add to new window */
-    /* Note: create_new_tab creates a NEW tab. We want to move EXISTING. */
-    /* We manually insert */
-    
-    char id[32];
-    sprintf(id, "page_%p", page); /* Use same ID or new one? ID depends on pointer, pointer same. */
-    gtk_stack_add_named(new_win->stack, page, id);
-    
-    vite_tab_bar_insert_tab(new_win->tab_bar, tab, 0);
-    vite_tab_bar_set_active_tab(new_win->tab_bar, tab);
-    
-    gtk_stack_set_visible_child(new_win->stack, page);
-    
-    /* Update Page <-> Tab links? They stored pointers to widgets, widgets same. */
-    /* Update Window Title for new window */
-    /* Need doc */
-    GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
-    Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
-    update_window_title_for_tab(tab); /* Uses root, so should find new window now */
-    
-    g_object_unref(tab);
-    g_object_unref(page);
-    
-    gtk_window_present(new_win->window);
-    
-    /* Close old window if empty? */
-    /* Check if source window empty */
-    if (vite_tab_bar_get_n_tabs(current_win->tab_bar) == 0) {
-        gtk_window_destroy(current_win->window);
-    }
+    /* 2. Move tab */
+    move_tab_to_window(new_win, tab, -1);
 }
+
+
 
 static void
 move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
@@ -950,25 +1209,24 @@ move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     if (!page) return;
     
+    /* Remove from source window */
     g_object_ref(tab);
     g_object_ref(page);
     
-    /* Remove from source */
     vite_tab_bar_remove_tab(source_win->tab_bar, tab);
     gtk_stack_remove(source_win->stack, page);
     
-    /* Add to target */
+    /* Add to target window */
     char id[32];
     sprintf(id, "page_%p", page);
     gtk_stack_add_named(target_win->stack, page, id);
     
-    /* Handle append case */
     if (position < 0) position = vite_tab_bar_get_n_tabs(target_win->tab_bar);
-    
     vite_tab_bar_insert_tab(target_win->tab_bar, tab, position);
-    vite_tab_bar_set_active_tab(target_win->tab_bar, tab);
     
+    /* Activate */
     gtk_stack_set_visible_child(target_win->stack, page);
+    vite_tab_bar_set_active_tab(target_win->tab_bar, tab);
     
     update_window_title_for_tab(tab);
     gtk_window_present(target_win->window);
@@ -978,13 +1236,14 @@ move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
     
     /* Check if source window empty */
     if (vite_tab_bar_get_n_tabs(source_win->tab_bar) == 0) {
-        gtk_window_destroy(source_win->window);
+        /* destroy window? */
     }
 }
 
 static void
-on_tab_dropped(ViteTabBar *tab_bar, ViteTab *tab, int position, ViteWindow *target_win)
+on_tab_dropped(ViteTabBar *tab_bar, ViteTab *tab, int position, gpointer user_data)
 {
+    ViteWindow *target_win = (ViteWindow *)user_data;
     move_tab_to_window(target_win, tab, position);
 }
 
@@ -1016,9 +1275,15 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
         if (dot) editor_widget_set_language(EDITOR_WIDGET(editor), dot + 1);
     }
     
+    /* Create Container (Overlay) */
+    GtkWidget *page_root = create_view_container(win, scrolled, FALSE);
+    
     char id[32];
-    sprintf(id, "page_%p", scrolled);
-    gtk_stack_add_named(win->stack, scrolled, id);
+    sprintf(id, "page_%p", page_root);
+    
+    if (win->stack) {
+        gtk_stack_add_named(win->stack, page_root, id);
+    }
     
     char *final_title = g_strdup(title);
     
@@ -1032,8 +1297,9 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     g_object_set_data_full(G_OBJECT(tab), "original_title", g_strdup(final_title), g_free);
     g_free(final_title);
 
-    g_object_set_data(G_OBJECT(tab), "page", scrolled);
-    g_object_set_data(G_OBJECT(scrolled), "tab", tab); /* Link back for close button */
+    /* Tab Page is the Root Container (Overlay) */
+    g_object_set_data(G_OBJECT(tab), "page", page_root);
+    g_object_set_data(G_OBJECT(page_root), "tab", tab);
     
     g_signal_connect(tab, "clicked", G_CALLBACK(on_tab_clicked), NULL);
     g_signal_connect(tab, "close-clicked", G_CALLBACK(on_tab_close_clicked), NULL);
@@ -1058,12 +1324,14 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     vite_tab_bar_insert_tab(win->tab_bar, VITE_TAB(tab), position);
     vite_tab_bar_set_active_tab(win->tab_bar, VITE_TAB(tab));
     
-    gtk_stack_set_visible_child(win->stack, scrolled);
+    if (win->stack) {
+        gtk_stack_set_visible_child(win->stack, page_root);
+    }
     
     /* Use idle to ensure focus sticks after stack transition */
     g_idle_add_once((GSourceOnceFunc)gtk_widget_grab_focus, editor);
 
-    update_window_title(doc);
+    update_window_title_for_tab(VITE_TAB(tab));
 }
 
 static void
@@ -1076,15 +1344,14 @@ on_close_curr_tab_clicked (GtkButton *btn, gpointer user_data)
          win = g_object_get_data(G_OBJECT(root), "vite-window");
     }
     
-    if (!win || !win->stack) return;
+    if (!win) return;
     
-    GtkWidget *page = gtk_stack_get_visible_child(win->stack);
-    if (!page) return;
-    ViteTab *tab = g_object_get_data(G_OBJECT(page), "tab");
-    if (tab) {
-        on_tab_close_clicked(tab, NULL);
+    ViteTab *active = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (active) {
+        on_tab_close_clicked(active, NULL);
     }
 }
+
 
 static ViteWindow *
 setup_window(GtkWindow *window)
@@ -1208,6 +1475,13 @@ setup_window(GtkWindow *window)
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s1));
     g_object_unref(s1);
     
+    /* Section Split */
+    GMenu *s_split = g_menu_new();
+    g_menu_append(s_split, "Split Right", "win.split-right");
+    g_menu_append(s_split, "Split Down", "win.split-down");
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_split));
+    g_object_unref(s_split);
+    
     /* Section 2: App Actions */
     GMenu *s2 = g_menu_new();
     g_menu_append(s2, "Preferences", "win.preferences");
@@ -1215,14 +1489,13 @@ setup_window(GtkWindow *window)
     g_object_unref(s2);
     
     /* Actions */
-    GSimpleAction *act_nw = g_simple_action_new("new-window", NULL);
-    g_signal_connect(act_nw, "activate", G_CALLBACK(on_new_window_action), gtk_window_get_application(window));
-    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(act_nw));
-
-    /* Wrapper for preferences to handle action signature */
-    GSimpleAction *act_pref = g_simple_action_new("preferences", NULL);
-    g_signal_connect(act_pref, "activate", G_CALLBACK(on_preferences_action), window);
-    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(act_pref));
+    const GActionEntry win_entries[] = {
+        { "new-window", on_new_window_action, NULL, NULL, NULL },
+        { "split-right", on_split_horizontal_action, NULL, NULL, NULL },
+        { "split-down", on_split_vertical_action, NULL, NULL, NULL },
+        { "preferences", on_preferences_action, NULL, NULL, NULL }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
     
     GtkWidget *btn_menu = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(btn_menu), "open-menu-symbolic");
@@ -1263,7 +1536,17 @@ setup_window(GtkWindow *window)
     /* Initialize Stack */
     win->stack = GTK_STACK(gtk_stack_new());
     gtk_stack_set_transition_type(win->stack, GTK_STACK_TRANSITION_TYPE_CROSSFADE);
+    
     gtk_window_set_child(window, GTK_WIDGET(win->stack));
+    
+    /* Create Initial Tab if needed? 
+       Actually activate() might do nothing? 
+       Usually we open an execution tab or untitled? 
+       Previous code created active_split but no tab? 
+       Ah, `create_new_tab` is called elsewhere? 
+       Wait, `activate` calls `setup_window` then creates an "Untitled"? 
+       Checking activate...
+    */
     
     return win;
 }
@@ -1285,6 +1568,20 @@ activate(GtkApplication *app, gpointer user_data)
 }
 
 static void
+on_split_horizontal_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    split_view(win, GTK_ORIENTATION_HORIZONTAL);
+}
+
+static void
+on_split_vertical_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    split_view(win, GTK_ORIENTATION_VERTICAL);
+}
+
+static void
 open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
 {
     char *path = g_file_get_path(file);
@@ -1301,20 +1598,19 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
         for (GList *l = tabs; l != NULL; l = l->next) {
             ViteTab *tab = VITE_TAB(l->data);
             GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
-            if (page) {
-                GtkWidget *scroll_child = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
-                if (EDITOR_IS_WIDGET(scroll_child)) {
-                    Document *d = editor_widget_get_document(EDITOR_WIDGET(scroll_child));
-                    const char *p = document_get_file_path(d);
-                    if (g_strcmp0(path, p) == 0) {
-                        /* FOUND! Switch to this window and tab */
-                        on_tab_clicked(tab, NULL);
-                        gtk_window_present(check_win->window);
-                        
-                        g_free(path);
-                        g_list_free(tabs);
-                        return;
-                    }
+            GtkWidget *editor = get_editor_from_page(page);
+            
+            if (EDITOR_IS_WIDGET(editor)) {
+                Document *d = editor_widget_get_document(EDITOR_WIDGET(editor));
+                const char *p = document_get_file_path(d);
+                if (g_strcmp0(path, p) == 0) {
+                    /* FOUND! Switch to this window and tab */
+                    on_tab_clicked(tab, NULL);
+                    gtk_window_present(check_win->window);
+                            
+                    g_free(path);
+                    g_list_free(tabs);
+                    return;
                 }
             }
         }
@@ -1337,6 +1633,8 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
         if (!target_window) {
             GtkWindow *window = GTK_WINDOW(gtk_application_window_new(app));
             target_window = setup_window(window);
+            gtk_window_set_default_size(window, 800, 600);
+            gtk_window_present(window); /* Ensure it's presented? Or done later? */
         }
     }
         
@@ -1345,9 +1643,8 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
              ViteTab *tab = vite_tab_bar_get_active_tab(target_window->tab_bar);
              if (tab) {
                  GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
-                 if (page) {
-                      GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(page));
-                      if (EDITOR_IS_WIDGET(editor)) {
+                 GtkWidget *editor = get_editor_from_page(page);
+                 if (EDITOR_IS_WIDGET(editor)) {
                            Document *current_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
                            if (!document_get_file_path(current_doc) && !document_is_modified(current_doc)) {
                                /* Reuse this tab */
@@ -1395,9 +1692,8 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
                                
                                return;
                            }
-                      }
-                 }
-             }
+                     }
+              }
     }
     
     Document *doc = document_new(path);
