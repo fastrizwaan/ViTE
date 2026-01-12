@@ -116,11 +116,12 @@ static void
 stack_safe_remove_child(GtkStack *stack, GtkWidget *child)
 {
     if (!stack || !child) return;
+    if (gtk_widget_get_parent(child) != GTK_WIDGET(stack)) return; /* Already removed or wrong parent */
     
     guint dur = gtk_stack_get_transition_duration(stack);
     gtk_stack_set_transition_duration(stack, 0);
     gtk_widget_set_visible(child, FALSE);
-    gtk_widget_unparent(child);
+    gtk_stack_remove(stack, child); /* Use gtk_stack_remove for proper bookkeeping */
     gtk_stack_set_transition_duration(stack, dur);
 }
 
@@ -191,7 +192,10 @@ static void
 handle_view_close(GtkWidget *overlay) {
     if (!overlay || !GTK_IS_WIDGET(overlay)) return;
     
-    ViteWindow *win = g_object_get_data(G_OBJECT(overlay), "vite-window");
+    GtkRoot *root = gtk_widget_get_root(overlay);
+    if (!root) return;
+    
+    ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
     if (!win) return;
     
     GtkWidget *parent = gtk_widget_get_parent(overlay);
@@ -330,6 +334,17 @@ create_view_container(ViteWindow *win, GtkWidget *editor, gboolean show_close)
     return overlay;
 }
 
+static gboolean
+refresh_all_windows_idle(gpointer user_data)
+{
+    GtkApplication *app = GTK_APPLICATION(user_data);
+    GList *windows = gtk_application_get_windows(app);
+    for (GList *l = windows; l != NULL; l = l->next) {
+        gtk_widget_queue_draw(GTK_WIDGET(l->data));
+    }
+    return G_SOURCE_REMOVE;
+}
+
 static void
 split_view(ViteWindow *win, GtkOrientation orientation)
 {
@@ -394,6 +409,8 @@ split_view(ViteWindow *win, GtkOrientation orientation)
     
     /* Create new paned container */
     GtkWidget *paned = gtk_paned_new(orientation);
+    gtk_widget_set_hexpand(paned, TRUE);
+    gtk_widget_set_vexpand(paned, TRUE);
     gtk_paned_set_start_child(GTK_PANED(paned), target);
     gtk_paned_set_end_child(GTK_PANED(paned), new_overlay);
     
@@ -415,6 +432,13 @@ split_view(ViteWindow *win, GtkOrientation orientation)
     gtk_widget_set_visible(paned, TRUE);
     
     g_object_unref(target);
+    
+    /* Defer refresh to idle handler to fix cross-window rendering issues */
+    GtkApplication *app = gtk_window_get_application(win->window);
+    if (app) {
+        g_object_ref(app);
+        g_idle_add_full(G_PRIORITY_HIGH, (GSourceFunc)refresh_all_windows_idle, app, g_object_unref);
+    }
 }
 
 
@@ -1379,6 +1403,9 @@ move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
     /* Activate */
     vite_tab_bar_set_active_tab(target_win->tab_bar, tab);
     
+    /* Update window association on the Page (Overlay) just in case */
+    g_object_set_data(G_OBJECT(page), "vite-window", target_win);
+    
     update_window_title_for_tab(tab);
     gtk_window_present(target_win->window);
 
@@ -1404,10 +1431,15 @@ on_tab_dropped(ViteTabBar *tab_bar, ViteTab *tab, int position, gpointer user_da
 static gboolean
 on_window_drop(GtkDropTarget *target, const GValue *value, double x, double y, ViteWindow *win)
 {
+
     if (value && G_VALUE_HOLDS(value, VITE_TYPE_TAB)) {
         ViteTab *tab = VITE_TAB(g_value_get_object(value));
         /* Move to end of tab list */
         move_tab_to_window(win, tab, -1);
+        /* Signal successful drop to tab bar? The tab bar monitors itself via drag-end/failed?
+           Actually, vite_tab_bar_clear_dragging_tab is manual.
+           We might need to ensure the source tab bar knows it's done?
+           move_tab_to_window removes it from source, so source updates. */
         return TRUE;
     }
     return FALSE;
@@ -1460,8 +1492,9 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     g_signal_connect(tab, "move-to-new-window", G_CALLBACK(on_tab_move_to_new_window), NULL); /* Connect new signal */
     
     /* Connect modification and content callbacks */
-    document_set_modification_callback(doc, on_document_modified, tab);
-    document_set_content_callback(doc, on_document_content_changed, tab);
+    /* Connect modification and content callbacks */
+    document_add_modification_callback(doc, on_document_modified, tab);
+    document_add_content_callback(doc, on_document_content_changed, tab);
     
     /* Calculate insertion position (next to active) */
     int position = -1;
@@ -1883,8 +1916,9 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
                                editor_widget_set_document(EDITOR_WIDGET(editor), doc);
                                
                                /* Setup callbacks */
-                               document_set_modification_callback(doc, on_document_modified, tab);
-                               document_set_content_callback(doc, on_document_content_changed, tab);
+                               /* Setup callbacks */
+                               document_add_modification_callback(doc, on_document_modified, tab);
+                               document_add_content_callback(doc, on_document_content_changed, tab);
 
                                /* Set language for syntax highlighting */
                                const char *dot = strrchr(path, '.');

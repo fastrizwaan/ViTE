@@ -1189,7 +1189,10 @@ static void scroll_to_cursor(EditorWidget *self);
 static void
 editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t *out_offset)
 {
-    if (!self->doc) return;
+    if (!self->doc) {
+        *out_offset = 0;
+        return;
+    }
     
     /* Pixel-based scrolling */
     double scroll_y = (self->vadjustment) ? gtk_adjustment_get_value(self->vadjustment) : 0;
@@ -3956,6 +3959,8 @@ editor_widget_reset_cursor_blink(EditorWidget *self)
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
+static void on_doc_content_changed(Document *doc, void *user_data);
+
 static void
 editor_widget_dispose(GObject *object)
 {
@@ -3965,6 +3970,12 @@ editor_widget_dispose(GObject *object)
     if (self->cursor_blink_tick_id) {
         gtk_widget_remove_tick_callback(GTK_WIDGET(self), self->cursor_blink_tick_id);
         self->cursor_blink_tick_id = 0;
+    }
+    
+    if (self->doc) {
+        document_remove_content_callback(self->doc, on_doc_content_changed, self);
+        /* We do not own the document (ViteTab/Main owns it), so do not free it. */
+        self->doc = NULL;
     }
     
     if (self->hadjustment) g_clear_object(&self->hadjustment);
@@ -4282,11 +4293,26 @@ editor_widget_new(void)
     return g_object_new(EDITOR_TYPE_WIDGET, NULL);
 }
 
+static void
+on_doc_content_changed(Document *doc, void *user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    /* Content changed externally (e.g. from another view). Queue redraw. */
+    /* Update adjustments (size might have changed) */
+    editor_widget_update_adjustments(self, -1, -1);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
 void
 editor_widget_set_document(EditorWidget *self, Document *doc)
 {
+    if (self->doc) {
+        document_remove_content_callback(self->doc, on_doc_content_changed, self);
+    }
     self->doc = doc;
-    self->doc = doc;
+    if (self->doc) {
+        document_add_content_callback(self->doc, on_doc_content_changed, self);
+    }
     /* Force clear all cursors including the default one from init */
     if (self->cursors) g_array_set_size(self->cursors, 0);
     editor_widget_add_cursor(self, 0);
