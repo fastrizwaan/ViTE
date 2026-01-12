@@ -6,23 +6,32 @@ struct _Document {
     char *file_path;
     
     /* Modification State */
+    /* Modification State Listeners */
     void *saved_command; /* Pointer to the undo command representing the saved state */
-    void (*mod_callback)(Document *doc, gboolean modified, void *user_data);
-    void *mod_user_data;
+    GList *mod_callbacks; /* List of struct { func, user_data } */
 
-    /* Content Observation */
-    void (*content_callback)(Document *doc, void *user_data);
-    void *content_user_data;
+    /* Content Observation Listeners */
+    GList *content_callbacks; /* List of struct { func, user_data } */
 };
+
+typedef struct {
+    void (*func)(Document *doc, gboolean modified, void *user_data);
+    void *user_data;
+} ModCallbackData;
+
+typedef struct {
+    void (*func)(Document *doc, void *user_data);
+    void *user_data;
+} ContentCallbackData;
 
 static void
 check_modification_state(Document *doc)
 {
     void *current = undo_stack_peek(doc->undo_stack);
     gboolean modified = (current != doc->saved_command);
-    
-    if (doc->mod_callback) {
-        doc->mod_callback(doc, modified, doc->mod_user_data);
+    for (GList *l = doc->mod_callbacks; l != NULL; l = l->next) {
+        ModCallbackData *cb = l->data;
+        cb->func(doc, modified, cb->user_data);
     }
 }
 
@@ -34,10 +43,8 @@ document_new(const char *filename)
     doc->undo_stack = undo_stack_new();
     doc->file_path = filename ? g_strdup(filename) : NULL;
     doc->saved_command = NULL;
-    doc->mod_callback = NULL;
-    doc->mod_user_data = NULL;
-    doc->content_callback = NULL;
-    doc->content_user_data = NULL;
+    doc->mod_callbacks = NULL;
+    doc->content_callbacks = NULL;
     return doc;
 }
 
@@ -47,6 +54,9 @@ document_free(Document *doc)
     piece_table_free(doc->pt);
     undo_stack_free(doc->undo_stack);
     g_free(doc->file_path);
+    /* Free callback lists */
+    g_list_free_full(doc->mod_callbacks, g_free);
+    g_list_free_full(doc->content_callbacks, g_free);
     free(doc);
 }
 
@@ -113,7 +123,11 @@ document_insert(Document *doc, size_t offset, const char *text, size_t len)
     undo_stack_push_insert(doc->undo_stack, offset, text, len);
     piece_table_insert(doc->pt, offset, text, len);
     check_modification_state(doc);
-    if (doc->content_callback) doc->content_callback(doc, doc->content_user_data);
+    check_modification_state(doc);
+    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        cb->func(doc, cb->user_data);
+    }
 }
 
 void
@@ -126,7 +140,11 @@ document_delete(Document *doc, size_t offset, size_t len)
     
     piece_table_delete(doc->pt, offset, len);
     check_modification_state(doc);
-    if (doc->content_callback) doc->content_callback(doc, doc->content_user_data);
+    check_modification_state(doc);
+    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        cb->func(doc, cb->user_data);
+    }
 }
 
 /* Proxy UndoInfo type manually to avoid cyclic dep header hell if needed, 
@@ -138,7 +156,11 @@ document_undo(Document *doc)
 {
     UndoInfo info = undo_stack_undo(doc->undo_stack, doc->pt);
     check_modification_state(doc);
-    if (doc->content_callback) doc->content_callback(doc, doc->content_user_data);
+    check_modification_state(doc);
+    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        cb->func(doc, cb->user_data);
+    }
     return info;
 }
 
@@ -147,7 +169,11 @@ document_redo(Document *doc)
 {
     UndoInfo info = undo_stack_redo(doc->undo_stack, doc->pt);
     check_modification_state(doc);
-    if (doc->content_callback) doc->content_callback(doc, doc->content_user_data);
+    check_modification_state(doc);
+    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        cb->func(doc, cb->user_data);
+    }
     return info;
 }
 
@@ -191,15 +217,45 @@ document_mark_saved(Document *doc)
 }
 
 void
-document_set_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data)
+document_add_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data)
 {
-    doc->mod_callback = func;
-    doc->mod_user_data = user_data;
+    ModCallbackData *cb = g_new(ModCallbackData, 1);
+    cb->func = func;
+    cb->user_data = user_data;
+    doc->mod_callbacks = g_list_append(doc->mod_callbacks, cb);
 }
 
 void
-document_set_content_callback(Document *doc, DocumentContentCallback callback, void *user_data)
+document_remove_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data)
 {
-    doc->content_callback = callback;
-    doc->content_user_data = user_data;
+    for (GList *l = doc->mod_callbacks; l != NULL; l = l->next) {
+        ModCallbackData *cb = l->data;
+        if (cb->func == func && cb->user_data == user_data) {
+            doc->mod_callbacks = g_list_delete_link(doc->mod_callbacks, l);
+            g_free(cb);
+            return;
+        }
+    }
+}
+
+void
+document_add_content_callback(Document *doc, DocumentContentCallback callback, void *user_data)
+{
+    ContentCallbackData *cb = g_new(ContentCallbackData, 1);
+    cb->func = callback;
+    cb->user_data = user_data;
+    doc->content_callbacks = g_list_append(doc->content_callbacks, cb);
+}
+
+void
+document_remove_content_callback(Document *doc, DocumentContentCallback callback, void *user_data)
+{
+    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        if (cb->func == callback && cb->user_data == user_data) {
+            doc->content_callbacks = g_list_delete_link(doc->content_callbacks, l);
+            g_free(cb);
+            return;
+        }
+    }
 }

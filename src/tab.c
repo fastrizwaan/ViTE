@@ -336,6 +336,9 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
             moved_to_new = TRUE;
         }
     
+        /* If delete_data is TRUE, the drop was accepted (moved).
+           If moved_to_new is TRUE, we handled it manually.
+           In both cases, we should NOT revert. */
         vite_tab_bar_clear_dragging_tab(tab_bar, delete_data || moved_to_new);
     }
     

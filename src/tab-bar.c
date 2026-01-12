@@ -657,6 +657,12 @@ vite_tab_bar_remove_tab (ViteTabBar *self, ViteTab *tab)
     
     self->tabs = g_list_delete_link(self->tabs, l);
     
+    if (self->dragging_tab == tab) {
+        self->dragging_tab = NULL;
+        self->drop_occurred = FALSE;
+        self->drag_original_pos = -1;
+    }
+    
     GtkWidget *parent = gtk_widget_get_parent(GTK_WIDGET(tab));
     if (parent && GTK_IS_FLOW_BOX_CHILD(parent)) {
         /* Explicitly detach to ensure tab->parent is NULL immediately */
