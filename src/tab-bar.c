@@ -280,30 +280,23 @@ vite_tab_bar_is_overflowing (ViteTabBar *self)
 static GdkDragAction
 on_flowbox_drop_enter (GtkDropTarget *target, double x, double y, ViteTabBar *self)
 {
-    g_print("[FLOWBOX] Drop target entered\n");
     return GDK_ACTION_MOVE;
 }
 
 static gboolean
 on_flowbox_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTabBar *self)
 {
-    g_print("\n[FLOWBOX DROP] Drop on empty space\n");
-    
     /* Stop edge scrolling */
     vite_tab_bar_stop_edge_scroll(self);
     
     /* Just acknowledge the drop - tab was already reordered during motion */
     if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) {
-        g_print("[FLOWBOX DROP] Invalid value, returning FALSE\n");
         return FALSE;
     }
-    
-    g_print("[FLOWBOX DROP] Accepting drop\n");
     
     /* Check if tab is foreign */
     ViteTab *dropped_tab = VITE_TAB(g_value_get_object(value));
     if (!g_list_find(self->tabs, dropped_tab)) {
-        g_print("[FLOWBOX DROP] Foreign tab detected - emitting signal\n");
         /* -1 means append (end) */
         vite_tab_bar_drop_foreign_tab(self, dropped_tab, -1);
     } else {
@@ -822,17 +815,11 @@ vite_tab_bar_clear_dragging_tab (ViteTabBar *self, gboolean success)
 {
     /* If drop successful, assume handled (e.g. moved to another window). 
        Only revert if NOT success logic and NOT drop logic. */
-    if (success) {
-         g_print("[TAB BAR] Drag successful (delete_data=1) - skipping revert\n");
-    }
     /* If drop didn't occur (drag cancelled/outside), revert to original position */
-    else if (self->dragging_tab && !self->drop_occurred && self->drag_original_pos != -1) {
+    if (!success && self->dragging_tab && !self->drop_occurred && self->drag_original_pos != -1) {
         /* Verify tab is still in list before reverting */
         if (g_list_find(self->tabs, self->dragging_tab)) {
-            g_print("[TAB BAR] Drag cancelled/outside - Reverting tab to position %d\n", self->drag_original_pos);
             vite_tab_bar_reorder_tab_to(self, self->dragging_tab, self->drag_original_pos);
-        } else {
-            g_print("[TAB BAR] Drag cancelled but tab removed (moved to new win?) - skipping revert\n");
         }
     }
 
