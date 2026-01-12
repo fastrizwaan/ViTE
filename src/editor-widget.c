@@ -69,6 +69,7 @@ struct _EditorWidget {
     gboolean drag_copy_mode;
     PangoLayout *drag_ghost_layout;
     gboolean is_dnd_active; /* TRUE only after passing 8px threshold */
+    gboolean is_drag_gesture_active; /* TRUE whenever mouse is dragging (selection or DnD) */
     
     /* Autoscroll timer for smooth edge scrolling */
     guint autoscroll_timer_id;
@@ -1231,6 +1232,10 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     double gutter_w = get_effective_gutter_width(self);
     double text_start_x = gutter_w + self->padding_left;
 
+    double scroll_x = 0;
+    if (self->hadjustment)
+        scroll_x = gtk_adjustment_get_value(self->hadjustment);
+
     size_t line_idx = start_line;
     
     /* Handle clicks above the visible content area */
@@ -1279,7 +1284,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         if (click_y >= current_y && click_y < current_y + line_h) {
             /* Found it! */
             int idx, trailing;
-            double local_x = x - text_start_x;
+            double local_x = (x - text_start_x) + scroll_x;
             if (local_x < 0) local_x = 0;
             
             pango_layout_xy_to_index(layout, 
@@ -1611,6 +1616,7 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
         self->is_dragging_selection = FALSE;
         self->is_dnd_active = FALSE;
     }
+    self->is_drag_gesture_active = TRUE;
 }
 
 /* Autoscroll timer callback for smooth edge scrolling */
@@ -2049,6 +2055,7 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     
     stop_autoscroll(self);
     editor_widget_update_adjustments(self, -1, -1);
+    self->is_drag_gesture_active = FALSE;
 }
 
 /* Helper for comparing cursors - need forward declaration or static here */
@@ -2283,6 +2290,45 @@ scroll_to_cursor(EditorWidget *self)
     } else if (abs_bottom > viewport_bottom) {
         /* Scroll DOWN to make abs_bottom visible */
         gtk_adjustment_set_value(self->vadjustment, abs_bottom - bottom_margin);
+    }
+    
+    /* Horizontal Scrolling */
+    if (self->hadjustment && !self->wrap_lines) {
+        double scroll_x = gtk_adjustment_get_value(self->hadjustment);
+        double page_x = gtk_adjustment_get_page_size(self->hadjustment);
+        double gutter_w = get_effective_gutter_width(self);
+        
+        /* Local X is relative to the text start (after gutter). 
+           We need to convert cursor local X to "scrollable content X".
+           In snapshot, we translate by (text_start_x - scroll_x).
+           So visual_x = text_start_x - scroll_x + local_x.
+           To be visible: gutter_w < visual_x < widget_width.
+           
+           Let's look at it in "scroll space":
+           cursor_scroll_x = local_x (since pango layout is the content)
+           visible_left = scroll_x
+           visible_right = scroll_x + (widget_width - gutter_w - padding)
+        */
+        
+        double pango_x = pango_units_to_double(pos.x);
+        double cursor_w = 2.0; /* minimal width to ensure visibility */
+        
+        /* Effective viewport width for text */
+        int widget_w = gtk_widget_get_width(GTK_WIDGET(self));
+        double visible_w = widget_w - gutter_w - self->padding_left - 20; /* -20 for right margin safety */
+        
+        if (pango_x < scroll_x) {
+            /* Scroll Left */
+            double new_x = pango_x - 10; /* Adds a bit of context */
+            if (new_x < 0) new_x = 0;
+            gtk_adjustment_set_value(self->hadjustment, new_x);
+        } else if (pango_x + cursor_w > scroll_x + visible_w) {
+            /* Scroll Right */
+            double new_x = (pango_x + cursor_w) - visible_w + 10;
+            double upper = gtk_adjustment_get_upper(self->hadjustment);
+            if (new_x > upper - page_x) new_x = upper - page_x;
+            gtk_adjustment_set_value(self->hadjustment, new_x);
+        }
     }
     
     editor_widget_update_im_cursor_location(self);
@@ -3796,32 +3842,86 @@ cursor_blink_tick_callback(GtkWidget *widget, GdkFrameClock *frame_clock, gpoint
     /* 
        Auto-scrolling during drag-and-drop 
     */
-    if (self->is_dnd_active && self->vadjustment) {
-        double height = gtk_widget_get_height(widget);
+    /* 
+       Auto-scrolling during drag-and-drop OR selection drag
+    */
+    if (self->is_dragging_selection || self->is_drag_gesture_active) {
         double threshold = 30.0;
-        double scroll_delta = 0;
-        
-        if (self->drag_y < threshold && self->drag_y >= 0) {
-            /* Scroll up */
-            scroll_delta = -((threshold - self->drag_y) / threshold) * 5.0;
-        } else if (self->drag_y > height - threshold && self->drag_y <= height) {
-            /* Scroll down */
-            scroll_delta = ((self->drag_y - (height - threshold)) / threshold) * 5.0;
-        }
-        
-        if (scroll_delta != 0) {
-            double old_val = gtk_adjustment_get_value(self->vadjustment);
-            double new_val = old_val + scroll_delta;
-            double upper = gtk_adjustment_get_upper(self->vadjustment);
-            double page_size = gtk_adjustment_get_page_size(self->vadjustment);
+        gboolean changed = FALSE;
+
+        /* Vertical Autoscroll */
+        if (self->vadjustment) {
+            double height = gtk_widget_get_height(widget);
+            double scroll_delta = 0;
             
-            if (new_val < 0) new_val = 0;
-            if (new_val > upper - page_size) new_val = upper - page_size;
+            if (self->drag_y < threshold && self->drag_y >= -50) {
+                 /* Scroll up */
+                 double intensity = (threshold - self->drag_y) / threshold;
+                 if (intensity > 2.0) intensity = 2.0; /* Cap speed */
+                 scroll_delta = -intensity * 15.0; /* Max 15px per tick */
+            } else if (self->drag_y > height - threshold && self->drag_y <= height + 50) {
+                 /* Scroll down */
+                 double intensity = (self->drag_y - (height - threshold)) / threshold;
+                 if (intensity > 2.0) intensity = 2.0;
+                 scroll_delta = intensity * 15.0;
+            }
             
-            if (new_val != old_val) {
-                gtk_adjustment_set_value(self->vadjustment, new_val);
+            if (scroll_delta != 0) {
+                double old_val = gtk_adjustment_get_value(self->vadjustment);
+                double new_val = old_val + scroll_delta;
+                double upper = gtk_adjustment_get_upper(self->vadjustment);
+                double page_size = gtk_adjustment_get_page_size(self->vadjustment);
                 
-                /* Recalculate drop offset since viewport moved */
+                if (new_val < 0) new_val = 0;
+                if (new_val > upper - page_size) new_val = upper - page_size;
+                
+                if (new_val != old_val) {
+                    gtk_adjustment_set_value(self->vadjustment, new_val);
+                    changed = TRUE;
+                }
+            }
+        }
+
+        /* Horizontal Autoscroll */
+        if (self->hadjustment) {
+            double width = gtk_widget_get_width(widget);
+            double scroll_delta = 0;
+            
+            double gutter_w = get_effective_gutter_width(self);
+            double left_trigger = gutter_w + threshold;
+            
+            if (self->drag_x < left_trigger && self->drag_x >= -50) {
+                 /* Scroll left (trigger when near or inside gutter) */
+                 double intensity = (left_trigger - self->drag_x) / threshold;
+                 if (intensity > 2.0) intensity = 2.0;
+                 scroll_delta = -intensity * 15.0;
+            } else if (self->drag_x > width - threshold && self->drag_x <= width + 50) {
+                 /* Scroll right */
+                 double intensity = (self->drag_x - (width - threshold)) / threshold;
+                 if (intensity > 2.0) intensity = 2.0;
+                 scroll_delta = intensity * 15.0;
+            }
+            
+            if (scroll_delta != 0) {
+                double old_val = gtk_adjustment_get_value(self->hadjustment);
+                double new_val = old_val + scroll_delta;
+                double upper = gtk_adjustment_get_upper(self->hadjustment);
+                double page_size = gtk_adjustment_get_page_size(self->hadjustment);
+                
+                if (new_val < 0) new_val = 0;
+                if (new_val > upper - page_size) new_val = upper - page_size;
+                
+                if (new_val != old_val) {
+                    gtk_adjustment_set_value(self->hadjustment, new_val);
+                    changed = TRUE;
+                }
+            }
+        }
+
+        if (changed) {
+             /* Update selection logic based on new scroll position */
+             if (self->is_dnd_active) {
+                /* Recalculate drop insertion point */
                 size_t drop_off;
                 editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &drop_off);
                 
@@ -3833,8 +3933,14 @@ cursor_blink_tick_callback(GtkWidget *widget, GdkFrameClock *frame_clock, gpoint
                 } else {
                     self->drag_drop_offset = drop_off;
                 }
-                gtk_widget_queue_draw(widget);
-            }
+             } else {
+                /* Standard Selection extension */
+                size_t off;
+                editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &off);
+                update_selection_extension(self, off);
+             }
+             
+             gtk_widget_queue_draw(widget);
         }
     }
     
