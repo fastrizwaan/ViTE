@@ -237,6 +237,20 @@ typedef struct {
     double line_height;
 } ScrollCalcState;
 
+/* Max line width calculation helper */
+typedef struct {
+    size_t max_len_bytes;
+} MaxWidthCalcState;
+
+static void
+calculate_max_line_len_cb(size_t len, void *user_data)
+{
+    MaxWidthCalcState *state = (MaxWidthCalcState*)user_data;
+    if (len > state->max_len_bytes) {
+        state->max_len_bytes = len;
+    }
+}
+
 static void
 calculate_line_height_cb(size_t len, void *user_data)
 {
@@ -358,6 +372,41 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
                              self->line_height,      /* step = one line height */
                              widget_height,          /* page = viewport height */
                              widget_height);         /* page_size = viewport height */
+
+    /* Horizontal Adjustment */
+    double content_width = 0;
+    
+    if (self->wrap_lines) {
+        content_width = (double)widget_width;
+    } else {
+        /* Approximate width based on max line length */
+        if (total_lines < 50000) {
+            MaxWidthCalcState mw_state = {0};
+            document_foreach_line(self->doc, calculate_max_line_len_cb, &mw_state);
+            
+            double gutter = get_effective_gutter_width(self);
+            /* Approximate: max bytes * char width + padding. 
+               (For exactness, we'd need to measure the specific longest line with Pango, 
+                but bytes * char_width is a decent O(N) proxy for monospace). */
+            content_width = mw_state.max_len_bytes * self->cached_char_width + gutter + self->padding_left * 2 + 50; /* +50 extra buffer */
+        } else {
+            /* Large file fallback: don't scan. Allow some fixed scroll range or just widget width */
+            /* Let's give a generous default for large files so they can at least scroll a bit if needed */
+            content_width = widget_width * 2.0; 
+        }
+    }
+    
+    if (content_width < widget_width) content_width = widget_width;
+
+    if (self->hadjustment) {
+        gtk_adjustment_configure(self->hadjustment,
+                                 gtk_adjustment_get_value(self->hadjustment),
+                                 0,
+                                 content_width,
+                                 self->cached_char_width, /* step */
+                                 widget_width,           /* page */
+                                 widget_width);          /* page_size */
+    }
 }
 
 /* UTF-8 grapheme cluster navigation helpers */
@@ -698,6 +747,12 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     if (self->vadjustment)
         scroll_y = gtk_adjustment_get_value(self->vadjustment);
 
+    double scroll_x = 0;
+    if (self->hadjustment)
+        scroll_x = gtk_adjustment_get_value(self->hadjustment);
+
+
+
     /* Find start_line using binary search on line_y_offsets */
     size_t start_line = 0;
     double partial_y = 0;
@@ -862,8 +917,11 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         }
 
         gtk_snapshot_save(snapshot);
+        /* Clip text area to ensure it doesn't draw over the gutter */
+        gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(gutter_w, 0, width - gutter_w, height));
+        
         /* Apply centering_offset to the text drawing translation */
-        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x, current_y_pos + self->padding_top + centering_offset));
+        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x - scroll_x, current_y_pos + self->padding_top + centering_offset));
         
         /* Draw Line Background if selected */
         /* Selection rendering across lines is complex. 
@@ -921,7 +979,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                                 int x_pos;
                                 pango_layout_line_index_to_x(p_line, line_end_index, FALSE, &x_pos);
                                 double dx = pango_units_to_double(x_pos);
-                                double ew = (p_line->resolved_dir == PANGO_DIRECTION_RTL) ? dx : width - dx;
+                                double ew = (p_line->resolved_dir == PANGO_DIRECTION_RTL) ? dx : (width + scroll_x) - dx;
                                 double ex = (p_line->resolved_dir == PANGO_DIRECTION_RTL) ? 0 : dx;
                                 if (ew > 0) gtk_snapshot_append_color(snapshot, &(GdkRGBA){0.2, 0.4, 0.8, 0.35}, &GRAPHENE_RECT_INIT((float)ex, (float)ry, (float)ew, (float)rh));
                             }
@@ -992,7 +1050,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
                 GdkRGBA caret_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){1.0, 0.647, 0.0, 1.0};
                 /* Snap for drop caret */
-                float caret_x = (float)(self->drag_x - text_start_x);
+                float caret_x = (float)(self->drag_x - text_start_x + scroll_x);
                 if (caret_x < 0) caret_x = 0;
                 caret_x = (float)floor(caret_x * scale + 0.5) / scale;
                 
@@ -1012,6 +1070,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* Update Y position for next line */
         current_y_pos += layout_h;
         
+        gtk_snapshot_pop(snapshot);
         gtk_snapshot_restore(snapshot);
         g_object_unref(layout);
         g_free(text);
