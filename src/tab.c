@@ -253,8 +253,6 @@ on_drag_begin (GtkDragSource *source, GdkDrag *drag, ViteTab *self)
     /* Activate this tab immediately when starting to drag */
     g_signal_emit(self, signals[SIGNAL_CLICKED], 0);
     
-    g_print("[DRAG] Starting drag\n");
-    
     GtkWidget *widget = GTK_WIDGET(self);
     GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(widget));
     
@@ -292,7 +290,6 @@ on_drag_begin (GtkDragSource *source, GdkDrag *drag, ViteTab *self)
 static void
 on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab *self)
 {
-    g_print("[DRAG] Drag ended, delete_data=%d\n", delete_data);
     /* Remove visual overlay */
     if (self->visual_tick_id) {
         gtk_widget_remove_tick_callback(GTK_WIDGET(self), self->visual_tick_id);
@@ -322,14 +319,12 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
              gboolean inside = gdk_surface_get_device_position(surface, device, &cursor_x, &cursor_y, NULL);
              
              if (!inside) {
-                 g_print("[DRAG] Drag end: Cursor outside surface -> Force Detach\n");
                  self->is_detached = TRUE;
              } else {
                  /* Check bounds manually too */
                  int w = gtk_widget_get_width(root);
                  int h = gtk_widget_get_height(root);
                  if (cursor_x < 0 || cursor_x > w || cursor_y < 0 || cursor_y > h) {
-                     g_print("[DRAG] Drag end: Cursor outside bounds (%.1f, %.1f) -> Force Detach\n", cursor_x, cursor_y);
                      self->is_detached = TRUE;
                  }
              }
@@ -337,7 +332,6 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
     
         /* If drag was not accepted (delete_data is FALSE) AND we are detached > 20px */
         if (!delete_data && self->is_detached) {
-            g_print("[DRAG] Drag ended outside - triggering move-to-new-window\n");
             g_signal_emit_by_name(self, "move-to-new-window");
             moved_to_new = TRUE;
         }
@@ -410,7 +404,6 @@ on_leave (GtkEventControllerMotion *controller, ViteTab *self)
 static GdkDragAction
 on_drop_enter (GtkDropTarget *target, double x, double y, ViteTab *self)
 {
-    g_print("[TAB DROP] Enter on tab\n");
     return GDK_ACTION_MOVE;
 }
 
@@ -469,19 +462,14 @@ on_drop_leave (GtkDropTarget *target, ViteTab *self)
 static gboolean
 on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTab *self)
 {
-    g_print("\n[DROP] ========== DROP OCCURRED ==========\n");
-    g_print("[DROP] x=%.1f y=%.1f value=%p\n", x, y, value);
-    
     /* Stop edge scrolling */
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
     if (tab_bar) {
-        g_print("[DROP] Stopping edge scroll\n");
         vite_tab_bar_stop_edge_scroll(tab_bar);
     }
     
     /* The tab was already reordered during motion, just return success */
     if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) {
-        g_print("[DROP] Invalid value, returning FALSE\n");
         return FALSE;
     }
     
@@ -497,7 +485,6 @@ on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, Vi
                 Usually drop on left half = before, right half = after.
                 For simplicity, let's insert at my position (pushing me right) */
              int my_pos = g_list_index(tabs, self);
-             g_print("[TAB DROP] Foreign tab dropped on non-empty bar at pos %d\n", my_pos);
              vite_tab_bar_drop_foreign_tab(tab_bar, dragged_tab, my_pos);
              g_list_free(tabs);
              return TRUE;
@@ -507,8 +494,6 @@ on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, Vi
         vite_tab_bar_notify_drop_done(tab_bar);
     }
     
-    g_print("[DROP] Returning TRUE - drop accepted\n");
-    g_print("[DROP] ========== DROP COMPLETE ==========\n\n");
     return TRUE;
 }
 

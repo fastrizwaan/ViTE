@@ -2082,6 +2082,7 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
     EditorWidget *self = EDITOR_WIDGET(user_data);
     GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
+    if (!text) return;
     size_t len = strlen(text);
     if (len > 0) {
         document_begin_undo_group(self->doc);

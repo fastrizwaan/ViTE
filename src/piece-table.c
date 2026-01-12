@@ -371,9 +371,14 @@ build_balanced_tree_recursive(PieceNode **nodes, int start, int end, PieceTable 
 PieceTable *
 piece_table_new(const char *filename)
 {
-    int fd = open(filename, O_RDONLY);
+    int fd = -1;
     char *mmap_ptr = NULL;
     size_t size = 0;
+    
+    /* Only attempt to open if filename is provided */
+    if (filename) {
+        fd = open(filename, O_RDONLY);
+    }
     
     if (fd != -1) {
         struct stat sb;
@@ -453,11 +458,20 @@ piece_table_new(const char *filename)
     return pt;
 }
 
+static void
+free_tree(PieceNode *node)
+{
+    if (!node) return;
+    free_tree(node->left);
+    free_tree(node->right);
+    free(node);
+}
+
 void
 piece_table_free(PieceTable *pt)
 {
-    /* Should free tree nodes recursively */
-    /* ... skipped for brevity in this step, but needed */
+    /* Free all tree nodes recursively */
+    free_tree(pt->root);
     if (pt->is_mmapped) {
         if (pt->mmap_base && pt->mmap_size > 0) munmap(pt->mmap_base, pt->mmap_size);
     } else {

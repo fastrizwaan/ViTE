@@ -62,6 +62,14 @@ static PangoColor color_variable;  /* Red - variables */
 static gboolean colors_initialized = FALSE;
 
 static void
+syntax_cache_entry_free(gpointer data)
+{
+    SyntaxCacheEntry *entry = data;
+    if (entry->attrs) pango_attr_list_unref(entry->attrs);
+    g_free(entry);
+}
+
+static void
 init_syntax_colors(void)
 {
     if (colors_initialized) return;
@@ -132,7 +140,7 @@ syntax_context_new(void)
     ctx->sh_variable = g_regex_new("\\$(\\w+|\\{[^}]+\\}|[0-9*@#?!$-])", G_REGEX_OPTIMIZE, 0, NULL);
 
     /* Initialize line cache */
-    ctx->line_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, g_free);
+    ctx->line_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, syntax_cache_entry_free);
 
     return ctx;
 }
@@ -733,14 +741,8 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
     /* Save end state */
     set_line_end_state(ctx, line_index, state);
     
-    /* Store in cache */
+    /* Store in cache - hash table's destroy function handles cleanup */
     if (ctx->line_cache) {
-        /* Remove old entry if exists */
-        SyntaxCacheEntry *old = g_hash_table_lookup(ctx->line_cache, GSIZE_TO_POINTER(line_index));
-        if (old && old->attrs) {
-            pango_attr_list_unref(old->attrs);
-        }
-        
         SyntaxCacheEntry *entry = g_new(SyntaxCacheEntry, 1);
         entry->content_hash = content_hash;
         entry->start_state = start_state;
