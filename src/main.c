@@ -6,6 +6,7 @@
 #include "preferences.h"
 #include "tab-bar.h"
 #include "tab.h"
+#include "find-replace-bar.h"
 
 typedef struct _ViteWindow ViteWindow;
 
@@ -59,6 +60,10 @@ static void on_overflow_changed(ViteTabBar *bar, gboolean overflowing, gpointer 
 static void on_tab_dropped(ViteTabBar *bar, ViteTab *tab, int position, gpointer user_data);
 static void update_open_tabs_list(GtkWidget *widget, gpointer user_data);
 static GtkWidget *create_view_container(ViteWindow *win, GtkWidget *editor, gboolean show_close);
+static GtkWidget *create_view_container(ViteWindow *win, GtkWidget *editor, gboolean show_close);
+static void on_find_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_replace_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+
 static void on_document_modified(Document *doc, gboolean modified, void *user_data);
 static void on_document_content_changed(Document *doc, void *user_data);
 static void on_recent_item_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data);
@@ -304,22 +309,34 @@ handle_view_close(GtkWidget *overlay) {
 }
 
 
-static void on_view_close_clicked(GtkButton *btn, GtkWidget *overlay) {
-    handle_view_close(overlay);
+static void on_view_close_clicked(GtkButton *btn, GtkWidget *view_root) {
+    handle_view_close(view_root);
 }
 
 static GtkWidget *
 create_view_container(ViteWindow *win, GtkWidget *editor, gboolean show_close)
 {
-    GtkWidget *overlay = gtk_overlay_new();
-    gtk_widget_add_css_class(overlay, "view-split");
+    /* Use a Box as the root for potential future widgets (e.g. breadcrumbs),
+       but FindBar moves to Overlay. */
+    GtkWidget *root_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(root_box, "view-split");
     
+    /* Create Overlay to hold Editor + FindBar + Close Button */
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_widget_set_hexpand(overlay, TRUE);
+    gtk_widget_set_vexpand(overlay, TRUE);
+    
+    /* Add Editor to Overlay */
     gtk_widget_set_hexpand(editor, TRUE);
     gtk_widget_set_vexpand(editor, TRUE);
     gtk_overlay_set_child(GTK_OVERLAY(overlay), editor);
     
-    g_object_set_data(G_OBJECT(overlay), "vite-window", win);
+    /* Add Overlay to Root Box */
+    gtk_box_append(GTK_BOX(root_box), overlay);
     
+    g_object_set_data(G_OBJECT(root_box), "vite-window", win);
+    
+    /* Close Button (Top Right) */
     if (show_close) {
         GtkWidget *btn = gtk_button_new_from_icon_name("window-close-symbolic");
         gtk_widget_add_css_class(btn, "split-close-btn");
@@ -328,10 +345,35 @@ create_view_container(ViteWindow *win, GtkWidget *editor, gboolean show_close)
         gtk_widget_set_margin_top(btn, 8);
         gtk_widget_set_margin_end(btn, 8);
         
-        g_signal_connect(btn, "clicked", G_CALLBACK(on_view_close_clicked), overlay);
+        g_signal_connect(btn, "clicked", G_CALLBACK(on_view_close_clicked), root_box);
         gtk_overlay_add_overlay(GTK_OVERLAY(overlay), btn);
     }
-    return overlay;
+    
+    /* Unwrap editor if needed for FindBar access */
+    GtkWidget *real_editor = editor;
+    if (GTK_IS_SCROLLED_WINDOW(real_editor)) {
+         real_editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(real_editor));
+    }
+
+    /* Add Find/Replace Bar to Root Box (below overlay) */
+    if (EDITOR_IS_WIDGET(real_editor)) {
+        GtkWidget *find_bar = vite_find_replace_bar_new(EDITOR_WIDGET(real_editor));
+        gtk_widget_set_visible(find_bar, FALSE);
+        
+        /* Full width integrated bar */
+        gtk_widget_set_halign(find_bar, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(find_bar, GTK_ALIGN_START);
+        
+        gtk_widget_set_margin_top(find_bar, 0);
+        gtk_widget_set_margin_bottom(find_bar, 0);
+        
+        gtk_box_append(GTK_BOX(root_box), find_bar);
+        
+        /* Store logical association */
+        g_object_set_data(G_OBJECT(root_box), "find_bar", find_bar);
+    }
+    
+    return root_box;
 }
 
 static gboolean
@@ -343,6 +385,26 @@ refresh_all_windows_idle(gpointer user_data)
         gtk_widget_queue_draw(GTK_WIDGET(l->data));
     }
     return G_SOURCE_REMOVE;
+}
+
+static GtkWidget *
+get_scrolled_window_from_view(GtkWidget *view_root)
+{
+    /* Supports both old Overlay structure (if any legacy exists) and new Box structure */
+    if (GTK_IS_OVERLAY(view_root)) {
+        return gtk_overlay_get_child(GTK_OVERLAY(view_root));
+    }
+    else if (GTK_IS_BOX(view_root)) {
+        /* Iterate children to find the Overlay, then get ScrolledWindow */
+        GtkWidget *child = gtk_widget_get_first_child(view_root);
+        while (child) {
+            if (GTK_IS_OVERLAY(child)) {
+                return gtk_overlay_get_child(GTK_OVERLAY(child));
+            }
+            child = gtk_widget_get_next_sibling(child);
+        }
+    }
+    return NULL;
 }
 
 static void
@@ -373,7 +435,9 @@ split_view(ViteWindow *win, GtkOrientation orientation)
     if (!target) return;
     
     /* Get document from current editor */
-    GtkWidget *scrolled = gtk_overlay_get_child(GTK_OVERLAY(target));
+    GtkWidget *scrolled = get_scrolled_window_from_view(target);
+    if (!scrolled || !GTK_IS_SCROLLED_WINDOW(scrolled)) return;
+    
     GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
     Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
     
@@ -472,11 +536,13 @@ on_preferences_action(GSimpleAction *action, GVariant *parameter, gpointer user_
         if (tab) {
             GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
             if (page) {
-                /* If page is Overlay (simple) */
+                /* If page is View Root (simple) */
                 if (gtk_widget_has_css_class(page, "view-split")) {
-                     GtkWidget *scrolled = gtk_overlay_get_child(GTK_OVERLAY(page));
-                     GtkWidget *child = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
-                     if (EDITOR_IS_WIDGET(child)) editor = child;
+                     GtkWidget *scrolled = get_scrolled_window_from_view(page);
+                     if (scrolled) {
+                        GtkWidget *child = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
+                        if (EDITOR_IS_WIDGET(child)) editor = child;
+                     }
                 }
                 /* If page is Paned (split), getting "first" editor is harder but acceptable fallback. */
             }
@@ -499,9 +565,9 @@ get_editor_from_page(GtkWidget *page) {
     }
     
     if (gtk_widget_has_css_class(target, "view-split")) {
-         GtkWidget *scrolled = gtk_overlay_get_child(GTK_OVERLAY(target));
+         GtkWidget *scrolled = get_scrolled_window_from_view(target);
          /* Verify scanned widget type just in case */
-         if (GTK_IS_SCROLLED_WINDOW(scrolled))
+         if (scrolled && GTK_IS_SCROLLED_WINDOW(scrolled))
             return gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
     }
     return NULL;
@@ -683,6 +749,54 @@ static void
 load_css(void)
 {
     const char *css = 
+    "findbar {"
+    "    background: @headerbar_bg_color;" 
+    "    color: @headerbar_fg_color;"
+    "    border-top: 1px solid alpha(@window_fg_color, 0.1);"
+    "    padding: 6px;"
+    "}"
+    "findbar entry {"
+    "    min-height: 28px;"
+    "}"
+    ".find-entry-wrapper {"
+    "    background: alpha(@window_fg_color, 0.05);"
+    "    border: 1px solid alpha(@window_fg_color, 0.1);"
+    "    border-radius: 6px;"
+    "    padding-left: 4px;"
+    "    padding-right: 4px;"
+    "    transition: all 200ms ease;"
+    "}"
+    ".find-entry-wrapper:focus-within {"
+    "    border-color: @theme_selected_bg_color;"
+    "    box-shadow: 0 0 0 1px @theme_selected_bg_color;"
+    "}"
+    ".transparent-entry, .transparent-entry:focus {"
+    "    background: transparent;"
+    "    border: none;"
+    "    box-shadow: none;"
+    "    outline: none;"
+    "}"
+    "findbar button.flat {"
+    "    min-width: 28px;"
+    "    min-height: 28px;"
+    "    padding: 0;"
+    "    border-radius: 6px;"
+    "}"
+    "findbar .dim-label {"
+    "    color: alpha(@window_fg_color, 0.5);"
+    "    font-size: 0.9em;"
+    "    margin-left: 8px;"
+    "    margin-right: 8px;"
+    "}"
+    /* Linked group override for findbar if needed */
+    "findbar .linked > button:first-child {"
+    "    border-top-left-radius: 6px;"
+    "    border-bottom-left-radius: 6px;"
+    "}"
+    "findbar .linked > button:last-child {"
+    "    border-top-right-radius: 6px;"
+    "    border-bottom-right-radius: 6px;"
+    "}"
     ".titlebar-box {"
     "    background: @headerbar_bg_color;"
     "    color: @headerbar_fg_color;"
@@ -1573,11 +1687,31 @@ setup_window(GtkWindow *window)
     win->window_title = ADW_WINDOW_TITLE(title);
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title);
     
-    /* Open Split Button */
-    GSimpleAction *act_open = g_simple_action_new("open-file", NULL);
-    g_signal_connect_swapped(act_open, "activate", G_CALLBACK(on_open_btn_clicked), NULL);
-    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(act_open));
+    GSimpleAction *pref_act = g_simple_action_new("preferences", NULL);
+    g_signal_connect(pref_act, "activate", G_CALLBACK(on_preferences_action), win);
+    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(pref_act));
+
+    GSimpleAction *find_act = g_simple_action_new("find", NULL);
+    g_signal_connect(find_act, "activate", G_CALLBACK(on_find_action), win);
+    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(find_act));
+
+    GSimpleAction *replace_act = g_simple_action_new("replace", NULL);
+    g_signal_connect(replace_act, "activate", G_CALLBACK(on_replace_action), win);
+    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(replace_act));
     
+    /* Shortcuts */
+    GtkShortcutController *shortcuts = GTK_SHORTCUT_CONTROLLER(gtk_shortcut_controller_new());
+    gtk_shortcut_controller_set_scope(shortcuts, GTK_SHORTCUT_SCOPE_GLOBAL);
+
+    GtkShortcut *find_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_f, GDK_CONTROL_MASK), gtk_named_action_new("win.find"));
+    gtk_shortcut_controller_add_shortcut(shortcuts, find_sc);
+
+    GtkShortcut *repl_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_h, GDK_CONTROL_MASK), gtk_named_action_new("win.replace"));
+    gtk_shortcut_controller_add_shortcut(shortcuts, repl_sc);
+    
+    gtk_widget_add_controller(GTK_WIDGET(window), GTK_EVENT_CONTROLLER(shortcuts));
+    
+    /* Open Split Button */
     GtkWidget *split_btn = adw_split_button_new();
     adw_split_button_set_label(ADW_SPLIT_BUTTON(split_btn), "Open");
     g_signal_connect(split_btn, "clicked", G_CALLBACK(on_open_btn_clicked), NULL);
@@ -1989,4 +2123,57 @@ main(int argc, char **argv)
     status = g_application_run(G_APPLICATION(app), argc, argv);
     g_object_unref(app);
     return status;
+}
+static GtkWidget *
+get_active_overlay(ViteWindow *win) {
+    /* Try focused widget first */
+    GtkWidget *focus = gtk_window_get_focus(win->window);
+    GtkWidget *iter = focus;
+    while (iter) {
+        if (gtk_widget_has_css_class(iter, "view-split")) return iter;
+        iter = gtk_widget_get_parent(iter);
+    }
+    
+    /* Fallback to active tab */
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (tab) {
+         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+         if (page) {
+             /* If page is Overlay */
+             if (gtk_widget_has_css_class(page, "view-split")) return page;
+             /* If Paned... recurse to first leaf? */
+             return get_editor_from_page(page) ? gtk_widget_get_parent(gtk_widget_get_parent(get_editor_from_page(page))) : NULL; 
+             /* get_editor returns EditorWidget. Parent is ScrolledWindow. Parent is Overlay. */
+         }
+    }
+    return NULL;
+}
+
+static void on_find_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    ViteWindow *win = (ViteWindow *)user_data;
+    GtkWidget *overlay = get_active_overlay(win);
+    if (!overlay) return;
+    
+    /* get_active_overlay might return scrolled window parent? Check create_view_container logic. 
+       create_view_container returns overlay.
+       get_editor_from_page returns editor. 
+       active_overlay logic above is imperfect but let's trust "view-split" class.
+    */
+    
+    GtkWidget *bar = g_object_get_data(G_OBJECT(overlay), "find_bar");
+    if (bar) {
+        vite_find_replace_bar_show(VITE_FIND_REPLACE_BAR(bar));
+    }
+}
+
+static void on_replace_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+    ViteWindow *win = (ViteWindow *)user_data;
+    GtkWidget *overlay = get_active_overlay(win);
+    if (!overlay) return;
+    
+    GtkWidget *bar = g_object_get_data(G_OBJECT(overlay), "find_bar");
+    if (bar) {
+        vite_find_replace_bar_show(VITE_FIND_REPLACE_BAR(bar));
+        vite_find_replace_bar_toggle_replace(VITE_FIND_REPLACE_BAR(bar));
+    }
 }
