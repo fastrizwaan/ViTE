@@ -327,6 +327,102 @@ unescape_string(const char *input)
     return g_string_free(out, FALSE);
 }
 
+/**
+ * Normalize capture group references in replacement strings.
+ * 
+ * Converts $1, $2, etc. to GLib's \g<1>, \g<2> format for g_regex_replace.
+ * Also handles escape sequences like \n, \t, \r.
+ * 
+ * User input examples:
+ *   "$1" -> "\\g<1>"
+ *   "$1-$2" -> "\\g<1>-\\g<2>"
+ *   "\\n" -> "\n" (literal newline)
+ *   "\\$1" -> "$1" (escaped dollar, literal)
+ *   "\\1" -> "\\g<1>" (also supported for compatibility)
+ */
+static char *
+normalize_replacement_string(const char *replacement, gboolean for_regex)
+{
+    if (!replacement) return NULL;
+    
+    GString *out = g_string_new("");
+    const char *p = replacement;
+    
+    while (*p) {
+        if (*p == '\\') {
+            p++;
+            if (!*p) {
+                /* Trailing backslash */
+                g_string_append_c(out, '\\');
+                break;
+            }
+            
+            /* Check for digit after backslash (backreference \1, \2, etc.) */
+            if (for_regex && *p >= '1' && *p <= '9') {
+                /* Convert \1 to \g<1> */
+                g_string_append(out, "\\g<");
+                /* Collect all digits for multi-digit group refs */
+                while (*p >= '0' && *p <= '9') {
+                    g_string_append_c(out, *p);
+                    p++;
+                }
+                g_string_append_c(out, '>');
+                continue;
+            }
+            
+            switch (*p) {
+                case 'n': g_string_append_c(out, '\n'); break;
+                case 'r': g_string_append_c(out, '\r'); break;
+                case 't': g_string_append_c(out, '\t'); break;
+                case '\\': g_string_append_c(out, '\\'); break;
+                case '$': g_string_append_c(out, '$'); break; /* Escaped dollar */
+                default:
+                    /* Keep other escapes as-is for GRegex (like \g<1>) */
+                    g_string_append_c(out, '\\');
+                    g_string_append_c(out, *p);
+                    break;
+            }
+        } else if (for_regex && *p == '$') {
+            p++;
+            if (*p >= '1' && *p <= '9') {
+                /* Convert $1 to \g<1> */
+                g_string_append(out, "\\g<");
+                while (*p >= '0' && *p <= '9') {
+                    g_string_append_c(out, *p);
+                    p++;
+                }
+                g_string_append_c(out, '>');
+                continue;
+            } else if (*p == '{') {
+                /* Handle ${1} style syntax */
+                p++;
+                if (*p >= '0' && *p <= '9') {
+                    g_string_append(out, "\\g<");
+                    while (*p >= '0' && *p <= '9') {
+                        g_string_append_c(out, *p);
+                        p++;
+                    }
+                    g_string_append_c(out, '>');
+                    if (*p == '}') p++;
+                    continue;
+                }
+                /* Invalid ${...}, output as-is */
+                g_string_append(out, "${");
+                continue;
+            } else {
+                /* Lone $, output as-is */
+                g_string_append_c(out, '$');
+                continue;
+            }
+        } else {
+            g_string_append_c(out, *p);
+        }
+        p++;
+    }
+    
+    return g_string_free(out, FALSE);
+}
+
 GArray *
 document_search(Document *doc, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word)
 {
@@ -570,10 +666,8 @@ document_replace_known_matches(Document *doc, GArray *matches, const char *repla
     document_begin_undo_group(doc);
     document_suspend_callbacks(doc);
     
-    char *literal_replacement = NULL;
-    if (!regex) {
-         literal_replacement = unescape_string(replacement);
-    }
+    /* Normalize replacement string (handles $1, \1, \n, \t, etc.) */
+    char *normalized_replacement = normalize_replacement_string(replacement, regex);
     
     /* Pre-check total document length to bounds check safely (approximate) */
     size_t total = document_get_length(doc);
@@ -589,13 +683,13 @@ document_replace_known_matches(Document *doc, GArray *matches, const char *repla
              size_t len = m.end - m.start;
              char *original_text = document_get_text_range(doc, m.start, len);
              if (original_text) {
-                 final_replacement = g_regex_replace(cached_regex, original_text, -1, 0, replacement, 0, NULL);
+                 final_replacement = g_regex_replace(cached_regex, original_text, -1, 0, normalized_replacement, 0, NULL);
                  g_free(original_text);
              }
         } else {
-             /* Literal replacement (optimized outside loop) */
-             if (literal_replacement) {
-                 final_replacement = g_strdup(literal_replacement);
+             /* Literal replacement (already normalized) */
+             if (normalized_replacement) {
+                 final_replacement = g_strdup(normalized_replacement);
              }
         }
         
@@ -603,14 +697,10 @@ document_replace_known_matches(Document *doc, GArray *matches, const char *repla
             document_replace(doc, m, final_replacement);
             g_free(final_replacement);
             count++;
-            
-            /* Update total - wait, replacement size might differ. 
-               Since we go backwards, 'total' for preceding matches is irrelevant. 
-            */
         }
     }
     
-    if (literal_replacement) g_free(literal_replacement);
+    g_free(normalized_replacement);
     
     document_resume_callbacks(doc);
     document_end_undo_group(doc);
@@ -1416,13 +1506,15 @@ document_replace_async_start(Document *doc, GArray *matches, const char *replace
     task->matches = matches;
     g_array_ref(matches);
     
-    task->replacement = g_strdup(replacement);
+    /* Normalize replacement string (handles $1, \1, \n, \t, etc.) */
+    task->replacement = normalize_replacement_string(replacement, regex);
     task->regex = regex;
     task->cached_regex = cached_regex; 
     if (cached_regex) g_regex_ref(cached_regex);
     
-    if (!regex && replacement) {
-        task->literal_replacement = unescape_string(replacement);
+    /* For literal (non-regex), reuse normalized string */
+    if (!regex && task->replacement) {
+        task->literal_replacement = g_strdup(task->replacement);
     }
     
     task->total_count = matches->len;

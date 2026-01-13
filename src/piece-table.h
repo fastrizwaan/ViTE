@@ -40,11 +40,18 @@ typedef enum {
     NEWLINE_CR
 } NewlineType;
 
+/* Large buffer using size_t (64-bit) for sizes - handles multi-GB content */
+typedef struct {
+    char *data;
+    size_t len;
+    size_t capacity;
+} LargeBuffer;
+
 typedef struct {
     char *orig_data;
     size_t orig_size;
     
-    GByteArray *add_buffer;
+    LargeBuffer *add_buffer;  /* Uses size_t for 64-bit sizes */
     
     PieceNode *root;
     

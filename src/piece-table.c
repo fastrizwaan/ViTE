@@ -7,6 +7,51 @@
 #include <string.h>
 #include <stdio.h>
 
+/* -- LargeBuffer: 64-bit sized buffer for multi-GB content -- */
+
+static LargeBuffer *
+large_buffer_new(void)
+{
+    LargeBuffer *buf = g_new0(LargeBuffer, 1);
+    buf->capacity = 1024;
+    buf->data = malloc(buf->capacity);
+    buf->len = 0;
+    return buf;
+}
+
+static void
+large_buffer_free(LargeBuffer *buf)
+{
+    if (buf) {
+        free(buf->data);
+        g_free(buf);
+    }
+}
+
+static void
+large_buffer_append(LargeBuffer *buf, const char *data, size_t len)
+{
+    if (len == 0) return;
+    
+    size_t new_len = buf->len + len;
+    if (new_len > buf->capacity) {
+        /* Grow by doubling, or by the needed amount, whichever is larger */
+        size_t new_cap = buf->capacity * 2;
+        if (new_cap < new_len) new_cap = new_len + 1024;
+        
+        char *new_data = realloc(buf->data, new_cap);
+        if (!new_data) {
+            g_error("large_buffer_append: Failed to allocate %zu bytes", new_cap);
+            return;
+        }
+        buf->data = new_data;
+        buf->capacity = new_cap;
+    }
+    
+    memcpy(buf->data + buf->len, data, len);
+    buf->len = new_len;
+}
+
 /* -- Utils -- */
 
 static void
@@ -431,7 +476,7 @@ piece_table_new(const char *filename)
         detect_newline_style(pt->orig_data, pt->orig_size, &pt->newline_style);
     }
 
-    pt->add_buffer = g_byte_array_new();
+    pt->add_buffer = large_buffer_new();
     
     if (pt->orig_size > 0) {
         /* Chunking strategy */
@@ -477,7 +522,7 @@ piece_table_free(PieceTable *pt)
     } else {
         g_free(pt->orig_data);
     }
-    g_byte_array_unref(pt->add_buffer);
+    large_buffer_free(pt->add_buffer);
     free(pt);
 }
 
@@ -510,7 +555,7 @@ piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
     
     /* Add text to buffer */
     size_t start_in_add = pt->add_buffer->len;
-    g_byte_array_append(pt->add_buffer, (guint8*)text, len);
+    large_buffer_append(pt->add_buffer, text, len);
     
     size_t lf_count = count_newlines(text, len);
     Piece new_piece = { SOURCE_ADD, start_in_add, len, lf_count };
@@ -653,7 +698,7 @@ piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, siz
     
     /* Add text to buffer */
     size_t start_in_add = pt->add_buffer->len;
-    g_byte_array_append(pt->add_buffer, (guint8*)new_content, len);
+    large_buffer_append(pt->add_buffer, new_content, len);
     
     /* Chunking strategy like piece_table_new - 16KB chunks for O(log N) line access */
     size_t chunk_size = 16 * 1024;
