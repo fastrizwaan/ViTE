@@ -2154,14 +2154,20 @@ static void on_find_action(GSimpleAction *action, GVariant *parameter, gpointer 
     GtkWidget *overlay = get_active_overlay(win);
     if (!overlay) return;
     
-    /* get_active_overlay might return scrolled window parent? Check create_view_container logic. 
-       create_view_container returns overlay.
-       get_editor_from_page returns editor. 
-       active_overlay logic above is imperfect but let's trust "view-split" class.
-    */
-    
     GtkWidget *bar = g_object_get_data(G_OBJECT(overlay), "find_bar");
     if (bar) {
+        /* Get editor and check for selection */
+        GtkWidget *scrolled = get_scrolled_window_from_view(overlay);
+        if (scrolled && GTK_IS_SCROLLED_WINDOW(scrolled)) {
+            GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
+            if (EDITOR_IS_WIDGET(editor)) {
+                char *selection = editor_widget_get_selected_text(EDITOR_WIDGET(editor));
+                if (selection) {
+                    vite_find_replace_bar_set_search_text(VITE_FIND_REPLACE_BAR(bar), selection);
+                    g_free(selection);
+                }
+            }
+        }
         vite_find_replace_bar_show(VITE_FIND_REPLACE_BAR(bar));
     }
 }
@@ -2173,7 +2179,23 @@ static void on_replace_action(GSimpleAction *action, GVariant *parameter, gpoint
     
     GtkWidget *bar = g_object_get_data(G_OBJECT(overlay), "find_bar");
     if (bar) {
-        vite_find_replace_bar_show(VITE_FIND_REPLACE_BAR(bar));
-        vite_find_replace_bar_toggle_replace(VITE_FIND_REPLACE_BAR(bar));
+        gboolean has_selection = FALSE;
+        
+        /* Get editor and check for selection */
+        GtkWidget *scrolled = get_scrolled_window_from_view(overlay);
+        if (scrolled && GTK_IS_SCROLLED_WINDOW(scrolled)) {
+            GtkWidget *editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(scrolled));
+            if (EDITOR_IS_WIDGET(editor)) {
+                char *selection = editor_widget_get_selected_text(EDITOR_WIDGET(editor));
+                if (selection) {
+                    vite_find_replace_bar_set_search_text(VITE_FIND_REPLACE_BAR(bar), selection);
+                    g_free(selection);
+                    has_selection = TRUE;
+                }
+            }
+        }
+        
+        /* Show replace bar, focus depends on whether we had selection */
+        vite_find_replace_bar_show_replace(VITE_FIND_REPLACE_BAR(bar), has_selection);
     }
 }

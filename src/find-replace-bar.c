@@ -428,6 +428,14 @@ static void on_replace_all_clicked(GtkButton *btn, gpointer user_data) {
     
     const char *query = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
     const char *repl = gtk_editable_get_text(GTK_EDITABLE(self->replace_entry));
+    
+    /* Early return if query is empty - prevents UI freeze */
+    if (!query || !*query) {
+        gtk_label_set_text(GTK_LABEL(self->matches_label), "Enter search text");
+        gtk_widget_set_visible(self->matches_label, TRUE);
+        return;
+    }
+    
     gboolean regex = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->regex_check));
     gboolean case_sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->case_check));
     gboolean whole_word = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->word_check));
@@ -435,6 +443,7 @@ static void on_replace_all_clicked(GtkButton *btn, gpointer user_data) {
     GArray *matches = NULL;
     GRegex *cached_pattern = NULL;
     gboolean matches_owned = FALSE;
+    gboolean cache_valid = FALSE;
     
     /* Reuse Logic: Check if current search is valid for replacement */
     if (self->current_search) {
@@ -448,19 +457,41 @@ static void on_replace_all_clicked(GtkButton *btn, gpointer user_data) {
         if (query_match && cached_regex == regex && cached_case == case_sensitive && cached_word == whole_word) {
              matches = document_search_task_get_matches(self->current_search);
              cached_pattern = document_search_task_get_pattern(self->current_search);
+             cache_valid = TRUE;
         }
     }
     
-    if (!matches || matches->len == 0) {
-        /* Sync Search Fallback */
+    /* If cache is valid but empty, we already know there are no matches - skip re-search */
+    if (cache_valid && (!matches || matches->len == 0)) {
+        gtk_label_set_text(GTK_LABEL(self->matches_label), "No matches found");
+        gtk_widget_set_visible(self->matches_label, TRUE);
+        return;
+    }
+    
+    /* If no valid cache, need to search */
+    if (!cache_valid) {
+        size_t line_count = document_get_line_count(doc);
+        
+        /* For large files, inform user and trigger async search first */
+        if (line_count >= 50000) {
+            gtk_label_set_text(GTK_LABEL(self->matches_label), "Searching first...");
+            gtk_widget_set_visible(self->matches_label, TRUE);
+            /* Trigger the normal search which is async for large files */
+            perform_search(self);
+            return;
+        }
+        
+        /* For smaller files, do sync search with UI feedback */
         gtk_label_set_text(GTK_LABEL(self->matches_label), "Finding matches...");
         gtk_widget_set_visible(self->matches_label, TRUE);
         
-        /* Force UI update or just wait? Sync search blocks. 
-           But it is faster than Replace. 
-        */
+        /* Process pending GTK events to update UI before sync search */
+        while (g_main_context_pending(NULL)) {
+            g_main_context_iteration(NULL, FALSE);
+        }
+        
         matches = document_search(doc, query, regex, case_sensitive, whole_word);
-        matches_owned = TRUE; 
+        matches_owned = TRUE;
     }
     
     if (matches && matches->len > 0) {
@@ -706,4 +737,22 @@ void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
     gtk_editable_set_text(GTK_EDITABLE(bar->find_entry), "");
     editor_widget_set_search_results(bar->editor, NULL);
     gtk_widget_grab_focus(GTK_WIDGET(bar->editor));
+}
+
+void vite_find_replace_bar_set_search_text(ViteFindReplaceBar *bar, const char *text) {
+    if (!bar || !text) return;
+    gtk_editable_set_text(GTK_EDITABLE(bar->find_entry), text);
+}
+
+void vite_find_replace_bar_show_replace(ViteFindReplaceBar *bar, gboolean has_search_text) {
+    if (!bar) return;
+    gtk_widget_set_visible(GTK_WIDGET(bar), TRUE);
+    gtk_widget_set_visible(bar->replace_box, TRUE);
+    
+    /* Focus replace entry only if there's search text, otherwise focus find entry */
+    if (has_search_text) {
+        gtk_widget_grab_focus(bar->replace_entry);
+    } else {
+        gtk_widget_grab_focus(bar->find_entry);
+    }
 }

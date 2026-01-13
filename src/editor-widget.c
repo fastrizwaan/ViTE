@@ -4679,3 +4679,23 @@ editor_widget_reset_cursor_to_start(EditorWidget *self)
         gtk_widget_queue_draw(GTK_WIDGET(self));
     }
 }
+
+char *
+editor_widget_get_selected_text(EditorWidget *self)
+{
+    g_return_val_if_fail(EDITOR_IS_WIDGET(self), NULL);
+    
+    EditorCursor *c = editor_widget_get_primary_cursor(self);
+    if (!c) return NULL;
+    
+    size_t start = MIN(c->cursor_offset, c->selection_anchor);
+    size_t end = MAX(c->cursor_offset, c->selection_anchor);
+    
+    /* No selection */
+    if (start == end) return NULL;
+    
+    if (!self->doc) return NULL;
+    
+    /* Get selection text from document */
+    return document_get_text_range(self->doc, start, end - start);
+}

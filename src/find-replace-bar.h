@@ -11,5 +11,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor);
 void vite_find_replace_bar_toggle_replace(ViteFindReplaceBar *bar);
 void vite_find_replace_bar_show(ViteFindReplaceBar *bar);
 void vite_find_replace_bar_close(ViteFindReplaceBar *bar);
+void vite_find_replace_bar_set_search_text(ViteFindReplaceBar *bar, const char *text);
+void vite_find_replace_bar_show_replace(ViteFindReplaceBar *bar, gboolean has_search_text);
 
 #endif
