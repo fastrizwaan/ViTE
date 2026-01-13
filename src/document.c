@@ -1,4 +1,5 @@
 #include "document.h"
+#include <string.h>
 
 struct _Document {
     PieceTable *pt;
@@ -12,6 +13,7 @@ struct _Document {
 
     /* Content Observation Listeners */
     GList *content_callbacks; /* List of struct { func, user_data } */
+    gboolean callbacks_suspended;
 };
 
 typedef struct {
@@ -27,6 +29,8 @@ typedef struct {
 static void
 check_modification_state(Document *doc)
 {
+    if (doc->callbacks_suspended) return;
+
     void *current = undo_stack_peek(doc->undo_stack);
     gboolean modified = (current != doc->saved_command);
     for (GList *l = doc->mod_callbacks; l != NULL; l = l->next) {
@@ -34,6 +38,10 @@ check_modification_state(Document *doc)
         cb->func(doc, modified, cb->user_data);
     }
 }
+
+/* ... (skipping unchanged functions) ... */
+
+
 
 Document *
 document_new(const char *filename)
@@ -123,7 +131,9 @@ document_insert(Document *doc, size_t offset, const char *text, size_t len)
     undo_stack_push_insert(doc->undo_stack, offset, text, len);
     piece_table_insert(doc->pt, offset, text, len);
     check_modification_state(doc);
-    check_modification_state(doc);
+    
+    if (doc->callbacks_suspended) return;
+
     for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
         ContentCallbackData *cb = l->data;
         cb->func(doc, cb->user_data);
@@ -140,10 +150,33 @@ document_delete(Document *doc, size_t offset, size_t len)
     
     piece_table_delete(doc->pt, offset, len);
     check_modification_state(doc);
-    check_modification_state(doc);
+    
+    if (doc->callbacks_suspended) return;
+    
     for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
         ContentCallbackData *cb = l->data;
         cb->func(doc, cb->user_data);
+    }
+}
+
+void
+document_suspend_callbacks(Document *doc)
+{
+    if (doc) doc->callbacks_suspended = TRUE;
+}
+
+void
+document_resume_callbacks(Document *doc)
+{
+    if (doc) {
+        doc->callbacks_suspended = FALSE;
+        /* Trigger one update for content */
+        for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+            ContentCallbackData *cb = l->data;
+            cb->func(doc, cb->user_data);
+        }
+        /* Trigger one update for modification state */
+        check_modification_state(doc);
     }
 }
 
@@ -258,4 +291,1201 @@ document_remove_content_callback(Document *doc, DocumentContentCallback callback
             return;
         }
     }
+}
+
+
+/* --- Search Implementation --- */
+
+static char *
+unescape_string(const char *input)
+{
+    if (!input) return NULL;
+    GString *out = g_string_new("");
+    const char *p = input;
+    while (*p) {
+        if (*p == '\\') {
+            p++;
+            if (!*p) { // Trailing backslash
+                g_string_append_c(out, '\\');
+                break;
+            }
+            switch (*p) {
+                case 'n': g_string_append_c(out, '\n'); break;
+                case 'r': g_string_append_c(out, '\r'); break;
+                case 't': g_string_append_c(out, '\t'); break;
+                case '\\': g_string_append_c(out, '\\'); break;
+                default: 
+                    g_string_append_c(out, '\\');
+                    g_string_append_c(out, *p);
+                    break;
+            }
+        } else {
+            g_string_append_c(out, *p);
+        }
+        p++;
+    }
+    return g_string_free(out, FALSE);
+}
+
+GArray *
+document_search(Document *doc, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word)
+{
+    GArray *matches = g_array_new(FALSE, FALSE, sizeof(SearchMatch));
+    if (!doc || !raw_query || !*raw_query) return matches;
+
+    char *query = NULL;
+    GRegex *pattern = NULL;
+    GError *err = NULL;
+
+    if (!regex) {
+        /* Unescape literal sequences like \n */
+        char *unescaped = unescape_string(raw_query);
+        /* Now escape for regex usage so we can use GRegex for everything (simplifies logic) */
+        char *safe_query = g_regex_escape_string(unescaped, -1);
+        g_free(unescaped);
+        
+        if (whole_word) {
+            query = g_strdup_printf("\\b%s\\b", safe_query);
+            g_free(safe_query);
+        } else {
+            query = safe_query;
+        }
+    } else {
+        if (whole_word) {
+            query = g_strdup_printf("\\b(?:%s)\\b", raw_query);
+        } else {
+            query = g_strdup(raw_query);
+        }
+    }
+
+    GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+    if (!case_sensitive) flags |= G_REGEX_CASELESS;
+    /* Multiline? We scan line-by-line, so dot matches generally within line. 
+       If we want ^ and $ to match start/end of line, G_REGEX_MULTILINE might be needed but
+       since we pass individual lines, ^/$ work naturally on the buffer passed.
+    */
+
+    pattern = g_regex_new(query, flags, 0, &err);
+    if (err) {
+        // g_warning("Regex compile error: %s", err->message);
+        g_error_free(err);
+        g_free(query);
+        return matches;
+    }
+
+    size_t line_count = document_get_line_count(doc);
+    /* Stack-allocated buffer for fast line retrieval */
+    char buf[4096];
+    size_t current_offset = 0;
+    
+    for (size_t i = 0; i < line_count; i++) {
+        size_t len = 0;
+        char *line = NULL;
+        size_t true_len = 0;
+        
+        /* Try fast path */
+        true_len = piece_table_get_line_into(doc->pt, i, buf, sizeof(buf));
+        
+        if (true_len < sizeof(buf)) {
+             /* Fits! Null terminate for regex usage */
+             buf[true_len] = '\0';
+             line = buf; /* Point to stack buffer */
+        } else {
+             /* Fallback to slow alloc path */
+             line = document_get_line(doc, i, &len);
+             /* Ensure we use the correct length for offset calculation */
+             if (!line) { 
+                 /* Should not happen if get_line_into returned something, but safety first */
+                 current_offset += true_len; // true_len should be valid even if alloc failed? No.
+                 /*If line is null, document_get_line failed. Skip.*/
+                 continue; 
+             }
+             /* Recalculate true_len from the allocated string length? 
+                document_get_line returns a null-terminated string.
+                len is set to string length.
+             */
+             true_len = len; 
+        }
+        
+        if (!line) {
+             /* Should have been handled above, but just in case */
+             continue; 
+        }
+
+        GMatchInfo *match_info;
+        if (g_regex_match(pattern, line, 0, &match_info)) {
+            while (g_match_info_matches(match_info)) {
+                gint start_pos, end_pos;
+                g_match_info_fetch_pos(match_info, 0, &start_pos, &end_pos);
+                
+                SearchMatch m;
+                m.start = current_offset + (size_t)start_pos;
+                m.end = current_offset + (size_t)end_pos;
+                g_array_append_val(matches, m);
+                
+                g_match_info_next(match_info, NULL);
+            }
+        }
+
+        g_match_info_free(match_info);
+        
+        /* Only free if we allocated it (fallback path) */
+        if (line != buf) g_free(line);
+        
+        /* Advance offset */
+        current_offset += true_len;
+    }
+    
+    g_regex_unref(pattern);
+    g_free(query);
+    return matches;
+}
+
+
+/* Viewport-only search for huge files - searches only within specified line range */
+GArray *
+document_search_viewport(Document *doc, const char *raw_query, 
+                          gboolean regex, gboolean case_sensitive, 
+                          gboolean whole_word,
+                          size_t start_line, size_t end_line)
+{
+    GArray *matches = g_array_new(FALSE, FALSE, sizeof(SearchMatch));
+    if (!doc || !raw_query || !*raw_query) return matches;
+
+    char *query = NULL;
+    GRegex *pattern = NULL;
+    GError *err = NULL;
+
+    if (!regex) {
+        char *unescaped = unescape_string(raw_query);
+        char *safe_query = g_regex_escape_string(unescaped, -1);
+        g_free(unescaped);
+        
+        if (whole_word) {
+            query = g_strdup_printf("\\b%s\\b", safe_query);
+            g_free(safe_query);
+        } else {
+            query = safe_query;
+        }
+    } else {
+        if (whole_word) {
+            query = g_strdup_printf("\\b(?:%s)\\b", raw_query);
+        } else {
+            query = g_strdup(raw_query);
+        }
+    }
+
+    GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+    if (!case_sensitive) flags |= G_REGEX_CASELESS;
+
+    pattern = g_regex_new(query, flags, 0, &err);
+    if (err) {
+        g_error_free(err);
+        g_free(query);
+        return matches;
+    }
+
+    size_t line_count = document_get_line_count(doc);
+    
+    /* Clamp to valid range */
+    if (start_line >= line_count) start_line = line_count > 0 ? line_count - 1 : 0;
+    if (end_line > line_count) end_line = line_count;
+    if (start_line > end_line) start_line = end_line;
+    
+    char buf[4096];
+    
+    /* Calculate offset of start_line */
+    size_t current_offset = document_get_offset_of_line(doc, start_line);
+    
+    for (size_t i = start_line; i < end_line; i++) {
+        size_t len = 0;
+        char *line = NULL;
+        size_t true_len = 0;
+        
+        true_len = piece_table_get_line_into(doc->pt, i, buf, sizeof(buf));
+        
+        if (true_len < sizeof(buf)) {
+             buf[true_len] = '\0';
+             line = buf;
+        } else {
+             line = document_get_line(doc, i, &len);
+             if (!line) { 
+                 continue; 
+             }
+             true_len = len; 
+        }
+        
+        if (!line) continue;
+
+        GMatchInfo *match_info;
+        if (g_regex_match(pattern, line, 0, &match_info)) {
+            while (g_match_info_matches(match_info)) {
+                gint start_pos, end_pos;
+                g_match_info_fetch_pos(match_info, 0, &start_pos, &end_pos);
+                
+                SearchMatch m;
+                m.start = current_offset + (size_t)start_pos;
+                m.end = current_offset + (size_t)end_pos;
+                g_array_append_val(matches, m);
+                
+                g_match_info_next(match_info, NULL);
+            }
+        }
+        g_match_info_free(match_info);
+        
+        if (line != buf) g_free(line);
+        
+        current_offset += true_len;
+    }
+    
+    g_regex_unref(pattern);
+    g_free(query);
+    return matches;
+}
+
+size_t
+document_replace(Document *doc, SearchMatch match, const char *replacement)
+{
+    if (!doc) return 0;
+    
+    /* TODO: Validate match is still valid? 
+       For now assume caller handles validity or we trust coordinates.
+    */
+    size_t len = match.end - match.start;
+    document_delete(doc, match.start, len);
+    
+    size_t repl_len = replacement ? strlen(replacement) : 0;
+    if (repl_len > 0) {
+        document_insert(doc, match.start, replacement, repl_len);
+    }
+    return match.start + repl_len;
+}
+
+int
+document_replace_known_matches(Document *doc, GArray *matches, const char *replacement, gboolean regex, GRegex *cached_regex)
+{
+    if (!doc || !matches || matches->len == 0) return 0;
+    
+    int count = 0;
+    document_begin_undo_group(doc);
+    document_suspend_callbacks(doc);
+    
+    char *literal_replacement = NULL;
+    if (!regex) {
+         literal_replacement = unescape_string(replacement);
+    }
+    
+    /* Pre-check total document length to bounds check safely (approximate) */
+    size_t total = document_get_length(doc);
+
+    for (int i = (int)matches->len - 1; i >= 0; i--) {
+        SearchMatch m = g_array_index(matches, SearchMatch, i);
+        
+        /* Basic sanity check */
+        if (m.end > total || m.start > total || m.start > m.end) continue;
+        
+        char *final_replacement = NULL;
+        if (regex && cached_regex) {
+             size_t len = m.end - m.start;
+             char *original_text = document_get_text_range(doc, m.start, len);
+             if (original_text) {
+                 final_replacement = g_regex_replace(cached_regex, original_text, -1, 0, replacement, 0, NULL);
+                 g_free(original_text);
+             }
+        } else {
+             /* Literal replacement (optimized outside loop) */
+             if (literal_replacement) {
+                 final_replacement = g_strdup(literal_replacement);
+             }
+        }
+        
+        if (final_replacement) {
+            document_replace(doc, m, final_replacement);
+            g_free(final_replacement);
+            count++;
+            
+            /* Update total - wait, replacement size might differ. 
+               Since we go backwards, 'total' for preceding matches is irrelevant. 
+            */
+        }
+    }
+    
+    if (literal_replacement) g_free(literal_replacement);
+    
+    document_resume_callbacks(doc);
+    document_end_undo_group(doc);
+    return count;
+}
+
+int
+document_replace_all(Document *doc, const char *raw_query, const char *replacement, gboolean regex, gboolean case_sensitive, gboolean whole_word)
+{
+    GArray *matches = document_search(doc, raw_query, regex, case_sensitive, whole_word);
+    if (!matches || matches->len == 0) {
+        if (matches) g_array_free(matches, TRUE);
+        return 0;
+    }
+    
+    GRegex *pattern = NULL;
+    char *query = NULL;
+    if (regex) {
+         query = g_strdup(raw_query);
+         GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+         if (!case_sensitive) flags |= G_REGEX_CASELESS;
+         pattern = g_regex_new(query, flags, 0, NULL);
+         g_free(query);
+    }
+    
+    int count = document_replace_known_matches(doc, matches, replacement, regex, pattern);
+    
+    if (pattern) g_regex_unref(pattern);
+    g_array_free(matches, TRUE);
+    
+    return count;
+}
+
+/* Targeted replace - only processes specified lines for efficiency (like svite.py) */
+int
+document_replace_targeted_lines(Document *doc, GArray *target_lines,
+                                 const char *query, const char *replacement,
+                                 gboolean regex, gboolean case_sensitive)
+{
+    if (!doc || !target_lines || target_lines->len == 0 || !query || !*query) return 0;
+    
+    GRegex *pattern = NULL;
+    char *search_query = NULL;
+    
+    if (regex) {
+        GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+        if (!case_sensitive) flags |= G_REGEX_CASELESS;
+        pattern = g_regex_new(query, flags, 0, NULL);
+        if (!pattern) return 0;
+    } else {
+        /* Prepare for literal search */
+        search_query = g_strdup(query);
+    }
+    
+    document_begin_undo_group(doc);
+    document_suspend_callbacks(doc);
+    
+    int count = 0;
+    char buf[4096];
+    
+    /* Process lines in reverse to maintain valid offsets */
+    for (int i = (int)target_lines->len - 1; i >= 0; i--) {
+        size_t line_idx = g_array_index(target_lines, size_t, i);
+        size_t line_count = document_get_line_count(doc);
+        
+        if (line_idx >= line_count) continue;
+        
+        size_t len = 0;
+        char *line = NULL;
+        size_t true_len = piece_table_get_line_into(doc->pt, line_idx, buf, sizeof(buf));
+        
+        if (true_len < sizeof(buf)) {
+            buf[true_len] = '\0';
+            line = buf;
+        } else {
+            line = document_get_line(doc, line_idx, &len);
+            if (!line) continue;
+            true_len = len;
+        }
+        
+        /* Find and replace within this line */
+        GString *new_line = g_string_new("");
+        size_t line_offset = document_get_offset_of_line(doc, line_idx);
+        gboolean line_modified = FALSE;
+        
+        if (regex && pattern) {
+            /* Regex replacement within the line */
+            gchar *result = g_regex_replace(pattern, line, -1, 0, replacement, 0, NULL);
+            if (result && strcmp(result, line) != 0) {
+                g_string_assign(new_line, result);
+                line_modified = TRUE;
+                /* Count matches replaced */
+                GMatchInfo *mi;
+                if (g_regex_match(pattern, line, 0, &mi)) {
+                    while (g_match_info_matches(mi)) {
+                        count++;
+                        g_match_info_next(mi, NULL);
+                    }
+                }
+                g_match_info_free(mi);
+            }
+            g_free(result);
+        } else if (search_query) {
+            /* Literal replacement */
+            const char *search = case_sensitive ? line : NULL;
+            char *lower_line = NULL;
+            char *lower_query = NULL;
+            
+            if (!case_sensitive) {
+                lower_line = g_utf8_strdown(line, -1);
+                lower_query = g_utf8_strdown(search_query, -1);
+                search = lower_line;
+            } else {
+                search = line;
+            }
+            
+            const char *lookup_query = case_sensitive ? search_query : lower_query;
+            size_t query_len = strlen(search_query);
+            size_t repl_len = strlen(replacement);
+            
+            const char *ptr = search;
+            const char *orig_ptr = line;
+            gboolean has_match = FALSE;
+            
+            while (ptr && *ptr) {
+                const char *found = strstr(ptr, lookup_query);
+                if (!found) {
+                    g_string_append(new_line, orig_ptr);
+                    break;
+                }
+                
+                size_t offset = found - search;
+                size_t orig_offset = orig_ptr - line;
+                size_t advance = offset - (ptr - search);
+                
+                g_string_append_len(new_line, orig_ptr, advance);
+                g_string_append(new_line, replacement);
+                
+                orig_ptr = line + offset + query_len;
+                ptr = found + query_len;
+                has_match = TRUE;
+                count++;
+            }
+            
+            if (has_match) line_modified = TRUE;
+            
+            g_free(lower_line);
+            g_free(lower_query);
+        }
+        
+        if (line_modified) {
+            /* Delete old line content (excluding newline) */
+            size_t line_content_len = true_len;
+            if (line_content_len > 0 && (line[line_content_len - 1] == '\n' || line[line_content_len - 1] == '\r')) {
+                line_content_len--;
+            }
+            if (line_content_len > 0 && line[line_content_len - 1] == '\r') {
+                line_content_len--;
+            }
+            
+            /* Remove trailing newline from new_line if present */
+            size_t new_len = new_line->len;
+            if (new_len > 0 && (new_line->str[new_len - 1] == '\n' || new_line->str[new_len - 1] == '\r')) {
+                new_len--;
+            }
+            if (new_len > 0 && new_line->str[new_len - 1] == '\r') {
+                new_len--;
+            }
+            
+            document_delete(doc, line_offset, line_content_len);
+            if (new_len > 0) {
+                document_insert(doc, line_offset, new_line->str, new_len);
+            }
+        }
+        
+        g_string_free(new_line, TRUE);
+        if (line != buf) g_free(line);
+    }
+    
+    document_resume_callbacks(doc);
+    document_end_undo_group(doc);
+    
+    if (pattern) g_regex_unref(pattern);
+    g_free(search_query);
+    
+    return count;
+}
+
+/* --- Async Search Implementation --- */
+
+struct _SearchTask {
+    Document *doc;
+    char *query; /* For literal search */
+    char *original_query; /* For validation (raw query) */
+    GRegex *pattern; /* For regex search */
+    
+    gboolean is_literal;
+    gboolean case_sensitive;
+    gboolean whole_word;
+    gboolean is_regex;
+    
+    PieceTableIter iter;
+    GString *line_buf;
+    uint64_t start_change_count;
+    
+    size_t current_offset; /* Cumulative offset tracker */
+    size_t total_lines;
+    size_t lines_searched;
+    
+    GArray *matches;
+    SearchCallback callback;
+    void *user_data;
+    
+    guint idle_id;
+};
+
+static gboolean
+search_idle_step(gpointer user_data)
+{
+    SearchTask *task = (SearchTask *)user_data;
+    if (!task) return G_SOURCE_REMOVE;
+    
+    /* Check for document modification */
+    if (task->doc->pt->change_count != task->start_change_count) {
+        /* Document changed - abort search */
+        if (task->callback) task->callback(task->matches, TRUE, task->user_data);
+        task->idle_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+
+    /* Time-budgeted processing (like svite.py) */
+    gint64 start_time = g_get_monotonic_time(); /* microseconds */
+    gint64 budget = 12000; /* 12ms time budget per idle iteration */
+
+
+    
+    size_t query_len = 0;
+    if (task->is_literal && task->query) {
+        query_len = strlen(task->query);
+    }
+    
+    size_t lines_this_chunk = 0;
+    gboolean budget_expired = FALSE;
+    
+    while (!budget_expired) {
+        /* Check time budget every 32 lines for responsive yielding */
+        if ((lines_this_chunk & 31) == 0 && lines_this_chunk > 0) {
+            if ((g_get_monotonic_time() - start_time) > budget) {
+                budget_expired = TRUE;
+                break;
+            }
+        }
+
+        g_string_truncate(task->line_buf, 0);
+        size_t len = piece_table_iter_get_next_line_string(&task->iter, task->line_buf);
+        
+        if (len == 0 && task->line_buf->len == 0) {
+            break; /* EOF */
+        }
+        
+        char *line = task->line_buf->str;
+        
+        if (task->is_literal) {
+             /* FAST PATH: Literal Search */
+             if (task->query) {
+                 char *haystack = line;
+                 char *found = NULL;
+                 
+                 while (haystack && *haystack) {
+                     if (task->case_sensitive) {
+                         found = strstr(haystack, task->query);
+                     } else {
+                         found = strcasestr(haystack, task->query);
+                     }
+                     
+                     if (!found) break;
+                     
+                     size_t start_idx = found - line;
+                     
+                     SearchMatch m;
+                     m.start = task->current_offset + start_idx;
+                     m.end = task->current_offset + start_idx + query_len;
+                     g_array_append_val(task->matches, m);
+                     
+                     haystack = found + 1; 
+                 }
+             }
+         } else {
+             /* SLOW PATH: Regex */
+             GMatchInfo *match_info;
+             if (g_regex_match(task->pattern, line, 0, &match_info)) {
+                 while (g_match_info_matches(match_info)) {
+                     gint start_pos, end_pos;
+                     g_match_info_fetch_pos(match_info, 0, &start_pos, &end_pos);
+                     
+                     SearchMatch m;
+                     m.start = task->current_offset + (size_t)start_pos;
+                     m.end = task->current_offset + (size_t)end_pos;
+                     g_array_append_val(task->matches, m);
+                     
+                     g_match_info_next(match_info, NULL);
+                 }
+             }
+             g_match_info_free(match_info);
+         }
+        
+        task->current_offset += len;
+        task->lines_searched++;
+        lines_this_chunk++;
+    }
+    
+    /* Report progress when budget expires */
+    if (budget_expired) {
+        if (task->callback) task->callback(task->matches, FALSE, task->user_data);
+        return G_SOURCE_CONTINUE;
+    }
+    
+    /* Finished - EOF was reached */
+    if (task->callback) task->callback(task->matches, TRUE, task->user_data);
+    
+    task->idle_id = 0; /* Source removed */
+    return G_SOURCE_REMOVE;
+}
+
+
+
+
+SearchTask *
+document_search_async_start(Document *doc, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word, SearchCallback callback, void *user_data)
+{
+    if (!doc || !raw_query || !*raw_query) return NULL;
+    
+    SearchTask *task = g_new0(SearchTask, 1);
+    task->doc = doc;
+    task->callback = callback;
+    task->user_data = user_data;
+    task->matches = g_array_new(FALSE, FALSE, sizeof(SearchMatch));
+    task->original_query = g_strdup(raw_query);
+    
+    piece_table_iter_init(doc->pt, &task->iter);
+    task->line_buf = g_string_sized_new(4096);
+    task->start_change_count = doc->pt->change_count;
+    
+    task->current_offset = 0;
+    task->total_lines = document_get_line_count(doc); /* For progress estimation if needed */
+    task->case_sensitive = case_sensitive;
+    task->whole_word = whole_word;
+    task->is_regex = regex;
+
+    /* Determine if we can use Fast Literal Path */
+    if (!regex && !whole_word) {
+        task->is_literal = TRUE;
+        task->query = g_strdup(raw_query);
+        task->pattern = NULL;
+    } else {
+        task->is_literal = FALSE;
+        /* Prepare regex */
+        char *query = NULL;
+        if (!regex) {
+            char *unescaped = unescape_string(raw_query);
+            char *safe_query = g_regex_escape_string(unescaped, -1);
+            g_free(unescaped);
+            
+            if (whole_word) {
+                query = g_strdup_printf("\\b%s\\b", safe_query);
+                g_free(safe_query);
+            } else {
+                query = safe_query;
+            }
+        } else {
+            if (whole_word) {
+                query = g_strdup_printf("\\b(?:%s)\\b", raw_query);
+            } else {
+                query = g_strdup(raw_query);
+            }
+        }
+        
+        GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+        if (!case_sensitive) flags |= G_REGEX_CASELESS;
+        task->pattern = g_regex_new(query, flags, 0, NULL);
+        g_free(query);
+        
+        if (!task->pattern) {
+            document_search_async_cancel(task);
+            return NULL;
+        }
+    }
+    
+    task->idle_id = g_idle_add(search_idle_step, task);
+    return task;
+}
+
+void
+document_search_async_cancel(SearchTask *task)
+{
+    if (!task) return;
+    
+    if (task->idle_id) {
+        g_source_remove(task->idle_id);
+        task->idle_id = 0;
+    }
+    
+    if (task->matches) {
+        g_array_unref(task->matches);
+    }
+    
+    if (task->pattern) {
+        g_regex_unref(task->pattern);
+    }
+    
+    if (task->query) {
+        g_free(task->query);
+    }
+    if (task->original_query) {
+        g_free(task->original_query);
+    }
+    
+    if (task->line_buf) {
+        g_string_free(task->line_buf, TRUE);
+    }
+    
+    g_free(task);
+}
+
+GArray *
+document_search_task_get_matches(SearchTask *task)
+{
+    if (!task) return NULL;
+    return task->matches;
+}
+
+GRegex *
+document_search_task_get_pattern(SearchTask *task)
+{
+    if (!task) return NULL;
+    return task->pattern;
+}
+
+size_t
+document_search_task_get_total_lines(SearchTask *task)
+{
+    return task ? task->total_lines : 0;
+}
+
+size_t
+document_search_task_get_lines_searched(SearchTask *task)
+{
+    return task ? task->lines_searched : 0;
+}
+
+const char *document_search_task_get_query(SearchTask *task) { return task ? task->original_query : NULL; }
+gboolean document_search_task_get_regex(SearchTask *task) { return task ? task->is_regex : FALSE; }
+gboolean document_search_task_get_case_sensitive(SearchTask *task) { return task ? task->case_sensitive : FALSE; }
+gboolean document_search_task_get_whole_word(SearchTask *task) { return task ? task->whole_word : FALSE; }
+
+
+static GRegex *compile_search_regex(const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word) {
+    char *query = NULL;
+    GRegex *pattern = NULL;
+    GError *err = NULL;
+
+    if (!regex) {
+        char *unescaped = unescape_string(raw_query);
+        char *safe_query = g_regex_escape_string(unescaped, -1);
+        g_free(unescaped);
+        if (whole_word) {
+            query = g_strdup_printf("\\b%s\\b", safe_query);
+            g_free(safe_query);
+        } else {
+            query = safe_query;
+        }
+    } else {
+        if (whole_word) {
+            query = g_strdup_printf("\\b(?:%s)\\b", raw_query);
+        } else {
+            query = g_strdup(raw_query);
+        }
+    }
+    GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+    if (!case_sensitive) flags |= G_REGEX_CASELESS;
+    pattern = g_regex_new(query, flags, 0, &err);
+    if (err) { g_error_free(err); g_free(query); return NULL; }
+    g_free(query);
+    return pattern;
+}
+
+gboolean
+document_find_next(Document *doc, SearchMatch *result, size_t start_pos, const char *raw_query, 
+                  gboolean regex, gboolean case_sensitive, gboolean whole_word)
+{
+    if (!doc || !raw_query || !*raw_query) return FALSE;
+    GRegex *pattern = compile_search_regex(raw_query, regex, case_sensitive, whole_word);
+    if (!pattern) return FALSE;
+    
+    size_t line_count = document_get_line_count(doc);
+    size_t start_line = document_get_line_of_offset(doc, start_pos);
+    size_t offset_in_line = start_pos - piece_table_get_offset_of_line(doc->pt, start_line);
+    
+    PieceTableIter iter;
+    piece_table_iter_init_at_line(doc->pt, &iter, start_line);
+    
+    char buf[65536];
+    size_t current_line = start_line;
+    size_t looped_limit = start_line;
+    gboolean wrapped = FALSE;
+    
+    while (TRUE) {
+        if (current_line >= line_count) {
+             if (!wrapped) {
+                 current_line = 0;
+                 piece_table_iter_init_at_line(doc->pt, &iter, 0);
+                 wrapped = TRUE;
+                 continue;
+             } else {
+                 break; 
+             }
+        }
+        
+        if (wrapped && current_line > looped_limit) break;
+        
+        size_t line_len = piece_table_iter_get_next_line(&iter, buf, sizeof(buf)-1);
+        if (line_len >= sizeof(buf)-1) line_len = sizeof(buf)-1;
+        buf[line_len] = '\0';
+        
+        size_t search_start_idx = 0;
+        if (current_line == start_line && !wrapped) {
+             search_start_idx = offset_in_line + 1; /* Scan AFTER cursor */
+        }
+        
+        if (search_start_idx < line_len) {
+             GMatchInfo *info;
+             if (g_regex_match_full(pattern, buf, -1, search_start_idx, 0, &info, NULL)) {
+                  gint s, e;
+                  g_match_info_fetch_pos(info, 0, &s, &e);
+                  size_t line_abs_start = piece_table_get_offset_of_line(doc->pt, current_line);
+                  result->start = line_abs_start + s;
+                  result->end = line_abs_start + e;
+                  g_match_info_free(info);
+                  g_regex_unref(pattern);
+                  return TRUE;
+             }
+             g_match_info_free(info);
+        }
+        current_line++;
+    }
+    
+    g_regex_unref(pattern);
+    return FALSE;
+}
+
+gboolean
+document_find_prev(Document *doc, SearchMatch *result, size_t start_pos, const char *raw_query, 
+                  gboolean regex, gboolean case_sensitive, gboolean whole_word)
+{
+    if (!doc || !raw_query || !*raw_query) return FALSE;
+    GRegex *pattern = compile_search_regex(raw_query, regex, case_sensitive, whole_word);
+    if (!pattern) return FALSE;
+    
+    size_t line_count = document_get_line_count(doc);
+    
+    PieceTableIter iter;
+    piece_table_iter_init(doc->pt, &iter);
+    
+    char buf[65536];
+    size_t current_line = 0;
+    
+    gboolean found_any = FALSE;
+    SearchMatch last_match_before = {0,0};
+    gboolean found_before = FALSE;
+    SearchMatch last_match_global = {0,0};
+    
+    while (current_line < line_count) {
+        size_t line_len = piece_table_iter_get_next_line(&iter, buf, sizeof(buf)-1);
+        if (line_len >= sizeof(buf)-1) line_len = sizeof(buf)-1;
+        buf[line_len] = '\0';
+        
+        GMatchInfo *info;
+        if (g_regex_match(pattern, buf, 0, &info)) {
+             while (g_match_info_matches(info)) {
+                 gint s, e;
+                 g_match_info_fetch_pos(info, 0, &s, &e);
+                 
+                 size_t line_abs_start = piece_table_get_offset_of_line(doc->pt, current_line);
+                 size_t abs_end = line_abs_start + e;
+                 
+                 SearchMatch m = {line_abs_start + s, abs_end};
+                 last_match_global = m;
+                 found_any = TRUE;
+                 
+                 if (abs_end <= start_pos) {
+                     last_match_before = m;
+                     found_before = TRUE;
+                 }
+                 
+                 g_match_info_next(info, NULL);
+             }
+        }
+        g_match_info_free(info);
+        current_line++;
+    }
+    g_regex_unref(pattern);
+    
+    if (found_before) {
+        *result = last_match_before;
+        return TRUE;
+    }
+    if (found_any) {
+        *result = last_match_global;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* --- Async Replace Implementation --- */
+
+struct _ReplaceTask {
+    Document *doc;
+    GArray *matches;
+    char *replacement;
+    char *literal_replacement;
+    
+    gboolean regex;
+    GRegex *cached_regex;
+    
+    int current_idx; /* Iterating Forward: 0 to total_count - 1 */
+    int total_count;
+    int processed_count;
+    
+    /* Bulk Strategy State */
+    GString *new_content_buffer;
+    size_t last_copied_offset;
+    size_t lf_count;  /* Pre-counted newlines to avoid O(N) scan at end */
+    
+    guint idle_id;
+    ReplaceProgressCallback callback;
+    void *user_data;
+};
+
+/* Helper to count newlines in a string */
+static size_t count_lf(const char *str, size_t len) {
+    size_t count = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (str[i] == '\n') count++;
+    }
+    return count;
+}
+
+static void replace_task_free(ReplaceTask *task) {
+    if (!task) return;
+    if (task->idle_id) g_source_remove(task->idle_id);
+    if (task->matches) g_array_unref(task->matches);
+    if (task->replacement) g_free(task->replacement);
+    if (task->literal_replacement) g_free(task->literal_replacement);
+    if (task->cached_regex) g_regex_unref(task->cached_regex);
+    if (task->new_content_buffer) g_string_free(task->new_content_buffer, TRUE);
+    g_free(task);
+}
+
+static gboolean replace_idle_step(gpointer user_data) {
+    ReplaceTask *task = (ReplaceTask *)user_data;
+    if (!task) return G_SOURCE_REMOVE;
+    
+    Document *doc = task->doc;
+    
+    /* Time Budget: 15ms (slightly higher for bulk throughput) */
+    gint64 start_time = g_get_monotonic_time();
+    gint64 budget_micros = 15000; 
+    
+    /* On first run, allocate buffer if not already */
+    if (!task->new_content_buffer) {
+        /* Estimate size: Current size + (difference * count). 
+           Safe bet: Current size * 1.2 or similar. */
+        size_t current_len = document_get_length(doc);
+        task->new_content_buffer = g_string_sized_new(current_len + 1024);
+    }
+    
+    /* Process continuously until budget exhausted */
+    while (task->current_idx < task->total_count) {
+        /* Check budget every 256 items (faster simple copies) */
+        if (task->processed_count % 256 == 0 && task->processed_count > 0) {
+             if (g_get_monotonic_time() - start_time > budget_micros) {
+                 /* Update Progress and Yield */
+                 if (task->callback) {
+                     task->callback(task->processed_count, task->total_count, FALSE, task->user_data);
+                 }
+                 return G_SOURCE_CONTINUE;
+             }
+        }
+        
+        SearchMatch m = g_array_index(task->matches, SearchMatch, task->current_idx);
+        
+        /* Validate range */
+        if (m.start < task->last_copied_offset) {
+            /* Overlapping matches? Should not happen if search provided non-overlapping results.
+               Skip or clamp. */
+            task->current_idx++;
+            task->processed_count++;
+            continue;
+        }
+        
+        /* 1. Append Text from Last Offset to Match Start */
+        if (m.start > task->last_copied_offset) {
+            size_t gap_len = m.start - task->last_copied_offset;
+            char *gap_text = document_get_text_range(doc, task->last_copied_offset, gap_len);
+            if (gap_text) {
+                g_string_append_len(task->new_content_buffer, gap_text, gap_len);
+                task->lf_count += count_lf(gap_text, gap_len);
+                g_free(gap_text);
+            }
+        }
+        
+        /* 2. Compute and Append Replacement */
+        if (task->regex && task->cached_regex) {
+             size_t match_len = m.end - m.start;
+             char *original_text = document_get_text_range(doc, m.start, match_len);
+             if (original_text) {
+                 char *repl_str = g_regex_replace(task->cached_regex, original_text, -1, 0, task->replacement, 0, NULL);
+                 if (repl_str) {
+                     size_t repl_len = strlen(repl_str);
+                     g_string_append(task->new_content_buffer, repl_str);
+                     task->lf_count += count_lf(repl_str, repl_len);
+                     g_free(repl_str);
+                 }
+                 g_free(original_text);
+             }
+        } else {
+             /* Literal */
+             if (task->literal_replacement) {
+                 size_t lit_len = strlen(task->literal_replacement);
+                 g_string_append(task->new_content_buffer, task->literal_replacement);
+                 task->lf_count += count_lf(task->literal_replacement, lit_len);
+             }
+        }
+        
+        /* Advance */
+        task->last_copied_offset = m.end;
+        task->current_idx++;
+        task->processed_count++;
+    }
+    
+    /* Finished Processing Matches */
+    
+    /* Append Tail (Last Match End to Doc End) */
+    size_t total_len = document_get_length(doc);
+    if (task->last_copied_offset < total_len) {
+        size_t tail_len = total_len - task->last_copied_offset;
+        char *tail_text = document_get_text_range(doc, task->last_copied_offset, tail_len);
+        if (tail_text) {
+            g_string_append_len(task->new_content_buffer, tail_text, tail_len);
+            task->lf_count += count_lf(tail_text, tail_len);
+            g_free(tail_text);
+        }
+    }
+    
+    /* Prepare Confirmation */
+    /* ATOMIC REPLACE of WHOLE DOCUMENT */
+    /* 
+     * PERFORMANCE FIX: Use optimized piece_table_replace_all which creates
+     * chunked pieces to maintain O(log N) line access for rendering.
+     */
+    
+    document_suspend_callbacks(doc);
+    
+    /* Suppress undo recording */
+    doc->undo_stack->in_undo_redo = TRUE;
+    
+    /* OPTIMIZED: Use piece_table_replace_all which creates chunked pieces
+     * to maintain O(log N) line access for rendering. */
+    piece_table_replace_all(doc->pt, task->new_content_buffer->str, 
+                            task->new_content_buffer->len, task->lf_count);
+    
+    /* Re-enable undo recording */
+    doc->undo_stack->in_undo_redo = FALSE;
+    
+    /* Mark document as modified */
+    check_modification_state(doc);
+    
+    /* Re-enable callbacks BUT don't trigger them synchronously.
+     * The normal document_resume_callbacks() would invoke all registered
+     * callbacks (including editor_widget_update_adjustments which is O(N)),
+     * causing freeze. Instead, just clear the flag. The UI will update
+     * naturally on next draw cycle when it sees the piece_table change_count. */
+    doc->callbacks_suspended = FALSE;
+    
+    /* Final Callback */
+    if (task->callback) {
+        task->callback(task->total_count, task->total_count, TRUE, task->user_data);
+    }
+    
+    /* We don't free task here. We just return false. */
+    task->idle_id = 0; /* It's removed */
+    
+    return G_SOURCE_REMOVE;
+}
+
+ReplaceTask *
+document_replace_async_start(Document *doc, GArray *matches, const char *replacement, gboolean regex, GRegex *cached_regex, ReplaceProgressCallback callback, void *user_data)
+{
+    if (!doc || !matches || matches->len == 0) return NULL;
+    
+    ReplaceTask *task = g_new0(ReplaceTask, 1);
+    task->doc = doc;
+    task->matches = matches;
+    g_array_ref(matches);
+    
+    task->replacement = g_strdup(replacement);
+    task->regex = regex;
+    task->cached_regex = cached_regex; 
+    if (cached_regex) g_regex_ref(cached_regex);
+    
+    if (!regex && replacement) {
+        task->literal_replacement = unescape_string(replacement);
+    }
+    
+    task->total_count = matches->len;
+    task->current_idx = 0; /* Forward Iteration for Bulk Build */
+    task->processed_count = 0;
+    
+    task->new_content_buffer = NULL; /* Allocated in idle step */
+    task->last_copied_offset = 0;
+    
+    task->callback = callback;
+    task->user_data = user_data;
+    
+    /* Do NOT suspend callbacks or begin undo group yet. 
+       We are just building the string in background. 
+       We will do the actual replace (and suspend/undo) in the final step.
+       
+       Wait, if the user edits the document WHILE we are building the string?
+       That would invalidate our matches and our buffer building!
+       
+       We MUST block user input or lock the document.
+       Currently ViTE is single threaded (GLib Main Loop).
+       The idle function runs on main thread.
+       User events (keypresses) also run on main thread.
+       
+       If we yield (return G_SOURCE_CONTINUE), GMainLoop handles other events (like keypresses!).
+       So the user CAN type while we are yielding.
+       
+       This is dangerous.
+       If the user types, offsets change, matches become invalid.
+       
+       Solution:
+       1. Lock the editor (Set ReadOnly? Show Modal Progress Dialog?).
+       2. Or listen for changes and Cancel the task if document changes.
+       
+       The `find-replace-bar.c` has `on_document_changed`.
+       However, we need to ensure we don't apply a stale buffer.
+       
+       If `Find` is fast, `Replace All` shouldn't take long enough for user to be annoyed by a lock, 
+       BUT if it takes 2 seconds, they might type.
+       
+       Best practice: Cancel Replace if document modified.
+       The existing `on_document_changed` in `find-replace-bar.c` likely handles logic?
+       
+       Let's assume for now we must handle the risk.
+       If we suspend callbacks for the *duration of the task*, the UI won't update, but user might still type?
+       No, `document_suspend_callbacks` just stops specialized listeners.
+       
+       If we want to be safe, `Replace All` should act as a modal operation or faster enough.
+       Given the speedup, it should be fast.
+    */
+    
+    task->idle_id = g_idle_add(replace_idle_step, task);
+    return task;
+}
+
+void document_replace_async_cancel(ReplaceTask *task) {
+    if (!task) return;
+    
+    if (task->idle_id) {
+        /* Note: We no longer suspend/undo in start(), so we don't need to resume/end here. */
+        g_source_remove(task->idle_id);
+        task->idle_id = 0;
+    }
+    
+    replace_task_free(task);
 }

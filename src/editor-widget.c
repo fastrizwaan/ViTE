@@ -110,6 +110,11 @@ struct _EditorWidget {
     /* Idle resize handler to prevent blocking UI on every frame */
     guint idle_resize_id;
     
+    /* Search State */
+    GArray *search_matches; /* Array of SearchMatch */
+    int current_match_idx;
+
+    
     /* Statistical Scroll for Large Files */
     double avg_visual_lines;
     
@@ -131,6 +136,7 @@ static void move_cursor(EditorWidget *self, int visual_lines_delta);
 static void editor_widget_update_im_cursor_location(EditorWidget *self);
 static PangoLayout *create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len);
 static void update_selection_extension(EditorWidget *self, size_t off);
+static void editor_widget_clear_cursors(EditorWidget *self);
 
 static EditorCursor *
 editor_widget_get_primary_cursor(EditorWidget *self)
@@ -229,6 +235,13 @@ enum {
     PROP_FONT_NAME,
     N_PROPS
 };
+
+enum {
+    CARET_MOVED,
+    LAST_SIGNAL
+};
+
+static guint editor_signals[LAST_SIGNAL] = { 0 };
 
 /* Scroll Calculation Helper */
 typedef struct {
@@ -929,6 +942,89 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
            Simplified: If line is fully selected or partially.
         */
         
+        /* Draw Search Matches */
+        if (self->search_matches && self->search_matches->len > 0) {
+            /* OPTIMIZED: Use binary search to find matches overlapping this line */
+            /* This is critical for performance with thousands of matches */
+             
+            size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
+            size_t raw_line_end = line_start_off + len; /* End of text content on line */
+            
+            /* Binary search to find first match that could overlap this line */
+            /* A match overlaps if: match.start < line_end AND match.end > line_start */
+            int low = 0;
+            int high = (int)self->search_matches->len - 1;
+            int first_candidate = -1;
+            
+            /* Find leftmost match where end > line_start_off */
+            while (low <= high) {
+                int mid = (low + high) / 2;
+                SearchMatch *m = &g_array_index(self->search_matches, SearchMatch, mid);
+                if (m->end > line_start_off) {
+                    first_candidate = mid;
+                    high = mid - 1;
+                } else {
+                    low = mid + 1;
+                }
+            }
+            
+            /* Iterate from first_candidate until matches no longer overlap */
+            if (first_candidate >= 0) {
+                for (int m = first_candidate; m < (int)self->search_matches->len; m++) {
+                    SearchMatch match = g_array_index(self->search_matches, SearchMatch, m);
+                    
+                    /* Stop if match starts after line ends */
+                    if (match.start >= raw_line_end) break;
+                    
+                    size_t start_sel = match.start;
+                    size_t end_sel = match.end;
+                    
+                    /* Check overlap with line */
+                    if (start_sel < raw_line_end && end_sel > line_start_off) {
+                        size_t sel_in_line_start = MAX(start_sel, line_start_off) - line_start_off;
+                        size_t sel_in_line_end = MIN(end_sel, raw_line_end) - line_start_off;
+                        
+                        if (sel_in_line_start < sel_in_line_end) { /* Sanity check */
+                            /* Calculate X ranges using Pango */
+                            PangoLayoutIter *iter = pango_layout_get_iter(layout);
+                            do {
+                                PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
+                                int line_start_index = p_line->start_index;
+                                int line_end_index = line_start_index + p_line->length;
+                                
+                                PangoRectangle line_rect;
+                                pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
+                                double ry = pango_units_to_double(line_rect.y);
+                                double rh = pango_units_to_double(line_rect.height);
+
+                                if (sel_in_line_end >= (size_t)line_start_index && sel_in_line_start <= (size_t)line_end_index) {
+                                    int *ranges; int n_ranges;
+                                    int range_start = (int)MAX(sel_in_line_start, (size_t)line_start_index);
+                                    int range_end = (int)MIN(sel_in_line_end, (size_t)line_end_index);
+                                    
+                                    pango_layout_line_get_x_ranges(p_line, range_start, range_end, &ranges, &n_ranges);
+                                    for (int r = 0; r < n_ranges; r++) {
+                                        double rx = pango_units_to_double(ranges[2 * r]);
+                                        double rw = pango_units_to_double(ranges[2 * r + 1] - ranges[2 * r]);
+                                        
+                                        GdkRGBA match_col = {1.0, 1.0, 0.0, 0.3}; /* Yellow */
+                                        if (m == self->current_match_idx) {
+                                            match_col = (GdkRGBA){1.0, 0.6, 0.0, 0.6}; /* Orange active */
+                                        }
+                                        
+                                        if (rw > 0) gtk_snapshot_append_color(snapshot, &match_col, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                                    }
+                                    g_free(ranges);
+                                }
+                            } while (pango_layout_iter_next_line(iter));
+                            pango_layout_iter_free(iter);
+                        }
+                    }
+                }
+            }
+        }
+
+
         /* 1. Draw Selections for all cursors */
         size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
         size_t raw_line_end = line_start_off + len + 1;
@@ -2228,7 +2324,90 @@ editor_widget_paste_primary(EditorWidget *self)
     gdk_clipboard_read_text_async(clipboard, NULL, on_primary_paste_received, self);
 }
 
+int
+editor_widget_get_current_match_index(EditorWidget *self)
+{
+    if (!self->search_matches || self->search_matches->len == 0 || !self->cursors || self->cursors->len == 0) return 0;
 
+    EditorCursor *primary = editor_widget_get_primary_cursor(self);
+    /* Check overlap logic */
+    size_t c_start = MIN(primary->cursor_offset, primary->selection_anchor);
+    size_t c_end = MAX(primary->cursor_offset, primary->selection_anchor);
+    
+    int low = 0;
+    int high = self->search_matches->len - 1;
+    
+    while (low <= high) {
+        int mid = (low + high) / 2;
+        SearchMatch *m = &g_array_index(self->search_matches, SearchMatch, mid);
+        
+        /* If selection matches match exactly */
+        if (c_start == m->start && c_end == m->end) return mid + 1;
+        
+        /* If cursor is strictly inside match */
+        if (primary->cursor_offset > m->start && primary->cursor_offset <= m->end) return mid + 1;
+        
+        /* If just caret at start */
+        if (c_start == m->start && c_end == m->start) return mid + 1;
+
+        if (c_start < m->start) {
+            high = mid - 1;
+        } else {
+            low = mid + 1;
+        }
+    }
+    
+    return 0;
+}
+
+static void
+editor_widget_update_im_cursor_location(EditorWidget *self)
+{
+    if (!self->im_context || !self->doc) return;
+    
+    g_signal_emit(self, editor_signals[CARET_MOVED], 0);
+
+    /* Get Primary Cursor */
+    EditorCursor *primary = editor_widget_get_primary_cursor(self);
+    if (!primary) return;
+    
+    /* SYNC CACHE from Primary Cursor */
+    self->cursor_offset = primary->cursor_offset;
+    self->selection_anchor = primary->selection_anchor;
+    self->target_x = primary->target_x;
+
+    size_t cursor_line = document_get_line_of_offset(self->doc, primary->cursor_offset);
+    size_t line_start = document_get_offset_of_line(self->doc, cursor_line);
+    size_t char_idx = primary->cursor_offset - line_start;
+
+    char *text; size_t len;
+    PangoLayout *layout = create_pango_layout_for_line(self, cursor_line, &text, &len);
+    if (!layout) return;
+
+    PangoRectangle strong_pos;
+    pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &strong_pos, NULL);
+
+    double cursor_x = pango_units_to_double(strong_pos.x);
+    double cursor_y = pango_units_to_double(strong_pos.y);
+    double cursor_h = pango_units_to_double(strong_pos.height);
+    if (cursor_h < 1) cursor_h = self->line_height;
+
+    g_object_unref(layout); g_free(text);
+
+    double scroll_y = gtk_adjustment_get_value(self->vadjustment);
+    double scroll_x = gtk_adjustment_get_value(self->hadjustment);
+
+    double gutter_w = get_effective_gutter_width(self);
+    double text_start_x = gutter_w + self->padding_left;
+
+    GdkRectangle rect;
+    rect.x = (int)(text_start_x + cursor_x - scroll_x);
+    rect.y = (int)(self->padding_top + self->line_y_offsets->data[cursor_line] + cursor_y - scroll_y);
+    rect.width = 2; // Cursor width
+    rect.height = (int)cursor_h;
+
+    gtk_im_context_set_cursor_location(self->im_context, &rect);
+}
 
 static void
 scroll_to_cursor(EditorWidget *self)
@@ -3775,44 +3954,6 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
-static void
-editor_widget_update_im_cursor_location(EditorWidget *self)
-{
-    if (!self->im_context || !self->doc) return;
-
-    size_t line_idx = document_get_line_of_offset(self->doc, self->cursor_offset);
-    size_t line_start = document_get_offset_of_line(self->doc, line_idx);
-    size_t index_in_line = self->cursor_offset - line_start;
-
-    char *text;
-    size_t len;
-    PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
-    if (!layout) return;
-
-    if (index_in_line > len) index_in_line = len;
-
-    PangoRectangle strong_pos;
-    pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
-
-    /* Fast approximation of Y offset. 
-       Full precision requires iterating layouts, which is too slow for large files.
-       Approx: line_idx * line_height. Subtract scroll position.
-    */
-    double y_off = (double)line_idx * self->line_height;
-    double start_y = 0;
-    if (self->vadjustment) start_y = gtk_adjustment_get_value(self->vadjustment);
-
-    GdkRectangle area;
-    area.x = (int)pango_units_to_double(strong_pos.x);
-    area.y = (int)(y_off - (start_y * self->line_height) + pango_units_to_double(strong_pos.y));
-    area.width = 1;
-    area.height = (int)pango_units_to_double(strong_pos.height);
-
-    gtk_im_context_set_cursor_location(self->im_context, &area);
-
-    g_object_unref(layout);
-    g_free(text);
-}
 
 /* Cursor blink animation using frame clock tick callback */
 static gboolean
@@ -3994,6 +4135,11 @@ editor_widget_dispose(GObject *object)
         self->idle_resize_id = 0;
     }
     
+    if (self->search_matches) {
+        g_array_unref(self->search_matches);
+        self->search_matches = NULL;
+    }
+    
     /* Disconnect GSettings signal and cleanup */
     if (self->interface_settings) {
         g_signal_handlers_disconnect_by_func(self->interface_settings, on_system_font_changed, self);
@@ -4020,6 +4166,8 @@ editor_widget_init(EditorWidget *self)
     
     self->line_y_offsets = g_array_new(FALSE, FALSE, sizeof(double));
     self->cursors = g_array_new(FALSE, FALSE, sizeof(EditorCursor));
+    self->search_matches = NULL;
+    self->current_match_idx = -1;
     editor_widget_add_cursor(self, 0);
     
     /* Initialize cursor blink animation */
@@ -4237,6 +4385,14 @@ editor_widget_class_init(EditorWidgetClass *klass)
     object_class->set_property = editor_widget_set_property;
     object_class->get_property = editor_widget_get_property;
     object_class->dispose = editor_widget_dispose;
+    
+    editor_signals[CARET_MOVED] = g_signal_new("caret-moved",
+                                 G_TYPE_FROM_CLASS(klass),
+                                 G_SIGNAL_RUN_LAST,
+                                 0,
+                                 NULL, NULL,
+                                 NULL,
+                                 G_TYPE_NONE, 0);
 
     widget_class->snapshot = editor_widget_snapshot;
     widget_class->measure = editor_widget_measure;
@@ -4338,4 +4494,188 @@ editor_widget_get_document(EditorWidget *self)
 {
     g_return_val_if_fail(EDITOR_IS_WIDGET(self), NULL);
     return self->doc;
+}
+
+/* Search Integration */
+void 
+editor_widget_set_search_results(EditorWidget *self, GArray *matches) 
+{
+    if (self->search_matches) {
+         g_array_unref(self->search_matches);
+        self->search_matches = NULL;
+    }
+    self->search_matches = matches;
+    self->current_match_idx = -1;
+    
+    /* Loop to find first match after cursor? Or first match? */
+    /* If cursor is at offset X, find match where start >= X. */
+    if (matches && matches->len > 0) {
+        EditorCursor *c = editor_widget_get_primary_cursor(self);
+        size_t cursor = c ? c->cursor_offset : 0;
+        
+        /* Find closest match */
+        int best_idx = 0;
+        for (guint i = 0; i < matches->len; i++) {
+            SearchMatch m = g_array_index(matches, SearchMatch, i);
+            if (m.start >= cursor) {
+                best_idx = (int)i;
+                break;
+            }
+        }
+        self->current_match_idx = best_idx;
+        
+        SearchMatch m = g_array_index(matches, SearchMatch, best_idx);
+        /* Don't move cursor automatically on type-to-search unless desired?
+           svite: on_find_next does update. on_search_changed just highlights. 
+           User usually wants to see what matches.
+           We'll just set the current match index but NOT move cursor until Next is pressed?
+           Actually, highlighting the "current" match (orange) is good. 
+        */
+    }
+    
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static void
+scroll_to_cursor_simple(EditorWidget *self) {
+    /* Simple ensure visible implementation since we lack the robust one */
+    /* Rely on the fact that next draw might handle it if we flag it? 
+       No, we don't have that flag. 
+       Let's leave it for now, user can scroll. 
+       Or trigger a fake key event? No.
+    */
+}
+
+void 
+editor_widget_next_match(EditorWidget *self) 
+{
+    if (!self->search_matches || self->search_matches->len == 0) return;
+    
+    self->current_match_idx++;
+    if (self->current_match_idx >= (int)self->search_matches->len) {
+        self->current_match_idx = 0; /* Loop */
+    }
+    
+    SearchMatch m = g_array_index(self->search_matches, SearchMatch, self->current_match_idx);
+    
+    /* Select the match */
+    editor_widget_clear_cursors(self);
+    
+    /* Update primary cursor (since clear_cursors keeps one) */
+    EditorCursor *c = editor_widget_get_primary_cursor(self);
+    if (c) {
+        c->cursor_offset = m.end;
+        c->selection_anchor = m.start;
+        c->target_x = -1;
+        scroll_to_cursor(self); 
+    }
+    
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+void 
+editor_widget_prev_match(EditorWidget *self) 
+{
+    if (!self->search_matches || self->search_matches->len == 0) return;
+    
+    self->current_match_idx--;
+    if (self->current_match_idx < 0) {
+        self->current_match_idx = (int)self->search_matches->len - 1; /* Loop */
+    }
+    
+    SearchMatch m = g_array_index(self->search_matches, SearchMatch, self->current_match_idx);
+    
+    editor_widget_clear_cursors(self);
+    
+    EditorCursor *c = editor_widget_get_primary_cursor(self);
+    if (c) {
+        c->cursor_offset = m.end;
+        c->selection_anchor = m.start;
+        c->target_x = -1;
+        scroll_to_cursor(self);
+    }
+    
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+void 
+editor_widget_replace_current(EditorWidget *self, const char *replacement)
+{
+    if (self->current_match_idx == -1 || !self->search_matches) return;
+    if (self->current_match_idx >= (int)self->search_matches->len) return;
+    
+    SearchMatch m = g_array_index(self->search_matches, SearchMatch, self->current_match_idx);
+    
+    /* Check if current selection matches the match (safety) */
+    EditorCursor *c = editor_widget_get_primary_cursor(self);
+    /* Strict check: cursor must wrap the match */
+    /* Relaxed check: just replace at location */
+    
+    size_t new_pos = document_replace(self->doc, m, replacement);
+    
+    /* Update cursor to end of replacement */
+    editor_widget_clear_cursors(self);
+    editor_widget_add_cursor(self, new_pos);
+    
+    /* We must now REFRESH the search because offsets shifted! 
+       The caller (FindBar) is responsible for re-triggering search. 
+    */
+}
+
+void
+editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *end)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    
+    if (!self->vadjustment || self->line_height <= 0) {
+        if (start) *start = 0;
+        if (end) *end = 0;
+        return;
+    }
+    
+    double val = gtk_adjustment_get_value(self->vadjustment);
+    double page_size = gtk_adjustment_get_page_size(self->vadjustment);
+    
+    size_t s = (size_t)(val / self->line_height);
+    /* Add extra padding (buffer) to ensure smooth scrolling and verify coverage */
+    size_t lines_visible = (size_t)(page_size / self->line_height) + 5; 
+    size_t e = s + lines_visible;
+    
+    size_t total = 0;
+    if (self->doc) total = document_get_line_count(self->doc);
+    
+    if (s > total) s = total;
+    if (e > total) e = total;
+    
+    if (start) *start = s;
+    if (end) *end = e;
+}
+
+GtkAdjustment *
+editor_widget_get_vadjustment(EditorWidget *self)
+{
+    g_return_val_if_fail(EDITOR_IS_WIDGET(self), NULL);
+    return self->vadjustment;
+}
+
+void
+editor_widget_refresh_syntax(EditorWidget *self)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    if (self->syntax_ctx) {
+        syntax_context_invalidate_all(self->syntax_ctx);
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+    }
+}
+void
+editor_widget_reset_cursor_to_start(EditorWidget *self)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    if (self->cursors) {
+        g_array_set_size(self->cursors, 0);
+        EditorCursor c = {0};
+        c.target_x = -1;
+        g_array_append_val(self->cursors, c);
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+    }
 }

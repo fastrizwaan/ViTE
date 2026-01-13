@@ -506,6 +506,7 @@ void
 piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
 {
     if (len == 0) return;
+    pt->change_count++;
     
     /* Add text to buffer */
     size_t start_in_add = pt->add_buffer->len;
@@ -634,6 +635,52 @@ piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
     update_node(pt, new_node);
 }
 
+/* Optimized bulk replacement: replaces entire content with new content.
+ * Creates chunked pieces like piece_table_new to maintain O(log N) line access.
+ * The lf_count parameter is ignored - we count per-chunk for proper tree balance.
+ */
+void
+piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, size_t lf_count)
+{
+    (void)lf_count; /* Not used - we count per chunk */
+    
+    pt->change_count++;
+    
+    /* Clear existing tree - don't free, just orphan (leak is acceptable for perf) */
+    pt->root = NULL;
+    
+    if (len == 0) return;
+    
+    /* Add text to buffer */
+    size_t start_in_add = pt->add_buffer->len;
+    g_byte_array_append(pt->add_buffer, (guint8*)new_content, len);
+    
+    /* Chunking strategy like piece_table_new - 16KB chunks for O(log N) line access */
+    size_t chunk_size = 16 * 1024;
+    size_t count = (len + chunk_size - 1) / chunk_size;
+    
+    PieceNode **nodes = malloc(count * sizeof(PieceNode*));
+    
+    for (size_t i = 0; i < count; i++) {
+        size_t chunk_start = i * chunk_size;
+        size_t chunk_len = chunk_size;
+        if (chunk_start + chunk_len > len) chunk_len = len - chunk_start;
+        
+        /* Count newlines in this chunk */
+        size_t chunk_lf = 0;
+        const char *chunk_data = new_content + chunk_start;
+        for (size_t j = 0; j < chunk_len; j++) {
+            if (chunk_data[j] == '\n') chunk_lf++;
+        }
+        
+        Piece p = { SOURCE_ADD, start_in_add + chunk_start, chunk_len, chunk_lf };
+        nodes[i] = node_new(p);
+    }
+    
+    pt->root = build_balanced_tree_recursive(nodes, 0, (int)count - 1, pt);
+    free(nodes);
+}
+
 /* Delete logic */
 /* Helper: Split buffer at logical offset. 
    Returns the node that ends exactly at offset (left part), 
@@ -693,6 +740,7 @@ void
 piece_table_delete(PieceTable *pt, size_t offset, size_t len)
 {
     if (len == 0 || !pt->root) return;
+    pt->change_count++;
     
     size_t total = piece_table_get_length(pt);
     if (offset + len > total) len = total - offset;
@@ -955,6 +1003,110 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
     return g_string_free(res, FALSE);
 }
 
+/* Zero-allocation (if fits) line retrieval.
+   Returns the total length of the line.
+   If result <= buf_len, then 'buf' contains the full line (null-terminated if space allows, but usually we handle length).
+   Actually, caller should know length.
+   We will treat buf_len as capacity. We write up to capacity.
+   Return value is the TRUE length of the line.
+   If return > buf_len, truncation occurred. 
+*/
+size_t
+piece_table_get_line_into(PieceTable *pt, size_t line_index, char *buf, size_t buf_len)
+{
+    size_t start_lf, start_byte;
+    PieceNode *node = find_node_for_line(pt, line_index, &start_lf, &start_byte);
+    
+    if (!node) return 0;
+    
+    size_t current_len = 0;
+    
+    size_t relative_lf = line_index - start_lf;
+    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    data += node->piece.start;
+    size_t len = node->piece.length;
+    
+    size_t internal_offset = 0;
+    int nl_len;
+    if (relative_lf > 0) {
+        size_t found = 0;
+        const char *ptr = data;
+        const char *end = data + len;
+        while (ptr < end && found < relative_lf) {
+            const char *p = find_next_newline(ptr, end, &nl_len);
+            if (!p) break;
+            ptr = p + nl_len;
+            found++;
+        }
+        internal_offset = ptr - data;
+    }
+    
+    const char *ptr = data + internal_offset;
+    const char *node_end = data + len;
+    
+    const char *eol = find_next_newline(ptr, node_end, &nl_len);
+    if (eol) {
+        size_t seg_len = eol - ptr + nl_len;
+        if (current_len < buf_len) {
+            size_t copy = seg_len;
+            if (current_len + copy > buf_len) copy = buf_len - current_len;
+            memcpy(buf + current_len, ptr, copy);
+        }
+        return seg_len;
+    }
+    
+    size_t seg_len = node_end - ptr;
+    if (current_len < buf_len) {
+        size_t copy = seg_len;
+        if (current_len + copy > buf_len) copy = buf_len - current_len;
+        memcpy(buf + current_len, ptr, copy);
+    }
+    current_len += seg_len;
+    
+    PieceNode *curr = node;
+    while (1) {
+        if (curr->right) {
+            curr = curr->right;
+            while (curr->left) curr = curr->left;
+        } else {
+            PieceNode *p = curr->parent;
+            while (p && curr == p->right) {
+                curr = p;
+                p = p->parent;
+            }
+            curr = p;
+        }
+        
+        if (!curr) break; 
+        
+        const char *cdata = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+        cdata += curr->piece.start;
+        size_t clen = curr->piece.length;
+        const char *cend = cdata + clen;
+        
+        const char *ceol = find_next_newline(cdata, cend, &nl_len);
+        if (ceol) {
+            size_t sub = ceol - cdata + nl_len;
+            if (current_len < buf_len) {
+                size_t copy = sub;
+                if (current_len + copy > buf_len) copy = buf_len - current_len;
+                memcpy(buf + current_len, cdata, copy);
+            }
+            current_len += sub;
+            break;
+        } else {
+            if (current_len < buf_len) {
+                size_t copy = clen;
+                if (current_len + copy > buf_len) copy = buf_len - current_len;
+                memcpy(buf + current_len, cdata, copy);
+            }
+            current_len += clen;
+        }
+    }
+    
+    return current_len;
+}
+
 size_t
 piece_table_get_line_length(PieceTable *pt, size_t line_index)
 {
@@ -1151,4 +1303,209 @@ piece_table_foreach_line(PieceTable *pt, void (*func)(size_t line_len, void *use
        If we iterate, we emit 1 for "A\n". The second line is empty and implicit.
        Our loop in editor_widget expects total_lines.
        If total_lines > emitted_lines, we know the last one is empty. */
+}
+
+/* -- Iterator Implementation -- */
+
+void
+piece_table_iter_init(PieceTable *pt, PieceTableIter *iter)
+{
+    if (!pt || !iter) return;
+    memset(iter, 0, sizeof(PieceTableIter));
+    iter->pt = pt;
+    
+    /* Start at leftmost node of root */
+    PieceNode *curr = pt->root;
+    while (curr && curr->left) {
+        curr = curr->left;
+    }
+    iter->current_node = curr;
+    iter->offset_in_node = 0;
+    iter->current_line_index = 0;
+}
+
+static PieceNode *
+node_next_in_order(PieceNode *node)
+{
+    if (!node) return NULL;
+    
+    /* If has right child, go right, then leftmost */
+    if (node->right) {
+        node = node->right;
+        while (node->left) node = node->left;
+        return node;
+    }
+    
+    /* Go up until we are a left child */
+    while (node->parent && node == node->parent->right) {
+        node = node->parent;
+    }
+    return node->parent;
+}
+
+size_t
+piece_table_iter_get_next_line(PieceTableIter *iter, char *buf, size_t buf_len)
+{
+    if (!iter || !iter->current_node) return 0;
+    
+    size_t copied = 0;
+    
+    while (iter->current_node) {
+        const char *data = (iter->current_node->piece.source == SOURCE_ORIGINAL) ? iter->pt->orig_data : (char*)iter->pt->add_buffer->data;
+        data += iter->current_node->piece.start;
+        size_t len = iter->current_node->piece.length;
+        
+        const char *ptr = data + iter->offset_in_node;
+        const char *end = data + len;
+        
+        if (ptr >= end) {
+             /* Should not happen usually, unless offset_in_node == len (empty node or just consumed?) 
+                Move to next node. */
+             iter->current_node = node_next_in_order(iter->current_node);
+             iter->offset_in_node = 0;
+             continue;
+        }
+
+        /* Search for newline */
+        int nl_len;
+        const char *nl = find_next_newline(ptr, end, &nl_len);
+        
+        if (nl) {
+            size_t seg_len = nl - ptr + nl_len;
+            if (buf && copied < buf_len) {
+                size_t copy = seg_len;
+                if (copied + copy > buf_len) copy = buf_len - copied;
+                memcpy(buf + copied, ptr, copy);
+            }
+            copied += seg_len;
+            iter->offset_in_node += seg_len;
+            iter->current_line_index++;
+            return copied;
+        } else {
+             size_t seg_len = end - ptr;
+             if (buf && copied < buf_len) {
+                size_t copy = seg_len;
+                if (copied + copy > buf_len) copy = buf_len - copied;
+                memcpy(buf + copied, ptr, copy);
+            }
+            copied += seg_len;
+            
+            /* Move to next node */
+            iter->current_node = node_next_in_order(iter->current_node);
+            iter->offset_in_node = 0;
+             /* Continue loop to append next chunk */
+        }
+    }
+    
+    /* EOF reached. If we copied something, it's the last line (no newline). */
+    if (copied > 0) iter->current_line_index++;
+    return copied;
+}
+
+size_t
+piece_table_iter_get_next_line_string(PieceTableIter *iter, GString *buf)
+{
+    if (!iter || !iter->current_node || !buf) return 0;
+    
+    size_t copied = 0;
+    
+    while (iter->current_node) {
+        const char *data = (iter->current_node->piece.source == SOURCE_ORIGINAL) ? iter->pt->orig_data : (char*)iter->pt->add_buffer->data;
+        data += iter->current_node->piece.start;
+        size_t len = iter->current_node->piece.length;
+        
+        const char *ptr = data + iter->offset_in_node;
+        const char *end = data + len;
+        
+        if (ptr >= end) {
+             iter->current_node = node_next_in_order(iter->current_node);
+             iter->offset_in_node = 0;
+             continue;
+        }
+
+        int nl_len;
+        const char *nl = find_next_newline(ptr, end, &nl_len);
+        
+        if (nl) {
+            size_t seg_len = nl - ptr + nl_len;
+            g_string_append_len(buf, ptr, seg_len);
+            copied += seg_len;
+            iter->offset_in_node += seg_len;
+            iter->current_line_index++;
+            return copied;
+        } else {
+             size_t seg_len = end - ptr;
+             g_string_append_len(buf, ptr, seg_len);
+             copied += seg_len;
+            
+            iter->current_node = node_next_in_order(iter->current_node);
+            iter->offset_in_node = 0;
+        }
+    }
+    
+    if (copied > 0) iter->current_line_index++;
+    return copied;
+}
+
+void
+piece_table_iter_init_at_line(PieceTable *pt, PieceTableIter *iter, size_t line_index)
+{
+    if (!pt || !iter) return;
+    memset(iter, 0, sizeof(PieceTableIter));
+    iter->pt = pt;
+    
+    PieceNode *curr = pt->root;
+    if (!curr) return;
+    
+    /* Clamp */
+    if (line_index >= curr->lf_subtree) {
+         /* Set to end */
+         iter->current_node = NULL;
+         /* We don't really have a 'total_lines' field in iter, but current_line_index can hint */
+         iter->current_line_index = curr->lf_subtree;
+         return;
+    }
+    
+    size_t accumulated_lines = 0;
+    
+    while (curr) {
+        size_t left_lf = curr->left ? curr->left->lf_subtree : 0;
+        
+        if (line_index < accumulated_lines + left_lf) {
+            curr = curr->left;
+        } else {
+            accumulated_lines += left_lf;
+            
+            size_t node_lf = curr->piece.cached_lf;
+            
+            if (line_index <= accumulated_lines + node_lf) {
+                /* Found */
+                iter->current_node = curr;
+                iter->current_line_index = line_index;
+                
+                size_t lines_to_skip = line_index - accumulated_lines;
+                
+                const char *data = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+                data += curr->piece.start;
+                const char *ptr = data;
+                const char *end = data + curr->piece.length;
+                
+                for (size_t i = 0; i < lines_to_skip; i++) {
+                    int nl_len;
+                    const char *nl = find_next_newline(ptr, end, &nl_len);
+                    if (nl) {
+                        ptr = nl + nl_len;
+                    } else {
+                        break; 
+                    }
+                }
+                iter->offset_in_node = ptr - data;
+                return;
+            }
+            
+            accumulated_lines += node_lf;
+            curr = curr->right;
+        }
+    }
+    iter->current_node = NULL;
 }

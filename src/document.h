@@ -7,6 +7,9 @@
 
 typedef struct _Document Document;
 
+void document_suspend_callbacks(Document *doc);
+void document_resume_callbacks(Document *doc);
+
 Document *document_new(const char *filename);
 void document_free(Document *doc);
 const char *document_get_file_path(Document *doc);
@@ -44,5 +47,57 @@ void document_end_undo_group(Document *doc);
 
 void document_set_undo_group_selection(Document *doc, size_t start, size_t end);
 void document_set_redo_group_selection(Document *doc, size_t start, size_t end);
+
+
+typedef struct {
+    size_t start;
+    size_t end;
+} SearchMatch;
+
+/* Async Search API */
+typedef struct _SearchTask SearchTask;
+typedef struct _ReplaceTask ReplaceTask;
+typedef void (*SearchCallback)(GArray *matches, gboolean finished, void *user_data);
+typedef void (*ReplaceProgressCallback)(int processed, int total, gboolean finished, void *user_data);
+
+SearchTask *document_search_async_start(Document *doc, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word, SearchCallback callback, void *user_data);
+void document_search_async_cancel(SearchTask *task);
+
+ReplaceTask *document_replace_async_start(Document *doc, GArray *matches, const char *replacement, gboolean regex, GRegex *cached_regex, ReplaceProgressCallback callback, void *user_data);
+void document_replace_async_cancel(ReplaceTask *task);
+GArray *document_search_task_get_matches(SearchTask *task);
+GRegex *document_search_task_get_pattern(SearchTask *task);
+size_t document_search_task_get_total_lines(SearchTask *task);
+size_t document_search_task_get_lines_searched(SearchTask *task);
+
+GArray *document_search(Document *doc, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word);
+gboolean document_find_next(Document *doc, SearchMatch *result, size_t start_pos, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word);
+gboolean document_find_prev(Document *doc, SearchMatch *result, size_t start_pos, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word);
+
+/* Viewport-only search for huge files - searches only within specified line range */
+GArray *document_search_viewport(Document *doc, const char *raw_query, 
+                                  gboolean regex, gboolean case_sensitive, 
+                                  gboolean whole_word,
+                                  size_t start_line, size_t end_line);
+
+/* Targeted replace - only processes specified lines for efficiency */
+int document_replace_targeted_lines(Document *doc, GArray *target_lines,
+                                     const char *query, const char *replacement,
+                                     gboolean regex, gboolean case_sensitive);
+
+/* Replace APIs */
+/* Replace single match. Returns new cursor position (end of replacement). */
+size_t document_replace(Document *doc, SearchMatch match, const char *replacement);
+/* Replace all matches. Returns number of replacements. */
+/* Replace all matches. Returns number of replacements. */
+int document_replace_all(Document *doc, const char *raw_query, const char *replacement, gboolean regex, gboolean case_sensitive, gboolean whole_word);
+
+/* Efficiently replace pre-calculated matches (skips re-search). matches must be valid. */
+int document_replace_known_matches(Document *doc, GArray *matches, const char *replacement, gboolean regex, GRegex *cached_regex);
+
+const char *document_search_task_get_query(SearchTask *task);
+gboolean document_search_task_get_regex(SearchTask *task);
+gboolean document_search_task_get_case_sensitive(SearchTask *task);
+gboolean document_search_task_get_whole_word(SearchTask *task);
 
 #endif
