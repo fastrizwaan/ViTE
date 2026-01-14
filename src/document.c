@@ -80,6 +80,12 @@ document_get_line(Document *doc, size_t line_index, size_t *len)
     return piece_table_get_line(doc->pt, line_index, len);
 }
 
+char *
+document_get_line_truncated(Document *doc, size_t line_index, size_t *out_len, size_t max_len)
+{
+    return piece_table_get_line_truncated(doc->pt, line_index, out_len, max_len);
+}
+
 size_t
 document_get_line_length(Document *doc, size_t line_index)
 {

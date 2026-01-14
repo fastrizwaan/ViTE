@@ -499,7 +499,6 @@ piece_table_new(const char *filename)
     } else {
         pt->root = NULL;
     }
-
     return pt;
 }
 
@@ -575,10 +574,10 @@ piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
         /* Append at end */
         /* Splay rightmost? Use simpler append */
         /* Assuming offset == length, find max */
-        PieceNode *curr = pt->root;
-        while (curr->right) curr = curr->right;
-        
-        curr->right = new_node;
+     PieceNode *curr = pt->root;
+     while (curr->right) curr = curr->right;
+     
+     curr->right = new_node;
         new_node->parent = curr;
         splay(pt, new_node); /* Updates everything */
         return;
@@ -1553,4 +1552,92 @@ piece_table_iter_init_at_line(PieceTable *pt, PieceTableIter *iter, size_t line_
         }
     }
     iter->current_node = NULL;
+}
+char *
+piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_len, size_t max_len)
+{
+    size_t start_lf, start_byte;
+    PieceNode *node = find_node_for_line(pt, line_index, &start_lf, &start_byte);
+    
+    if (!node) {
+        *out_len = 0;
+        return g_strdup("");
+    }
+    
+    size_t relative_lf = line_index - start_lf;
+    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    data += node->piece.start;
+    size_t len = node->piece.length;
+    
+    size_t internal_offset = 0;
+    int nl_len;
+    if (relative_lf > 0) {
+        size_t found = 0;
+        const char *ptr = data;
+        const char *end = data + len;
+        while (ptr < end && found < relative_lf) {
+            const char *p = find_next_newline(ptr, end, &nl_len);
+            if (!p) break;
+            ptr = p + nl_len;
+            found++;
+        }
+        internal_offset = ptr - data;
+    }
+    
+    GString *res = g_string_new("");
+    const char *ptr = data + internal_offset;
+    const char *node_end = data + len;
+    
+    const char *eol = find_next_newline(ptr, node_end, &nl_len);
+    if (eol) {
+        size_t chunk = eol - ptr + nl_len;
+        if (chunk > max_len) chunk = max_len;
+        g_string_append_len(res, ptr, chunk); 
+        *out_len = res->len;
+        return g_string_free(res, FALSE);
+    }
+    
+    size_t chunk = node_end - ptr;
+    if (chunk > max_len) chunk = max_len;
+    g_string_append_len(res, ptr, chunk);
+    
+    if (res->len >= max_len) {
+        *out_len = res->len;
+        return g_string_free(res, FALSE);
+    }
+    
+    PieceNode *curr = node;
+    while (res->len < max_len) {
+        if (curr->right) {
+            curr = curr->right;
+            while (curr->left) curr = curr->left;
+        } else {
+            while (curr->parent && curr == curr->parent->right) {
+                curr = curr->parent;
+            }
+            curr = curr->parent;
+            if (!curr) break;
+        }
+        
+        data = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+        data += curr->piece.start;
+        len = curr->piece.length;
+        ptr = data;
+        node_end = data + len;
+        
+        eol = find_next_newline(ptr, node_end, &nl_len);
+        if (eol) {
+            size_t chunk = eol - ptr + nl_len;
+            if (res->len + chunk > max_len) chunk = max_len - res->len;
+            g_string_append_len(res, ptr, chunk);
+            break; /* Found newline, stop */
+        } else {
+            size_t chunk = node_end - ptr;
+            if (res->len + chunk > max_len) chunk = max_len - res->len;
+            g_string_append_len(res, ptr, chunk);
+        }
+    }
+    
+    *out_len = res->len;
+    return g_string_free(res, FALSE);
 }

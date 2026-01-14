@@ -2,6 +2,8 @@
 #include "syntax.h"
 #include <math.h>
 
+#define MAX_PANGO_LINE_LEN 10485760 /* 10MB limit for single line rendering to avoid int overflow/crash */
+
 typedef struct {
     size_t cursor_offset;
     size_t selection_anchor;
@@ -286,6 +288,7 @@ calculate_line_height_cb(size_t len, void *user_data)
 static void
 editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widget_height)
 {
+    // fprintf(stderr, "[DEBUG] update_adjustments start\n");
     if (!self->vadjustment || !self->doc) return;
     
     /* If called with -1, use current */
@@ -715,6 +718,7 @@ editor_widget_ensure_metrics(EditorWidget *self)
 static void
 editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 {
+    // fprintf(stderr, "[DEBUG] snapshot start\n");
     EditorWidget *self = EDITOR_WIDGET(widget);
     if (!self->doc) return;
 
@@ -834,10 +838,12 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
     for (size_t i = 0; i < count_lines; ++i) {
         size_t line_idx = start_line + i;
+        // fprintf(stderr, "[DEBUG] snapshot loop: line_idx=%zu\n", line_idx);
         if (line_idx >= max_lines) break;
 
         size_t len;
-        char *text = document_get_line(self->doc, line_idx, &len);
+        char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024);
+        // fprintf(stderr, "[DEBUG] snapshot loop: len=%zu\n", len);
 
         /* UTF-8 Validation */
         if (!g_utf8_validate(text, len, NULL)) {
@@ -854,7 +860,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
         PangoLayout *layout = pango_layout_new(context);
         pango_layout_set_font_description(layout, self->font_desc);
-        pango_layout_set_text(layout, text, (int)len);
+        int pango_len = (len > MAX_PANGO_LINE_LEN) ? MAX_PANGO_LINE_LEN : (int)len;
+        pango_layout_set_text(layout, text, pango_len);
         
         /* Word Wrap - account for gutter and padding */
         if (self->wrap_lines) {
@@ -929,6 +936,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             
             g_object_unref(lnum_layout);
         }
+        
+        // fprintf(stderr, "[DEBUG] snapshot loop: line_idx=%zu done\n", line_idx);
 
         gtk_snapshot_save(snapshot);
         /* Clip text area to ensure it doesn't draw over the gutter */
@@ -1107,7 +1116,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                 if (self->cursor_alpha > 0.01 && !has_selection && !self->is_dragging_selection) {
                      size_t index_in_line = cur->cursor_offset - line_start_off;
                      /* Safety clamp */
-                     if (index_in_line > len) index_in_line = len;
+                     /* Safety clamp to layout length */
+                     size_t effective_len = (len > MAX_PANGO_LINE_LEN) ? MAX_PANGO_LINE_LEN : len;
+                     if (index_in_line > effective_len) index_in_line = effective_len;
                      
                      PangoRectangle strong_pos;
                      pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
@@ -1142,8 +1153,11 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                 size_t index_in_line = self->drag_drop_offset - line_start_off;
                 if (index_in_line > len) index_in_line = len;
 
+                size_t effective_len = strlen(pango_layout_get_text(layout));
+                size_t safe_idx = MIN(index_in_line, effective_len);
+
                 PangoRectangle strong_pos;
-                pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
+                pango_layout_get_cursor_pos(layout, (int)safe_idx, &strong_pos, NULL);
 
                 GdkRGBA caret_color = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){1.0, 0.647, 0.0, 1.0};
                 /* Snap for drop caret */
@@ -1176,8 +1190,10 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
              break;
         }
     }
+    // fprintf(stderr, "[DEBUG] snapshot: Loop finished\n");
 
     /* Draw DnD Overlays */
+    // fprintf(stderr, "[DEBUG] snapshot: Checking DnD\n");
     if (self->is_dnd_active) {
         /* 1. Ghost Text (Cursor Follower) */
         if (self->drag_ghost_layout) {
@@ -1285,6 +1301,7 @@ static void scroll_to_cursor(EditorWidget *self);
 static void
 editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t *out_offset)
 {
+    // g_print("[DEBUG] get_offset_at_point: x=%f, y=%f\n", x, y); /* Commented out to reduce noise unless clicking */
     if (!self->doc) {
         *out_offset = 0;
         return;
@@ -1350,7 +1367,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     /* Limit scan to reasonable screen height + buffer */
     while (line_idx < max_lines) {
         size_t len;
-        char *text = document_get_line(self->doc, line_idx, &len);
+        char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024);
         
         if (!g_utf8_validate(text, len, NULL)) {
              char *safe = g_utf8_make_valid(text, len);
@@ -1362,7 +1379,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         
         PangoLayout *layout = pango_layout_new(context);
         pango_layout_set_font_description(layout, self->font_desc);
-        pango_layout_set_text(layout, text, (int)len);
+        pango_layout_set_text(layout, text, (len > MAX_PANGO_LINE_LEN) ? MAX_PANGO_LINE_LEN : (int)len);
         
         if (self->wrap_lines) {
             int available_w = width - text_start_x;
@@ -2385,7 +2402,11 @@ editor_widget_update_im_cursor_location(EditorWidget *self)
     if (!layout) return;
 
     PangoRectangle strong_pos;
-    pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &strong_pos, NULL);
+    /* CLAMP index to actual layout length (Pango may have truncated invalid UTF-8) */
+    size_t effective_len = strlen(pango_layout_get_text(layout));
+    size_t safe_idx = MIN(char_idx, effective_len);
+    
+    pango_layout_get_cursor_pos(layout, (int)safe_idx, &strong_pos, NULL);
 
     double cursor_x = pango_units_to_double(strong_pos.x);
     double cursor_y = pango_units_to_double(strong_pos.y);
@@ -2444,7 +2465,10 @@ scroll_to_cursor(EditorWidget *self)
     size_t line_start = document_get_offset_of_line(self->doc, cursor_line);
     size_t idx = self->cursor_offset - line_start;
     PangoRectangle pos;
-    pango_layout_get_cursor_pos(layout, MIN((int)idx, (int)len), &pos, NULL);
+    
+    size_t effective_len = strlen(pango_layout_get_text(layout));
+    size_t safe_idx = MIN(idx, effective_len);
+    pango_layout_get_cursor_pos(layout, (int)safe_idx, &pos, NULL);
     
     double local_y = pango_units_to_double(pos.y);
     double cursor_h = pango_units_to_double(pos.height);
@@ -2521,8 +2545,12 @@ static PangoLayout *
 create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len)
 {
     size_t len;
-    char *text = document_get_line(self->doc, line_idx, &len);
+    char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024);
     if (!text) return NULL;
+    
+    /* SAFETY: Embedded nulls can confuse Pango if we pass explict length > strlen. */
+    size_t true_len = strlen(text);
+    if (true_len < len) len = true_len;
 
     if (!g_utf8_validate(text, len, NULL)) {
         char *safe = g_utf8_make_valid(text, len);
@@ -2536,10 +2564,14 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
         len--;
     }
 
-    PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
-    PangoLayout *layout = pango_layout_new(context);
+    /* Use high-level helper to ensure context is correct */
+    PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(self), text);
     pango_layout_set_font_description(layout, self->font_desc);
-    pango_layout_set_text(layout, text, (int)len);
+    
+    /* Enforce length limit if text was longer than we want? 
+       document_get_line_truncated already limited it. 
+       But we might want to set width/wrap attributes. 
+    */
     
     /* Apply Syntax Highlighting for correct metrics (bold, etc) */
     if (self->syntax_ctx) {
@@ -2586,8 +2618,11 @@ update_target_x(EditorWidget *self)
         
         if (index_in_line > len) index_in_line = len;
         
+        size_t effective_len = strlen(pango_layout_get_text(layout));
+        size_t safe_idx = MIN(index_in_line, effective_len);
+
         PangoRectangle strong_pos;
-        pango_layout_get_cursor_pos(layout, (int)index_in_line, &strong_pos, NULL);
+        pango_layout_get_cursor_pos(layout, (int)safe_idx, &strong_pos, NULL);
         cur->target_x = pango_units_to_double(strong_pos.x);
         
         g_object_unref(layout);
@@ -2611,14 +2646,18 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
         PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
         if (!layout) continue;
 
+        size_t effective_len = strlen(pango_layout_get_text(layout));
+
         if (cur->target_x < 0) {
              PangoRectangle strong_pos;
-             pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &strong_pos, NULL);
+             size_t safe_idx = MIN(char_idx, effective_len);
+             pango_layout_get_cursor_pos(layout, (int)safe_idx, &strong_pos, NULL);
              cur->target_x = pango_units_to_double(strong_pos.x);
         }
         
         PangoRectangle cursor_pos;
-        pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &cursor_pos, NULL);
+        size_t safe_idx = MIN(char_idx, effective_len);
+        pango_layout_get_cursor_pos(layout, (int)safe_idx, &cursor_pos, NULL);
         int cursor_y_center = cursor_pos.y + (cursor_pos.height / 2);
         
         PangoLayoutIter *iter = pango_layout_get_iter(layout);
@@ -2731,17 +2770,21 @@ editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_delta)
     PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
     if (!layout) return;
     
+    size_t effective_len = strlen(pango_layout_get_text(layout));
+    
     double target_x = ref_cur->target_x;
     if (target_x < 0) {
          PangoRectangle strong_pos;
-         pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &strong_pos, NULL);
+         size_t safe_idx = MIN(char_idx, effective_len);
+         pango_layout_get_cursor_pos(layout, (int)safe_idx, &strong_pos, NULL);
          target_x = pango_units_to_double(strong_pos.x);
          /* Update reference cursor too so it remembers x for subsequent moves */
          ref_cur->target_x = target_x;
     }
     
     PangoRectangle cursor_pos;
-    pango_layout_get_cursor_pos(layout, (int)MIN(char_idx, len), &cursor_pos, NULL);
+    size_t safe_idx = MIN(char_idx, effective_len);
+    pango_layout_get_cursor_pos(layout, (int)safe_idx, &cursor_pos, NULL);
     int cursor_y_center = cursor_pos.y + (cursor_pos.height / 2);
     
     PangoLayoutIter *iter = pango_layout_get_iter(layout);
@@ -3185,7 +3228,10 @@ get_cursor_screen_coordinates(EditorWidget *self, double *out_x, double *out_y)
             size_t line_start = document_get_offset_of_line(self->doc, line);
             size_t idx = self->cursor_offset - line_start;
             PangoRectangle pos;
-            pango_layout_get_cursor_pos(layout, MIN((int)idx, (int)len), &pos, NULL);
+            
+            size_t effective_len = strlen(pango_layout_get_text(layout));
+            size_t safe_idx = MIN(idx, effective_len);
+            pango_layout_get_cursor_pos(layout, (int)safe_idx, &pos, NULL);
             
             if (out_x) *out_x = pango_units_to_double(pos.x) + self->padding_left;
             if (out_y) *out_y = current_y + pango_units_to_double(pos.y) + self->padding_top;
