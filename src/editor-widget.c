@@ -719,6 +719,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     int width = gtk_widget_get_width(widget);
     int height = gtk_widget_get_height(widget);
     
+    /* Clip to visible area to prevent drawing over splitters */
+    gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)height));
+    
     /* Ensure background is cleared/drawn to prevent drag artifacts */
     GdkRGBA bg_color = {1, 1, 1, 1}; /* Default white */
     if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
@@ -1008,7 +1011,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             /* Optimized check: Is cursor within this line's range? */
             if (cur->cursor_offset >= line_start_off && cur->cursor_offset <= (line_start_off + len)) {
                 
-                if (self->cursor_alpha > 0.01 && !has_selection && !self->is_dragging_selection) {
+                if (gtk_widget_has_focus(widget) && self->cursor_alpha > 0.01 && !has_selection && !self->is_dragging_selection) {
                      size_t index_in_line = cur->cursor_offset - line_start_off;
                      /* Safety clamp */
                      if (index_in_line > len) index_in_line = len;
@@ -1134,6 +1137,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     if (cursor_lines != cursor_lines_stack) {
         g_free(cursor_lines);
     }
+    
+    gtk_snapshot_pop(snapshot);
 }
 
 
