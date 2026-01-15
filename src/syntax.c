@@ -176,16 +176,9 @@ syntax_context_free(SyntaxContext *ctx)
     if (ctx->sh_comment) g_regex_unref(ctx->sh_comment);
     if (ctx->sh_variable) g_regex_unref(ctx->sh_variable);
     
-    /* Free cache - entries freed by hash table */
+    /* Free cache - g_hash_table_destroy triggers the destroy callback (syntax_cache_entry_free)
+     * for each entry, which handles cleanup - do NOT unref manually to avoid double-free. */
     if (ctx->line_cache) {
-        /* Free PangoAttrLists from cache entries */
-        GHashTableIter iter;
-        gpointer key, value;
-        g_hash_table_iter_init(&iter, ctx->line_cache);
-        while (g_hash_table_iter_next(&iter, &key, &value)) {
-            SyntaxCacheEntry *entry = value;
-            if (entry->attrs) pango_attr_list_unref(entry->attrs);
-        }
         g_hash_table_destroy(ctx->line_cache);
     }
     
@@ -217,7 +210,9 @@ syntax_context_invalidate(SyntaxContext *ctx, size_t start_line)
     if (start_line < ctx->state_chain->len) {
         g_byte_array_set_size(ctx->state_chain, start_line);
     }
-    /* Remove cache entries from start_line onwards */
+    /* Remove cache entries from start_line onwards.
+     * Note: g_hash_table_iter_remove will trigger the destroy callback
+     * (syntax_cache_entry_free) which handles cleanup - do NOT unref manually. */
     if (ctx->line_cache) {
         GHashTableIter iter;
         gpointer key, value;
@@ -225,8 +220,6 @@ syntax_context_invalidate(SyntaxContext *ctx, size_t start_line)
         while (g_hash_table_iter_next(&iter, &key, &value)) {
             size_t line = GPOINTER_TO_SIZE(key);
             if (line >= start_line) {
-                SyntaxCacheEntry *entry = value;
-                if (entry->attrs) pango_attr_list_unref(entry->attrs);
                 g_hash_table_iter_remove(&iter);
             }
         }
@@ -237,14 +230,9 @@ void
 syntax_context_invalidate_all(SyntaxContext *ctx)
 {
     g_byte_array_set_size(ctx->state_chain, 0);
+    /* g_hash_table_remove_all triggers the destroy callback (syntax_cache_entry_free)
+     * for each entry, which handles cleanup - do NOT unref manually to avoid double-free. */
     if (ctx->line_cache) {
-        GHashTableIter iter;
-        gpointer key, value;
-        g_hash_table_iter_init(&iter, ctx->line_cache);
-        while (g_hash_table_iter_next(&iter, &key, &value)) {
-            SyntaxCacheEntry *entry = value;
-            if (entry->attrs) pango_attr_list_unref(entry->attrs);
-        }
         g_hash_table_remove_all(ctx->line_cache);
     }
 }
