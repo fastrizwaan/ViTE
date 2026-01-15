@@ -725,6 +725,83 @@ piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, siz
     free(nodes);
 }
 
+void
+piece_table_replace_from_fd(PieceTable *pt, int fd, size_t len, size_t lf_count)
+{
+    (void)lf_count; /* Not used - we count per chunk */
+    
+    /* 1. Map the new file */
+    struct stat st;
+    if (fstat(fd, &st) < 0) {
+        g_warning("fstat failed: %s", strerror(errno));
+        return;
+    }
+    size_t size = st.st_size;
+    if (size == 0) size = 1; /* Handle empty file case for mmap? */
+    
+    char *map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (map == MAP_FAILED) {
+        g_warning("mmap failed: %s", strerror(errno));
+        return;
+    }
+
+    pt->change_count++;
+    
+    /* 2. Free old tree */
+    free_tree(pt->root);
+    pt->root = NULL;
+
+    /* 3. Free old backing store */
+    if (pt->is_mmapped) {
+        if (pt->mmap_base && pt->mmap_size > 0)
+            munmap(pt->mmap_base, pt->mmap_size);
+    } else {
+        if (pt->orig_data)
+            g_free(pt->orig_data);
+    }
+    
+    /* 4. Set up new backing store */
+    pt->is_mmapped = TRUE;
+    pt->mmap_base = map;
+    pt->mmap_size = size;
+    pt->orig_data = map;
+    pt->orig_size = len; /* Use passed length (should match file size mostly) */
+    
+    if (len > size) pt->orig_size = size; /* Safety cap */
+    
+    /* 5. Reset add buffer */
+    pt->add_buffer->len = 0;
+    
+    /* 6. Rebuild tree (Chunking strategy for O(log N) access) */
+    if (len == 0) return;
+    
+    size_t chunk_size = 16 * 1024;
+    size_t count = (len + chunk_size - 1) / chunk_size;
+    
+    PieceNode **nodes = malloc(count * sizeof(PieceNode*));
+    if (!nodes) return;
+    
+    for (size_t i = 0; i < count; i++) {
+        size_t chunk_start = i * chunk_size;
+        size_t chunk_len = chunk_size;
+        if (chunk_start + chunk_len > len) chunk_len = len - chunk_start;
+        
+        /* Count newlines in this chunk */
+        size_t chunk_lf = 0;
+        const char *chunk_data = pt->orig_data + chunk_start;
+        for (size_t j = 0; j < chunk_len; j++) {
+            if (chunk_data[j] == '\n') chunk_lf++;
+        }
+        
+        Piece p = { SOURCE_ORIGINAL, chunk_start, chunk_len, chunk_lf };
+        nodes[i] = node_new(p);
+    }
+    
+    pt->root = build_balanced_tree_recursive(nodes, 0, (int)count - 1, pt);
+    free(nodes);
+}
+
+
 /* Delete logic */
 /* Helper: Split buffer at logical offset. 
    Returns the node that ends exactly at offset (left part), 

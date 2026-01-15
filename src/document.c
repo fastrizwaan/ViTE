@@ -1,5 +1,11 @@
 #include "document.h"
+#include "compact-matches.h"
 #include <string.h>
+#include <stdio.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 
 struct _Document {
     PieceTable *pt;
@@ -916,7 +922,11 @@ struct _SearchTask {
     size_t total_lines;
     size_t lines_searched;
     
-    GArray *matches;
+    /* Memory-efficient match storage using delta+varint encoding */
+    CompactMatches *compact_matches;
+    GArray *matches;         /* Lazily populated from compact_matches when needed */
+    size_t match_length;     /* Length of query for end offset calculation */
+    
     SearchCallback callback;
     void *user_data;
     
@@ -985,11 +995,10 @@ search_idle_step(gpointer user_data)
                      if (!found) break;
                      
                      size_t start_idx = found - line;
+                     size_t start_offset = task->current_offset + start_idx;
                      
-                     SearchMatch m;
-                     m.start = task->current_offset + start_idx;
-                     m.end = task->current_offset + start_idx + query_len;
-                     g_array_append_val(task->matches, m);
+                     /* Use compact storage - only stores start, delta encoded */
+                     compact_matches_append(task->compact_matches, start_offset);
                      
                      haystack = found + 1; 
                  }
@@ -1015,6 +1024,11 @@ search_idle_step(gpointer user_data)
         
         task->current_offset += len;
         task->lines_searched++;
+        
+        if (task->lines_searched % 100000 == 0) {
+            g_print("[DEBUG] Search progress: %zu lines, offset: %zu\n", task->lines_searched, task->current_offset);
+        }
+
         lines_this_chunk++;
     }
     
@@ -1025,6 +1039,7 @@ search_idle_step(gpointer user_data)
     }
     
     /* Finished - EOF was reached */
+    g_print("[DEBUG] Search finished. Total matches: %zu, Total lines: %zu\n", document_search_task_get_match_count(task), task->total_lines);
     if (task->callback) task->callback(task->matches, TRUE, task->user_data);
     
     task->idle_id = 0; /* Source removed */
@@ -1043,7 +1058,8 @@ document_search_async_start(Document *doc, const char *raw_query, gboolean regex
     task->doc = doc;
     task->callback = callback;
     task->user_data = user_data;
-    task->matches = g_array_new(FALSE, FALSE, sizeof(SearchMatch));
+    task->matches = NULL;  /* Lazily populated from compact_matches when needed */
+    task->compact_matches = NULL;
     task->original_query = g_strdup(raw_query);
     
     piece_table_iter_init(doc->pt, &task->iter);
@@ -1061,8 +1077,14 @@ document_search_async_start(Document *doc, const char *raw_query, gboolean regex
         task->is_literal = TRUE;
         task->query = g_strdup(raw_query);
         task->pattern = NULL;
+        task->match_length = strlen(raw_query);
+        /* Use compact storage for literal search - ~8x memory reduction */
+        task->compact_matches = compact_matches_new(task->match_length);
     } else {
         task->is_literal = FALSE;
+        /* For regex, use GArray since match lengths vary */
+        task->matches = g_array_new(FALSE, FALSE, sizeof(SearchMatch));
+        
         /* Prepare regex */
         char *query = NULL;
         if (!regex) {
@@ -1113,6 +1135,10 @@ document_search_async_cancel(SearchTask *task)
         g_array_unref(task->matches);
     }
     
+    if (task->compact_matches) {
+        compact_matches_free(task->compact_matches);
+    }
+    
     if (task->pattern) {
         g_regex_unref(task->pattern);
     }
@@ -1135,6 +1161,12 @@ GArray *
 document_search_task_get_matches(SearchTask *task)
 {
     if (!task) return NULL;
+    
+    /* If we have compact matches but no GArray, convert lazily */
+    if (task->compact_matches && !task->matches) {
+        task->matches = compact_matches_to_array(task->compact_matches);
+    }
+    
     return task->matches;
 }
 
@@ -1161,6 +1193,40 @@ const char *document_search_task_get_query(SearchTask *task) { return task ? tas
 gboolean document_search_task_get_regex(SearchTask *task) { return task ? task->is_regex : FALSE; }
 gboolean document_search_task_get_case_sensitive(SearchTask *task) { return task ? task->case_sensitive : FALSE; }
 gboolean document_search_task_get_whole_word(SearchTask *task) { return task ? task->whole_word : FALSE; }
+
+/* Get total match count without converting to GArray */
+size_t document_search_task_get_match_count(SearchTask *task) {
+    if (!task) return 0;
+    if (task->compact_matches) {
+        return compact_matches_count(task->compact_matches);
+    }
+    return task->matches ? task->matches->len : 0;
+}
+
+/* Get only viewport matches using binary search - O(log N) instead of O(N) */
+GArray *document_search_task_get_viewport_matches(SearchTask *task, size_t start_offset, size_t end_offset) {
+    if (!task) return NULL;
+    
+    if (task->compact_matches) {
+        /* Use binary search to find matches in range */
+        size_t first_idx, last_idx;
+        compact_matches_find_range(task->compact_matches, start_offset, end_offset, &first_idx, &last_idx);
+        return compact_matches_range_to_array(task->compact_matches, first_idx, last_idx);
+    }
+    
+    /* Fallback for regex search (uses GArray) - linear search */
+    if (!task->matches || task->matches->len == 0) return NULL;
+    
+    GArray *viewport = g_array_new(FALSE, FALSE, sizeof(SearchMatch));
+    for (guint i = 0; i < task->matches->len; i++) {
+        SearchMatch m = g_array_index(task->matches, SearchMatch, i);
+        if (m.start >= start_offset && m.start < end_offset) {
+            g_array_append_val(viewport, m);
+        }
+        if (m.start >= end_offset) break;  /* Sorted, can stop early */
+    }
+    return viewport;
+}
 
 
 static GRegex *compile_search_regex(const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word) {
@@ -1587,3 +1653,294 @@ void document_replace_async_cancel(ReplaceTask *task) {
     
     replace_task_free(task);
 }
+/* --- Streaming Replace Implementation (File-Backed, Buffered) --- */
+
+struct _StreamingReplaceTask {
+    Document *doc;
+    char *query;           /* For literal fast path */
+    char *replacement;     /* Normalized replacement string */
+    size_t replacement_len;
+    size_t query_len;      /* Length of literal query */
+    GRegex *pattern;       /* Compiled pattern for regex */
+    
+    gboolean regex;
+    gboolean case_sensitive;
+    
+    /* Line-by-line processing */
+    PieceTableIter iter;
+    GString *line_buf;
+    size_t current_line;
+    size_t total_lines;
+    int replace_count;
+    size_t lf_count;
+    
+    /* Temp file for output (buffered I/O) */
+    FILE *output_file;
+    char *output_path;
+    size_t output_size;
+    
+    guint idle_id;
+    ReplaceProgressCallback callback;
+    void *user_data;
+};
+
+static void streaming_replace_task_free(StreamingReplaceTask *task) {
+    if (!task) return;
+    if (task->idle_id) g_source_remove(task->idle_id);
+    if (task->query) g_free(task->query);
+    if (task->replacement) g_free(task->replacement);
+    if (task->pattern) g_regex_unref(task->pattern);
+    if (task->line_buf) g_string_free(task->line_buf, TRUE);
+    if (task->output_file) fclose(task->output_file);
+    if (task->output_path) {
+        unlink(task->output_path);
+        g_free(task->output_path);
+    }
+    g_free(task);
+}
+
+static gboolean streaming_replace_idle_step(gpointer user_data) {
+    StreamingReplaceTask *task = (StreamingReplaceTask *)user_data;
+    if (!task) return G_SOURCE_REMOVE;
+    
+    Document *doc = task->doc;
+    
+    /* Time Budget: 50ms (increased for speed) */
+    gint64 start_time = g_get_monotonic_time();
+    gint64 budget_micros = 50000;
+    
+    size_t repl_len = task->replacement_len;
+    size_t query_len = task->query_len;
+    
+    /* Process lines - write to temp file */
+    while (task->current_line < task->total_lines) {
+        /* Check budget every 1000 lines (less frequent checks) */
+        if (task->current_line % 1000 == 0 && task->current_line > 0) {
+            if (g_get_monotonic_time() - start_time > budget_micros) {
+                /* Report progress and yield */
+                if (task->callback) {
+                    int progress_pct = (int)((task->current_line * 100) / task->total_lines);
+                    task->callback(progress_pct, task->replace_count, FALSE, task->user_data);
+                }
+                return G_SOURCE_CONTINUE;
+            }
+        }
+        
+        /* Get next line */
+        g_string_truncate(task->line_buf, 0);
+        size_t len = piece_table_iter_get_next_line_string(&task->iter, task->line_buf);
+        
+        if (len == 0 && task->line_buf->len == 0) {
+            break; /* EOF */
+        }
+        
+        char *line = task->line_buf->str;
+        size_t line_len = task->line_buf->len;
+        
+        /* Process this line - write transformed content to temp file */
+        if (task->regex && task->pattern) {
+            /* Regex replacement */
+            GError *err = NULL;
+            char *result = g_regex_replace(task->pattern, line, line_len, 0, 
+                                           task->replacement, 0, &err);
+            if (result) {
+                size_t result_len = strlen(result);
+                fwrite(result, 1, result_len, task->output_file);
+                task->output_size += result_len;
+                task->lf_count += count_lf(result, result_len);
+                
+                /* Count replacements */
+                if (result_len != line_len) {
+                    GMatchInfo *mi;
+                    if (g_regex_match(task->pattern, line, 0, &mi)) {
+                        while (g_match_info_matches(mi)) {
+                            task->replace_count++;
+                            g_match_info_next(mi, NULL);
+                        }
+                    }
+                    g_match_info_free(mi);
+                }
+                g_free(result);
+            } else {
+                /* Error - write original */
+                fwrite(line, 1, line_len, task->output_file);
+                task->output_size += line_len;
+                task->lf_count += count_lf(line, line_len);
+                if (err) g_error_free(err);
+            }
+        } else if (task->query && query_len > 0) {
+            /* Literal replacement - fast path */
+            const char *ptr = line;
+            const char *line_end = line + line_len;
+            
+            while (ptr < line_end) {
+                const char *found;
+                if (task->case_sensitive) {
+                    found = strstr(ptr, task->query);
+                } else {
+                    found = strcasestr(ptr, task->query);
+                }
+                
+                if (!found || found >= line_end) {
+                    /* No more matches - write rest of line */
+                    size_t rest = line_end - ptr;
+                    fwrite(ptr, 1, rest, task->output_file);
+                    task->output_size += rest;
+                    task->lf_count += count_lf(ptr, rest);
+                    break;
+                }
+                
+                /* Write text before match */
+                if (found > ptr) {
+                    size_t before = found - ptr;
+                    fwrite(ptr, 1, before, task->output_file);
+                    task->output_size += before;
+                    task->lf_count += count_lf(ptr, before);
+                }
+                
+                /* Write replacement */
+                if (repl_len > 0) {
+                    fwrite(task->replacement, 1, repl_len, task->output_file);
+                    task->output_size += repl_len;
+                    task->lf_count += count_lf(task->replacement, repl_len);
+                }
+                
+                task->replace_count++;
+                ptr = found + query_len;
+            }
+        } else {
+            /* No query - just write line */
+            fwrite(line, 1, line_len, task->output_file);
+            task->output_size += line_len;
+            task->lf_count += count_lf(line, line_len);
+        }
+        
+        task->current_line++;
+    }
+    
+    /* All lines processed - replace document from temp file */
+    fflush(task->output_file);
+    int fd = fileno(task->output_file);
+    fsync(fd);
+    
+    /* mmap the temp file and replace document content */
+    piece_table_replace_from_fd(doc->pt, fd, task->output_size, task->lf_count);
+    
+    /* Report completion */
+    if (task->callback) {
+        task->callback(100, task->replace_count, TRUE, task->user_data);
+    }
+    
+    task->idle_id = 0;
+    streaming_replace_task_free(task);
+    return G_SOURCE_REMOVE;
+}
+
+StreamingReplaceTask *
+document_replace_streaming_start(Document *doc, const char *raw_query, const char *replacement,
+                                  gboolean regex, gboolean case_sensitive, gboolean whole_word,
+                                  ReplaceProgressCallback callback, void *user_data)
+{
+    if (!doc || !raw_query || !*raw_query) return NULL;
+    
+    StreamingReplaceTask *task = g_new0(StreamingReplaceTask, 1);
+    task->doc = doc;
+    task->regex = regex;
+    task->case_sensitive = case_sensitive;
+    task->callback = callback;
+    task->user_data = user_data;
+    task->output_file = NULL;
+    
+    /* Normalize replacement string */
+    task->replacement = normalize_replacement_string(replacement, regex);
+    task->replacement_len = task->replacement ? strlen(task->replacement) : 0;
+    
+    /* Compile pattern or prepare query */
+    if (regex || whole_word) {
+        char *query = NULL;
+        size_t query_len = 0;
+        
+        if (!regex) {
+            char *unescaped = unescape_string(raw_query);
+            query_len = strlen(unescaped);
+            char *safe_query = g_regex_escape_string(unescaped, -1);
+            g_free(unescaped);
+            if (whole_word) {
+                query = g_strdup_printf("\\b%s\\b", safe_query);
+                g_free(safe_query);
+            } else {
+                query = safe_query;
+            }
+        } else {
+            if (whole_word) {
+                query = g_strdup_printf("\\b(?:%s)\\b", raw_query);
+            } else {
+                query = g_strdup(raw_query);
+            }
+            query_len = strlen(raw_query);
+        }
+        
+        GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+        if (!case_sensitive) flags |= G_REGEX_CASELESS;
+        
+        GError *err = NULL;
+        task->pattern = g_regex_new(query, flags, 0, &err);
+        g_free(query);
+        
+        if (!task->pattern) {
+            if (err) g_error_free(err);
+            streaming_replace_task_free(task);
+            return NULL;
+        }
+        
+        task->query_len = query_len;
+    } else {
+        /* Literal search - use fast path */
+        char *unescaped = unescape_string(raw_query);
+        task->query = unescaped;
+        task->query_len = strlen(unescaped);
+    }
+    
+    /* Create temp file for output */
+    task->output_path = g_strdup("/tmp/vite_replace_XXXXXX");
+    int fd = mkstemp(task->output_path);
+    if (fd < 0) {
+        g_warning("Failed to create temp file for replace: %s", strerror(errno));
+        streaming_replace_task_free(task);
+        return NULL;
+    }
+    
+    /* Convert to FILE* for buffered I/O */
+    task->output_file = fdopen(fd, "w+");
+    if (!task->output_file) {
+        close(fd);
+        streaming_replace_task_free(task);
+        return NULL;
+    }
+    
+    /* Initialize iterator for line processing */
+    piece_table_iter_init(doc->pt, &task->iter);
+    task->line_buf = g_string_sized_new(4096);
+    task->total_lines = document_get_line_count(doc);
+    task->current_line = 0;
+    task->replace_count = 0;
+    task->output_size = 0;
+    task->lf_count = 0;
+    
+    task->idle_id = g_idle_add(streaming_replace_idle_step, task);
+    return task;
+}
+
+void document_replace_streaming_cancel(StreamingReplaceTask *task) {
+    if (!task) return;
+    
+    if (task->idle_id) {
+        g_source_remove(task->idle_id);
+        task->idle_id = 0;
+    }
+    
+    streaming_replace_task_free(task);
+}
+
+
+

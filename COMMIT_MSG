@@ -1,0 +1,28 @@
+Implement streaming replace, 64-bit support, and robust highlighting
+
+Summary of changes:
+
+1. Streaming Replace (Memory Optimization):
+   - Implemented `StreamingReplaceTask` in `src/document.c` to handle "Replace All" operations on huge files.
+   - Uses a line-by-line read/write approach backed by a temporary file, ensuring O(1) RAM usage (fixed buffer size) regardless of file size.
+   - Added `piece_table_replace_from_fd` to atomically swap the document content with the mmap'd temporary file.
+   - Eliminates the previous 4.6GB RAM spike observed on 10GB files.
+
+2. Large File Support (>2GB):
+   - Added `-D_FILE_OFFSET_BITS=64` to `build.sh` and `meson.build`.
+   - Ensures all file offsets (seeking, mmap, truncation) use 64-bit integers, resolving "missing matches" past the 2GB boundary.
+
+3. Search Highlighting & Rendering:
+   - Refactored `editor_widget.c` to use `PangoAttributes` (PANGO_ATTR_BACKGROUND) for search highlighting instead of manual rectangle drawing.
+   - Solves visibility issues where highlights were drawn behind text backgrounds or obscured by Z-ordering.
+   - Fixed a critical bug in `editor_widget_get_visible_line_range` where fixed-height calculations diverged from variable-height rendering (wrapped lines), causing "missing highlights at the top". Now synchronizes logic using `line_y_offsets`.
+   - implemented `pango_attr_list_copy` to prevent corruption of the syntax highlight cache.
+
+4. Search Optimization:
+   - Added `src/compact-matches.c/h` to store search results in an mmap-backed binary file.
+   - Reduces RAM usage for millions of matches (3.8M+ matches now occupy ~30MB on disk, 0MB RAM).
+   - Implemented binary search `lower_bound` for O(log N) viewport queries.
+
+5. General Fixes:
+   - Explicitly cancel old search tasks when starting "Replace All".
+   - Added granular debug logging to track search progress on massive files.

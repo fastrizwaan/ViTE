@@ -20,6 +20,7 @@ void editor_widget_prev_match(EditorWidget *self);
 void editor_widget_replace_current(EditorWidget *self, const char *replacement);
 int editor_widget_get_current_match_index(EditorWidget *self);
 void editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *end);
+void editor_widget_get_visible_offset_range(EditorWidget *self, size_t *start_offset, size_t *end_offset);
 GtkAdjustment *editor_widget_get_vadjustment(EditorWidget *self);
 void editor_widget_refresh_syntax(EditorWidget *self);
 void editor_widget_reset_cursor_to_start(EditorWidget *self);

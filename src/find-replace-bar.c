@@ -27,6 +27,7 @@ struct _ViteFindReplaceBar {
     guint viewport_update_timeout_id;
     
     ReplaceTask *current_replace_task;
+    StreamingReplaceTask *current_streaming_replace;
 };
 
 G_DEFINE_TYPE(ViteFindReplaceBar, vite_find_replace_bar, GTK_TYPE_BOX)
@@ -61,159 +62,97 @@ static void vite_find_replace_bar_dispose(GObject *object) {
         self->current_replace_task = NULL;
     }
     
+    if (self->current_streaming_replace) {
+        document_replace_streaming_cancel(self->current_streaming_replace);
+        self->current_streaming_replace = NULL;
+    }
+    
     G_OBJECT_CLASS(vite_find_replace_bar_parent_class)->dispose(object);
 }
 
 static void
 update_matches_label(ViteFindReplaceBar *self) {
+    if (!self) return;
     if (!self->current_search) {
          gtk_widget_set_visible(self->matches_label, FALSE);
          return;
     }
     
-    GArray *matches = document_search_task_get_matches(self->current_search);
-    guint total = matches ? matches->len : 0;
+    /* Use match count API - doesn't trigger expensive conversion */
+    size_t total = document_search_task_get_match_count(self->current_search);
     
     if (total == 0) {
         gtk_label_set_text(GTK_LABEL(self->matches_label), "No matches");
     } else {
-         int index = editor_widget_get_current_match_index(self->editor);
-         char *msg;
-         if (index > 0) {
-              msg = g_strdup_printf("%d of %d", index, total);
-         } else {
-              msg = g_strdup_printf("%d matches", total);
-         }
-         gtk_label_set_text(GTK_LABEL(self->matches_label), msg);
-         g_free(msg);
+         /* For now, just show total count - getting current match index 
+            would require the full GArray which is expensive */
+         char buf[64];
+         snprintf(buf, sizeof(buf), "%zu matches", total);
+         gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
     }
     gtk_widget_set_visible(self->matches_label, TRUE);
 }
 
 static void 
 on_caret_moved(EditorWidget *editor, ViteFindReplaceBar *self) {
-    update_matches_label(self);
+    (void)editor;
+    if (!self) return;
+    /* Only update if we have an active search */
+    if (self->current_search) {
+        update_matches_label(self);
+    }
 }
 
 
 static void on_search_update(GArray *matches, gboolean finished, void *user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
+    (void)matches; /* Ignored - we use viewport extraction instead */
     
-    /* If finished, current_search pointer is likely stale or needs clearing if we don't own it anymore?
-       Actually in our impl, Task removes itself from idle. But pointer persists until cancel.
-       We should clear self->current_search if finished? 
-       Wait, if we clear it, we can't cancel it later.
-       But if it finished, it is effectively done.
-       However, memory is allocated. We need to free it.
-       If finished is TRUE, task is done.
-       We should free the task structure?
-       Or we rely on standard ownership: Bar owns task.
-       If finished, we can free it immediately BUT we need the matches?
-       Matches are passed in callback.
-       
-       Better strategy:
-       Update UI results.
-       If finished, free the task struct?
-       Wait, typical GTask style: unref.
-       Our simple struct needs explicit free.
-       If we free task, we lose 'matches' if the task owned them?
-       The matches array is passed to us. We should probably take a reference or copy?
-       EditorWidget takes a reference/copy?
-       editor_widget_set_search_results takes ownership or copies?
-       Let's check editor-widget.c later. Assuming it copies or refcounts.
-       Actually GArray is refcounted? No.
-       We probably need to pass ownership or keep task alive.
-       
-       Simpler:
-       If finished, update editor results.
-       We KEEP current_search until next search starts or bar closes.
-       This allows us to resend results if needed (e.g. settings change? no that triggers new search).
-    */
-
+    if (!self) return;
+    if (!self->current_search) return;
+    if (!self->editor) return;
+    
+    /* Verify document is still valid */
+    Document *doc = editor_widget_get_document(self->editor);
+    if (!doc) {
+        /* Document changed - abort this search callback */
+        return;
+    }
+    
+    /* Get total match count (works on compact storage without conversion) */
+    size_t match_count = document_search_task_get_match_count(self->current_search);
+    
     /* Update Label */
-    if (!finished && self->current_search) {
-        /* Show progressive search status */
+    if (!finished) {
         size_t total = document_search_task_get_total_lines(self->current_search);
         size_t searched = document_search_task_get_lines_searched(self->current_search);
         int percent = total > 0 ? (int)((searched * 100) / total) : 0;
         
         char buf[64];
-        snprintf(buf, sizeof(buf), "Finding... %d%% (%u)", percent, matches ? matches->len : 0);
+        snprintf(buf, sizeof(buf), "Finding... %d%% (%zu)", percent, match_count);
         gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
         gtk_widget_set_visible(self->matches_label, TRUE);
-    } else if (finished) {
-        /* Update label with final count & index */
-        update_matches_label(self);
-    }
-
-
-    /* Update Editor Highlights Progressive */
-    if (matches) {
-       /* Use reference counting instead of copying for performance.
-          GArray supports ref counting since GLib 2.22. */
-       GArray *ref = g_array_ref(matches);
-       editor_widget_set_search_results(self->editor, ref);
     } else {
-        /* Clear if NULL */
-        if (finished) editor_widget_set_search_results(self->editor, NULL);
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%zu matches", match_count);
+        gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
+        gtk_widget_set_visible(self->matches_label, TRUE);
     }
-
     
-    if (finished) {
-        /* We can free the task wrapper but we need to keep matches alive for Editor?
-           If Editor copies, we can free.
-           If Editor refs, we can free.
-           Standard Document/GArray usage in previous `perform_search` passed GArray directly.
-           And previously `document_search` returned new GArray.
-           Reference counting GArray is not standard.
-           EditorWidget likely expects to OWN the array or Ref it.
-           If we look at `document_replace_all`, it frees matches.
-           So EditorWidget must copy or use it temporarily?
-           Wait, `editor_widget_set_search_results` likely stores it.
-           If `document_search` allocated it, who frees it?
-           If we look at `perform_search` before:
-             matches = document_search(...)
-             editor_widget_set_search_results(..., matches)
-             // It did NOT free matches. So EditorWidget owns it now?
-             // Or it leaked?
-           
-           I should check `editor_widget_set_search_results`.
-           Assuming transfer full.
-           
-           ASYNC ISSUE: 
-           Task owns matches GArray.
-           If we give it to Editor, and Task continues, Task appends to it.
-           Editor might be reading it? threading issue?
-           We are in IDLE thread (Main thread). So no concurrent access.
-           Editor redraws during standard layout cycle.
-           So it is safe to share GArray pointer as long as we assume Main Thread.
-           
-           BUT if we free Task (and GArray), Editor has dangling pointer.
-           So:
-           1. Task owns GArray.
-           2. We pass GArray to Editor.
-           3. When we cancel/free Task, we must tell Editor?
-              Or Editor makes a copy?
-           
-           If I assume `editor_widget_set_search_results` takes ownership, then Task cannot own it anymore?
-           But Task needs to append.
-           
-           Solution:
-           EditorWidget should REF the array if it uses `g_array_ref`? 
-           GArray supports ref counting since 2.22 `g_array_ref`.
-           
-           Let's assume we pass matches to Editor.
-           When Task finishes, we do nothing (Task struct stays alive in `current_search`).
-           When `current_search` is replaced (next search), we `cancel` (free) the old task.
-           `cancel` frees the matches GArray.
-           This implies Editor must have Ref'd it or Copied it.
-           
-           Let's verify `editor-widget.c` handling of search results later. 
-           For now, assume Update is safe.
-        */
-        
-        /* If finished, we leave `current_search` valid until next search options change. */
-    }
+    /* Get viewport range and extract only visible matches using binary search */
+    size_t start_offset, end_offset;
+    editor_widget_get_visible_offset_range(self->editor, &start_offset, &end_offset);
+    
+    /* Expand range for smooth scrolling */
+    size_t padding = 10000; /* ~10KB buffer */
+    start_offset = (start_offset > padding) ? start_offset - padding : 0;
+    end_offset += padding;
+    
+    GArray *viewport_matches = document_search_task_get_viewport_matches(
+        self->current_search, start_offset, end_offset);
+    
+    editor_widget_set_search_results(self->editor, viewport_matches);
+    if (viewport_matches) g_array_unref(viewport_matches);
 }
 
 
@@ -228,6 +167,7 @@ static gboolean on_viewport_scroll_timeout(gpointer user_data) {
 
 static void on_viewport_scroll(GtkAdjustment *adj, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
+    (void)adj;
     
     if (self->viewport_update_timeout_id) {
         g_source_remove(self->viewport_update_timeout_id);
@@ -237,48 +177,46 @@ static void on_viewport_scroll(GtkAdjustment *adj, gpointer user_data) {
 }
 
 static void update_viewport_search(ViteFindReplaceBar *self) {
-    Document *doc = editor_widget_get_document(self->editor);
-    const char *text = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
+    /* Safety checks - must have valid search and editor */
+    if (!self) return;
+    if (!self->current_search) return;
+    if (!self->editor) return;
     
-    if (!doc || !text || strlen(text) == 0) {
+    /* Check if editor still has a document */
+    Document *doc = editor_widget_get_document(self->editor);
+    if (!doc) {
+        /* Document was closed/changed - cancel search */
+        if (self->current_search) {
+            document_search_async_cancel(self->current_search);
+            self->current_search = NULL;
+        }
         editor_widget_set_search_results(self->editor, NULL);
-        gtk_widget_set_visible(self->matches_label, FALSE);
         return;
     }
     
-    size_t start_line, end_line;
-    editor_widget_get_visible_line_range(self->editor, &start_line, &end_line);
+    /* Get viewport range and extract only visible matches using binary search */
+    size_t start_offset, end_offset;
+    editor_widget_get_visible_offset_range(self->editor, &start_offset, &end_offset);
     
-    /* Expand range for smooth scrolling (buffer like svite.py) */
-    size_t padding = 100; 
-    start_line = (start_line > padding) ? start_line - padding : 0;
-    size_t total = document_get_line_count(doc);
-    end_line += padding;
-    if (end_line > total) end_line = total;
+    /* Expand range for smooth scrolling */
+    size_t padding = 50000; /* 50KB buffer for smoother scroll */
+    start_offset = (start_offset > padding) ? start_offset - padding : 0;
+    end_offset += padding;
     
-    gboolean regex = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->regex_check));
-    gboolean case_sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->case_check));
-    gboolean whole_word = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->word_check));
+    GArray *viewport_matches = document_search_task_get_viewport_matches(
+        self->current_search, start_offset, end_offset);
     
-    /* Call viewport search */
-    GArray *matches = document_search_viewport(doc, text, regex, case_sensitive, whole_word, start_line, end_line);
+    g_print("[DEBUG] update_viewport: offset %zu-%zu, got %u matches\n", 
+            start_offset, end_offset, viewport_matches ? viewport_matches->len : 0);
     
-    editor_widget_set_search_results(self->editor, matches);
-    
-    char buf[64];
-    if (matches && matches->len > 0) {
-       /* Just indicate visual matches since total is unknown/too expensive */
-       snprintf(buf, sizeof(buf), "%u visible", matches->len);
-    } else {
-       snprintf(buf, sizeof(buf), "No matches in view");
-    }
-    gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
-    gtk_widget_set_visible(self->matches_label, TRUE);
+    editor_widget_set_search_results(self->editor, viewport_matches);
+    if (viewport_matches) g_array_unref(viewport_matches);
 }
 
 static gboolean perform_search(ViteFindReplaceBar *self) {
     self->search_timeout_id = 0;
     
+    /* Cancel any previous async search */
     if (self->current_search) {
         document_search_async_cancel(self->current_search);
         self->current_search = NULL;
@@ -292,13 +230,11 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
         editor_widget_set_search_results(self->editor, NULL);
         gtk_widget_set_visible(self->matches_label, FALSE);
         
-        if (self->viewport_mode) {
-             self->viewport_mode = FALSE;
-             if (self->viewport_scroll_handler_id) {
-                 GtkAdjustment *vadj = editor_widget_get_vadjustment(self->editor);
-                 if (vadj) g_signal_handler_disconnect(vadj, self->viewport_scroll_handler_id);
-                 self->viewport_scroll_handler_id = 0;
-             }
+        /* Disconnect scroll handler when not searching */
+        if (self->viewport_scroll_handler_id) {
+            GtkAdjustment *vadj = editor_widget_get_vadjustment(self->editor);
+            if (vadj) g_signal_handler_disconnect(vadj, self->viewport_scroll_handler_id);
+            self->viewport_scroll_handler_id = 0;
         }
         return G_SOURCE_REMOVE;
     }
@@ -307,28 +243,22 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
     gboolean case_sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->case_check));
     gboolean whole_word = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->word_check));
     
-    size_t line_count = document_get_line_count(doc);
-
-    /* Turn off viewport mode if it was active */
-    if (self->viewport_mode) {
-         self->viewport_mode = FALSE;
-         if (self->viewport_scroll_handler_id) {
-             GtkAdjustment *vadj = editor_widget_get_vadjustment(self->editor);
-             if (vadj) g_signal_handler_disconnect(vadj, self->viewport_scroll_handler_id);
-             self->viewport_scroll_handler_id = 0;
-         }
-    }
+    /* UNIFIED APPROACH: Use async search for ALL files.
+     * Stores matches in mmap'd file (disk-backed).
+     * Uses binary search for O(log N) viewport lookup.
+     * Highlights only visible matches to keep UI memory low. */
+    gtk_label_set_text(GTK_LABEL(self->matches_label), "Finding...");
+    gtk_widget_set_visible(self->matches_label, TRUE);
     
-    if (line_count < 50000) {
-         GArray *matches = document_search(doc, text, regex, case_sensitive, whole_word);
-         editor_widget_set_search_results(self->editor, matches);
-         update_matches_label(self);
-    } else {
-         /* ASYNC SEARCH FOR ALL LARGE FILES */
-         gtk_label_set_text(GTK_LABEL(self->matches_label), "Finding...");
-         gtk_widget_set_visible(self->matches_label, TRUE);
-         
-         self->current_search = document_search_async_start(doc, text, regex, case_sensitive, whole_word, on_search_update, self);
+    self->current_search = document_search_async_start(doc, text, regex, case_sensitive, whole_word, on_search_update, self);
+    
+    /* Connect scroll handler to update highlights on scroll */
+    if (!self->viewport_scroll_handler_id && self->editor) {
+        GtkAdjustment *vadj = editor_widget_get_vadjustment(self->editor);
+        if (vadj) {
+            self->viewport_scroll_handler_id = g_signal_connect(vadj, "value-changed", 
+                G_CALLBACK(on_viewport_scroll), self);
+        }
     }
     
     return G_SOURCE_REMOVE;
@@ -381,8 +311,9 @@ static void on_replace_progress(int processed, int total, gboolean finished, voi
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     
     if (finished) {
-        /* Task Done */
+        /* Task Done - clear both task types */
         self->current_replace_task = NULL;
+        self->current_streaming_replace = NULL;
         gtk_button_set_label(GTK_BUTTON(self->replace_all_btn), "Replace All");
         
         char *msg = g_strdup_printf("Done (%d replaced)", total);
@@ -414,10 +345,17 @@ static void on_replace_progress(int processed, int total, gboolean finished, voi
 static void on_replace_all_clicked(GtkButton *btn, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     
-    /* Toggle / Cancel Logic */
+    /* Toggle / Cancel Logic - check both task types */
     if (self->current_replace_task) {
         document_replace_async_cancel(self->current_replace_task);
         self->current_replace_task = NULL;
+        gtk_button_set_label(GTK_BUTTON(self->replace_all_btn), "Replace All");
+        gtk_label_set_text(GTK_LABEL(self->matches_label), "Cancelled");
+        return;
+    }
+    if (self->current_streaming_replace) {
+        document_replace_streaming_cancel(self->current_streaming_replace);
+        self->current_streaming_replace = NULL;
         gtk_button_set_label(GTK_BUTTON(self->replace_all_btn), "Replace All");
         gtk_label_set_text(GTK_LABEL(self->matches_label), "Cancelled");
         return;
@@ -439,76 +377,28 @@ static void on_replace_all_clicked(GtkButton *btn, gpointer user_data) {
     gboolean regex = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->regex_check));
     gboolean case_sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->case_check));
     gboolean whole_word = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->word_check));
+    /* UNIFIED APPROACH: Always use streaming replace.
+     * This scans the document line-by-line and replaces on-the-fly,
+     * without storing all matches in memory. Works efficiently for any file size. */
     
-    GArray *matches = NULL;
-    GRegex *cached_pattern = NULL;
-    gboolean matches_owned = FALSE;
-    gboolean cache_valid = FALSE;
-    
-    /* Reuse Logic: Check if current search is valid for replacement */
+    /* Clear any search highlights and cancel active search */
     if (self->current_search) {
-        const char *cached_query = document_search_task_get_query(self->current_search);
-        gboolean cached_regex = document_search_task_get_regex(self->current_search);
-        gboolean cached_case = document_search_task_get_case_sensitive(self->current_search);
-        gboolean cached_word = document_search_task_get_whole_word(self->current_search);
-        
-        gboolean query_match = (cached_query && query && g_strcmp0(cached_query, query) == 0);
-        
-        if (query_match && cached_regex == regex && cached_case == case_sensitive && cached_word == whole_word) {
-             matches = document_search_task_get_matches(self->current_search);
-             cached_pattern = document_search_task_get_pattern(self->current_search);
-             cache_valid = TRUE;
-        }
+        document_search_async_cancel(self->current_search);
+        self->current_search = NULL;
     }
+    editor_widget_set_search_results(self->editor, NULL);
     
-    /* If cache is valid but empty, we already know there are no matches - skip re-search */
-    if (cache_valid && (!matches || matches->len == 0)) {
-        gtk_label_set_text(GTK_LABEL(self->matches_label), "No matches found");
-        gtk_widget_set_visible(self->matches_label, TRUE);
-        return;
-    }
+    gtk_label_set_text(GTK_LABEL(self->matches_label), "Replacing...");
+    gtk_widget_set_visible(self->matches_label, TRUE);
     
-    /* If no valid cache, need to search */
-    if (!cache_valid) {
-        size_t line_count = document_get_line_count(doc);
-        
-        /* For large files, inform user and trigger async search first */
-        if (line_count >= 50000) {
-            gtk_label_set_text(GTK_LABEL(self->matches_label), "Searching first...");
-            gtk_widget_set_visible(self->matches_label, TRUE);
-            /* Trigger the normal search which is async for large files */
-            perform_search(self);
-            return;
-        }
-        
-        /* For smaller files, do sync search with UI feedback */
-        gtk_label_set_text(GTK_LABEL(self->matches_label), "Finding matches...");
-        gtk_widget_set_visible(self->matches_label, TRUE);
-        
-        /* Process pending GTK events to update UI before sync search */
-        while (g_main_context_pending(NULL)) {
-            g_main_context_iteration(NULL, FALSE);
-        }
-        
-        matches = document_search(doc, query, regex, case_sensitive, whole_word);
-        matches_owned = TRUE;
-    }
+    self->current_streaming_replace = document_replace_streaming_start(
+        doc, query, repl, regex, case_sensitive, whole_word, 
+        on_replace_progress, self);
     
-    if (matches && matches->len > 0) {
-        /* Clear highlights from editor immediately as they are about to be invalidated/replaced.
-           This also prevents performance issues with rendering millions of matches during the op. */
-        editor_widget_set_search_results(self->editor, NULL);
-        
-        self->current_replace_task = document_replace_async_start(doc, matches, repl, regex, cached_pattern, on_replace_progress, self);
+    if (self->current_streaming_replace) {
         gtk_button_set_label(GTK_BUTTON(self->replace_all_btn), "Stop");
-        
-        if (matches_owned) {
-             g_array_unref(matches);
-        }
     } else {
-        gtk_label_set_text(GTK_LABEL(self->matches_label), "No matches found");
-        gtk_widget_set_visible(self->matches_label, TRUE);
-        if (matches_owned && matches) g_array_unref(matches);
+        gtk_label_set_text(GTK_LABEL(self->matches_label), "Replace error");
     }
 }
 

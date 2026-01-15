@@ -874,8 +874,65 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         }
         
-        /* Syntax highlight */
-        PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, line_idx, text);
+        /* Syntax highlight and Search Highlight */
+        /* MUST COPY cached attributes to avoid corrupting the syntax cache with search highlights! */
+        PangoAttrList *cached_attrs = syntax_highlight_line(self->syntax_ctx, line_idx, text);
+        PangoAttrList *attrs = cached_attrs ? pango_attr_list_copy(cached_attrs) : pango_attr_list_new();
+        
+        /* Inject Search Highlights */
+        if (self->search_matches && self->search_matches->len > 0) {
+            size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
+            size_t raw_line_end = line_start_off + len;
+            
+            /* Binary search to find first match that could overlap this line */
+            int low = 0;
+            int high = (int)self->search_matches->len - 1;
+            int first_candidate = -1;
+            
+            while (low <= high) {
+                int mid = (low + high) / 2;
+                SearchMatch *m = &g_array_index(self->search_matches, SearchMatch, mid);
+                if (m->end > line_start_off) {
+                    first_candidate = mid;
+                    high = mid - 1;
+                } else {
+                    low = mid + 1;
+                }
+            }
+            
+            if (first_candidate >= 0) {
+                for (int m = first_candidate; m < (int)self->search_matches->len; m++) {
+                    SearchMatch match = g_array_index(self->search_matches, SearchMatch, m);
+                    if (match.start >= raw_line_end) break;
+                    
+                    if (match.start < raw_line_end && match.end > line_start_off) {
+                        size_t local_start = MAX(match.start, line_start_off) - line_start_off;
+                        size_t local_end = MIN(match.end, raw_line_end) - line_start_off;
+                        
+                        if (local_start < local_end) {
+                            /* Yellow: 65535, 65535, 0 */
+                            guint16 r = 65535, g = 65535, b = 0;
+                            if (m == self->current_match_idx) {
+                                /* Orange for active: 65535, 40000, 0 */
+                                g = 40000; b = 0;
+                            }
+                            
+                            PangoAttribute *bg = pango_attr_background_new(r, g, b);
+                            bg->start_index = (guint)local_start;
+                            bg->end_index = (guint)local_end;
+                            pango_attr_list_change(attrs, bg);
+                            
+                            /* Alpha: 0.5 -> 32768 */
+                            PangoAttribute *alpha = pango_attr_background_alpha_new(32768);
+                            alpha->start_index = (guint)local_start;
+                            alpha->end_index = (guint)local_end;
+                            pango_attr_list_change(attrs, alpha);
+                        }
+                    }
+                }
+            }
+        }
+        
         pango_layout_set_attributes(layout, attrs);
         pango_attr_list_unref(attrs);
         
@@ -951,87 +1008,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
            Simplified: If line is fully selected or partially.
         */
         
-        /* Draw Search Matches */
-        if (self->search_matches && self->search_matches->len > 0) {
-            /* OPTIMIZED: Use binary search to find matches overlapping this line */
-            /* This is critical for performance with thousands of matches */
-             
-            size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
-            size_t raw_line_end = line_start_off + len; /* End of text content on line */
-            
-            /* Binary search to find first match that could overlap this line */
-            /* A match overlaps if: match.start < line_end AND match.end > line_start */
-            int low = 0;
-            int high = (int)self->search_matches->len - 1;
-            int first_candidate = -1;
-            
-            /* Find leftmost match where end > line_start_off */
-            while (low <= high) {
-                int mid = (low + high) / 2;
-                SearchMatch *m = &g_array_index(self->search_matches, SearchMatch, mid);
-                if (m->end > line_start_off) {
-                    first_candidate = mid;
-                    high = mid - 1;
-                } else {
-                    low = mid + 1;
-                }
-            }
-            
-            /* Iterate from first_candidate until matches no longer overlap */
-            if (first_candidate >= 0) {
-                for (int m = first_candidate; m < (int)self->search_matches->len; m++) {
-                    SearchMatch match = g_array_index(self->search_matches, SearchMatch, m);
-                    
-                    /* Stop if match starts after line ends */
-                    if (match.start >= raw_line_end) break;
-                    
-                    size_t start_sel = match.start;
-                    size_t end_sel = match.end;
-                    
-                    /* Check overlap with line */
-                    if (start_sel < raw_line_end && end_sel > line_start_off) {
-                        size_t sel_in_line_start = MAX(start_sel, line_start_off) - line_start_off;
-                        size_t sel_in_line_end = MIN(end_sel, raw_line_end) - line_start_off;
-                        
-                        if (sel_in_line_start < sel_in_line_end) { /* Sanity check */
-                            /* Calculate X ranges using Pango */
-                            PangoLayoutIter *iter = pango_layout_get_iter(layout);
-                            do {
-                                PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
-                                int line_start_index = p_line->start_index;
-                                int line_end_index = line_start_index + p_line->length;
-                                
-                                PangoRectangle line_rect;
-                                pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
-                                double ry = pango_units_to_double(line_rect.y);
-                                double rh = pango_units_to_double(line_rect.height);
 
-                                if (sel_in_line_end >= (size_t)line_start_index && sel_in_line_start <= (size_t)line_end_index) {
-                                    int *ranges; int n_ranges;
-                                    int range_start = (int)MAX(sel_in_line_start, (size_t)line_start_index);
-                                    int range_end = (int)MIN(sel_in_line_end, (size_t)line_end_index);
-                                    
-                                    pango_layout_line_get_x_ranges(p_line, range_start, range_end, &ranges, &n_ranges);
-                                    for (int r = 0; r < n_ranges; r++) {
-                                        double rx = pango_units_to_double(ranges[2 * r]);
-                                        double rw = pango_units_to_double(ranges[2 * r + 1] - ranges[2 * r]);
-                                        
-                                        GdkRGBA match_col = {1.0, 1.0, 0.0, 0.3}; /* Yellow */
-                                        if (m == self->current_match_idx) {
-                                            match_col = (GdkRGBA){1.0, 0.6, 0.0, 0.6}; /* Orange active */
-                                        }
-                                        
-                                        if (rw > 0) gtk_snapshot_append_color(snapshot, &match_col, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
-                                    }
-                                    g_free(ranges);
-                                }
-                            } while (pango_layout_iter_next_line(iter));
-                            pango_layout_iter_free(iter);
-                        }
-                    }
-                }
-            }
-        }
 
 
         /* 1. Draw Selections for all cursors */
@@ -2423,7 +2400,16 @@ editor_widget_update_im_cursor_location(EditorWidget *self)
 
     GdkRectangle rect;
     rect.x = (int)(text_start_x + cursor_x - scroll_x);
-    rect.y = (int)(self->padding_top + self->line_y_offsets->data[cursor_line] + cursor_y - scroll_y);
+    
+    /* BOUNDS CHECK: line_y_offsets may not cover all lines for huge files */
+    double line_y = 0;
+    if (self->line_y_offsets && cursor_line < self->line_y_offsets->len) {
+        line_y = self->line_y_offsets->data[cursor_line];
+    } else {
+        /* Fallback: estimate y position using line height */
+        line_y = cursor_line * self->line_height;
+    }
+    rect.y = (int)(self->padding_top + line_y + cursor_y - scroll_y);
     rect.width = 2; // Cursor width
     rect.height = (int)cursor_h;
 
@@ -4546,37 +4532,36 @@ editor_widget_get_document(EditorWidget *self)
 void 
 editor_widget_set_search_results(EditorWidget *self, GArray *matches) 
 {
+    /* Free old matches */
     if (self->search_matches) {
          g_array_unref(self->search_matches);
         self->search_matches = NULL;
     }
-    self->search_matches = matches;
+    
+    /* Take a reference to new matches (caller keeps their own reference) */
+    if (matches) {
+        self->search_matches = g_array_ref(matches);
+    } else {
+        self->search_matches = NULL;
+    }
     self->current_match_idx = -1;
     
     /* Loop to find first match after cursor? Or first match? */
     /* If cursor is at offset X, find match where start >= X. */
-    if (matches && matches->len > 0) {
+    if (self->search_matches && self->search_matches->len > 0) {
         EditorCursor *c = editor_widget_get_primary_cursor(self);
         size_t cursor = c ? c->cursor_offset : 0;
         
         /* Find closest match */
         int best_idx = 0;
-        for (guint i = 0; i < matches->len; i++) {
-            SearchMatch m = g_array_index(matches, SearchMatch, i);
+        for (guint i = 0; i < self->search_matches->len; i++) {
+            SearchMatch m = g_array_index(self->search_matches, SearchMatch, i);
             if (m.start >= cursor) {
                 best_idx = (int)i;
                 break;
             }
         }
         self->current_match_idx = best_idx;
-        
-        SearchMatch m = g_array_index(matches, SearchMatch, best_idx);
-        /* Don't move cursor automatically on type-to-search unless desired?
-           svite: on_find_next does update. on_search_changed just highlights. 
-           User usually wants to see what matches.
-           We'll just set the current match index but NOT move cursor until Next is pressed?
-           Actually, highlighting the "current" match (orange) is good. 
-        */
     }
     
     gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -4682,7 +4667,27 @@ editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *
     double val = gtk_adjustment_get_value(self->vadjustment);
     double page_size = gtk_adjustment_get_page_size(self->vadjustment);
     
-    size_t s = (size_t)(val / self->line_height);
+    size_t s = 0;
+    
+    /* Critical: must use same logic as snapshot to determine visible lines */
+    if (self->line_y_offsets && self->line_y_offsets->len > 0) {
+        double *offsets = (double*)self->line_y_offsets->data;
+        guint low = 0;
+        guint high = self->line_y_offsets->len - 1;
+        
+        while (low < high) {
+            guint mid = low + (high - low + 1) / 2;
+            if (offsets[mid] <= val) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        s = low;
+    } else {
+        s = (size_t)(val / self->line_height);
+    }
+
     /* Add extra padding (buffer) to ensure smooth scrolling and verify coverage */
     size_t lines_visible = (size_t)(page_size / self->line_height) + 5; 
     size_t e = s + lines_visible;
@@ -4695,6 +4700,30 @@ editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *
     
     if (start) *start = s;
     if (end) *end = e;
+}
+
+void
+editor_widget_get_visible_offset_range(EditorWidget *self, size_t *start_offset, size_t *end_offset)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    
+    size_t start_line, end_line;
+    editor_widget_get_visible_line_range(self, &start_line, &end_line);
+    
+    if (!self->doc) {
+        if (start_offset) *start_offset = 0;
+        if (end_offset) *end_offset = 0;
+        return;
+    }
+    
+    /* Get byte offsets for start and end lines */
+    if (start_offset) {
+        *start_offset = document_get_offset_of_line(self->doc, start_line);
+    }
+    if (end_offset) {
+        /* End is offset of end_line + 1 (exclusive) */
+        *end_offset = document_get_offset_of_line(self->doc, end_line);
+    }
 }
 
 GtkAdjustment *

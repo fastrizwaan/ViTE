@@ -88,6 +88,8 @@ void piece_table_delete(PieceTable *pt, size_t offset, size_t len);
 
 /* Optimized bulk replacement - accepts pre-calculated newline count to avoid O(N) scan */
 void piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, size_t lf_count);
+/* Zero-RAM replacement from file descriptor (mmap) */
+void piece_table_replace_from_fd(PieceTable *pt, int fd, size_t len, size_t lf_count);
 char *piece_table_get_text_range(PieceTable *pt, size_t offset, size_t len);
 size_t piece_table_get_line_of_offset(PieceTable *pt, size_t offset);
 size_t piece_table_get_offset_of_line(PieceTable *pt, size_t line_index);

@@ -67,10 +67,20 @@ void document_search_async_cancel(SearchTask *task);
 
 ReplaceTask *document_replace_async_start(Document *doc, GArray *matches, const char *replacement, gboolean regex, GRegex *cached_regex, ReplaceProgressCallback callback, void *user_data);
 void document_replace_async_cancel(ReplaceTask *task);
+
+/* Streaming Replace All - doesn't store matches, scans and replaces in one pass.
+ * Use this for huge files to avoid memory explosion from storing millions of matches. */
+typedef struct _StreamingReplaceTask StreamingReplaceTask;
+StreamingReplaceTask *document_replace_streaming_start(Document *doc, const char *query, const char *replacement, 
+                                                        gboolean regex, gboolean case_sensitive, gboolean whole_word,
+                                                        ReplaceProgressCallback callback, void *user_data);
+void document_replace_streaming_cancel(StreamingReplaceTask *task);
 GArray *document_search_task_get_matches(SearchTask *task);
 GRegex *document_search_task_get_pattern(SearchTask *task);
 size_t document_search_task_get_total_lines(SearchTask *task);
 size_t document_search_task_get_lines_searched(SearchTask *task);
+size_t document_search_task_get_match_count(SearchTask *task);
+GArray *document_search_task_get_viewport_matches(SearchTask *task, size_t start_offset, size_t end_offset);
 
 GArray *document_search(Document *doc, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word);
 gboolean document_find_next(Document *doc, SearchMatch *result, size_t start_pos, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word);
