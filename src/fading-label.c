@@ -28,18 +28,38 @@ static GParamSpec *props[LAST_PROP];
 static gboolean
 is_rtl(ViteFadingLabel *self)
 {
-    PangoDirection pango_direction = PANGO_DIRECTION_NEUTRAL;
     const char *label = vite_fading_label_get_label(self);
     
     if (label) {
-        pango_direction = pango_find_base_dir(label, -1);
+        const char *p = label;
+        while (*p) {
+            gunichar ch = g_utf8_get_char(p);
+            GUnicodeScript script = g_unichar_get_script(ch);
+            
+            /* Check for Strong RTL scripts */
+            if (script == G_UNICODE_SCRIPT_ARABIC ||
+                script == G_UNICODE_SCRIPT_HEBREW ||
+                script == G_UNICODE_SCRIPT_SYRIAC ||
+                script == G_UNICODE_SCRIPT_THAANA ||
+                script == G_UNICODE_SCRIPT_NKO) {
+                return TRUE;
+            }
+            
+            /* Check for Strong LTR scripts (Latin, Greek, Cyrillic, Han, etc) */
+            /* If we encounter Strong LTR first, we assume LTR. */
+            if (script == G_UNICODE_SCRIPT_LATIN ||
+                script == G_UNICODE_SCRIPT_GREEK ||
+                script == G_UNICODE_SCRIPT_CYRILLIC ||
+                script == G_UNICODE_SCRIPT_HAN ||
+                script == G_UNICODE_SCRIPT_KATAKANA ||
+                script == G_UNICODE_SCRIPT_HIRAGANA ||
+                script == G_UNICODE_SCRIPT_HANGUL) {
+                return FALSE;
+            }
+            
+            p = g_utf8_next_char(p);
+        }
     }
-    
-    if (pango_direction == PANGO_DIRECTION_RTL)
-        return TRUE;
-    
-    if (pango_direction == PANGO_DIRECTION_LTR)
-        return FALSE;
     
     return gtk_widget_get_direction(GTK_WIDGET(self)) == GTK_TEXT_DIR_RTL;
 }
