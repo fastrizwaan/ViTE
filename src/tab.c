@@ -34,6 +34,8 @@ struct _ViteTab {
     double tab_bar_y;              /* Tab bar Y in root coords (for locking) */
     double initial_overlay_y;      /* Initial overlay Y in titlebar coords */
     gboolean is_detached;          /* Whether >20px from start */
+
+    GtkWidget *last_focused_child; /* Track last focused editor container (for splits) */
 };
 
 G_DEFINE_TYPE(ViteTab, vite_tab, GTK_TYPE_BOX)
@@ -173,6 +175,28 @@ vite_tab_set_tab_bar (ViteTab *self, gpointer tab_bar)
 {
     /* Store tab bar reference if needed, or just use it for dnd/signals */
     g_object_set_data(G_OBJECT(self), "tab-bar", tab_bar);
+}
+
+void
+vite_tab_set_last_focused_child(ViteTab *self, GtkWidget *child)
+{
+    if (self->last_focused_child == child) return;
+    
+    if (self->last_focused_child) {
+        g_object_remove_weak_pointer(G_OBJECT(self->last_focused_child), (gpointer *)&self->last_focused_child);
+    }
+    
+    self->last_focused_child = child;
+    
+    if (self->last_focused_child) {
+        g_object_add_weak_pointer(G_OBJECT(self->last_focused_child), (gpointer *)&self->last_focused_child);
+    }
+}
+
+GtkWidget *
+vite_tab_get_last_focused_child(ViteTab *self)
+{
+    return self->last_focused_child;
 }
 
 /* Tick callback for visual overlay - applies Y constraints */

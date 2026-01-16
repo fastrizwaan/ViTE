@@ -20,4 +20,7 @@ double vite_tab_get_anim_offset_x (ViteTab *self);
 gboolean vite_tab_is_hovered (ViteTab *self);
 void vite_tab_set_modified(ViteTab *self, gboolean modified);
 
+void vite_tab_set_last_focused_child(ViteTab *self, GtkWidget *child);
+GtkWidget *vite_tab_get_last_focused_child(ViteTab *self);
+
 G_END_DECLS
