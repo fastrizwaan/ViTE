@@ -352,7 +352,7 @@ unescape_string(const char *input)
  *   "\\$1" -> "$1" (escaped dollar, literal)
  *   "\\1" -> "\\g<1>" (also supported for compatibility)
  */
-static char *
+char *
 normalize_replacement_string(const char *replacement, gboolean for_regex)
 {
     if (!replacement) return NULL;
@@ -692,11 +692,34 @@ document_replace_known_matches(Document *doc, GArray *matches, const char *repla
         
         char *final_replacement = NULL;
         if (regex && cached_regex) {
-             size_t len = m.end - m.start;
-             char *original_text = document_get_text_range(doc, m.start, len);
-             if (original_text) {
-                 final_replacement = g_regex_replace(cached_regex, original_text, -1, 0, normalized_replacement, 0, NULL);
-                 g_free(original_text);
+             /* Fix: Perform replacement with context (full line) so lookarounds work */
+             size_t line_idx = document_get_line_of_offset(doc, m.start);
+             size_t line_start = document_get_offset_of_line(doc, line_idx);
+             size_t len = 0;
+             char *line_text = document_get_line(doc, line_idx, &len);
+             
+             if (line_text) {
+                 size_t offset_in_line = m.start - line_start;
+                 GMatchInfo *info = NULL;
+                 
+                 /* Match starting exactly at the match position to capture correct groups */
+                 if (g_regex_match_full(cached_regex, line_text, len, offset_in_line, 0, &info, NULL)) {
+                     /* Verify we matched what we expected (sanity check) */
+                     gint start_pos, end_pos;
+                     g_match_info_fetch_pos(info, 0, &start_pos, &end_pos);
+                     if ((size_t)start_pos == offset_in_line) {
+                         final_replacement = g_match_info_expand_references(info, normalized_replacement, NULL);
+                     }
+                 }
+                 g_match_info_free(info);
+                 g_free(line_text);
+             }
+             
+             /* Fallback if something failed (e.g. line changed? shouldn't happen) */
+             if (!final_replacement) {
+                 /* Try the old isolated method as last resort, or just skip? 
+                    Skipping is safer than wrong replacement. */
+                 // final_replacement = g_strdup(""); // ?
              }
         } else {
              /* Literal replacement (already normalized) */
@@ -1739,30 +1762,53 @@ static gboolean streaming_replace_idle_step(gpointer user_data) {
         
         /* Process this line - write transformed content to temp file */
         if (task->regex && task->pattern) {
-            /* Regex replacement */
+            /* Regex replacement with manual iteration for safe backref expansion */
+            GMatchInfo *mi = NULL;
             GError *err = NULL;
-            char *result = g_regex_replace(task->pattern, line, line_len, 0, 
-                                           task->replacement, 0, &err);
-            if (result) {
-                size_t result_len = strlen(result);
-                fwrite(result, 1, result_len, task->output_file);
-                task->output_size += result_len;
-                task->lf_count += count_lf(result, result_len);
-                
-                /* Count replacements */
-                if (result_len != line_len) {
-                    GMatchInfo *mi;
-                    if (g_regex_match(task->pattern, line, 0, &mi)) {
-                        while (g_match_info_matches(mi)) {
-                            task->replace_count++;
-                            g_match_info_next(mi, NULL);
-                        }
+            
+            if (g_regex_match_full(task->pattern, line, line_len, 0, 0, &mi, &err)) {
+                size_t current_pos = 0;
+                while (g_match_info_matches(mi)) {
+                    gint start_pos, end_pos;
+                    g_match_info_fetch_pos(mi, 0, &start_pos, &end_pos);
+                    
+                    /* Write text before match */
+                    if ((size_t)start_pos > current_pos) {
+                        size_t gap = (size_t)start_pos - current_pos;
+                        fwrite(line + current_pos, 1, gap, task->output_file);
+                        task->output_size += gap;
+                        task->lf_count += count_lf(line + current_pos, gap);
                     }
-                    g_match_info_free(mi);
+                    
+                    /* Expand replacement */
+                    GError *expand_err = NULL;
+                    char *expanded = g_match_info_expand_references(mi, task->replacement, &expand_err);
+                    if (expanded) {
+                        size_t exp_len = strlen(expanded);
+                        fwrite(expanded, 1, exp_len, task->output_file);
+                        task->output_size += exp_len;
+                        task->lf_count += count_lf(expanded, exp_len);
+                        g_free(expanded);
+                    } else {
+                         /* Should not happen, but safe fallback? */
+                         if (expand_err) g_error_free(expand_err);
+                    }
+                    
+                    current_pos = (size_t)end_pos;
+                    task->replace_count++;
+                    g_match_info_next(mi, NULL);
                 }
-                g_free(result);
+                
+                /* Write remaining text after last match */
+                if (current_pos < line_len) {
+                    size_t rest = line_len - current_pos;
+                    fwrite(line + current_pos, 1, rest, task->output_file);
+                    task->output_size += rest;
+                    task->lf_count += count_lf(line + current_pos, rest);
+                }
+                g_match_info_free(mi);
             } else {
-                /* Error - write original */
+                /* No match - write original */
                 fwrite(line, 1, line_len, task->output_file);
                 task->output_size += line_len;
                 task->lf_count += count_lf(line, line_len);

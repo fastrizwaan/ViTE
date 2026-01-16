@@ -301,7 +301,11 @@ static void on_replace_clicked(GtkButton *btn, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     const char *repl = gtk_editable_get_text(GTK_EDITABLE(self->replace_entry));
     
-    editor_widget_replace_current(self->editor, repl);
+    gboolean regex = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->regex_check));
+    /* We need the Pattern text! Find entry has it. */
+    const char *pattern_text = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
+    
+    editor_widget_replace_current(self->editor, repl, regex, pattern_text);
     /* Re-trigger search to update offsets */
     perform_search(self);
 }

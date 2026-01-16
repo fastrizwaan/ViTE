@@ -112,4 +112,6 @@ gboolean document_search_task_get_regex(SearchTask *task);
 gboolean document_search_task_get_case_sensitive(SearchTask *task);
 gboolean document_search_task_get_whole_word(SearchTask *task);
 
+char *normalize_replacement_string(const char *replacement, gboolean for_regex);
+
 #endif

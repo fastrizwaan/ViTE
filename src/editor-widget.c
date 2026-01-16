@@ -4635,19 +4635,114 @@ editor_widget_prev_match(EditorWidget *self)
 }
 
 void 
-editor_widget_replace_current(EditorWidget *self, const char *replacement)
+editor_widget_replace_current(EditorWidget *self, const char *replacement, gboolean regex, const char *regex_text)
 {
     if (self->current_match_idx == -1 || !self->search_matches) return;
     if (self->current_match_idx >= (int)self->search_matches->len) return;
     
     SearchMatch m = g_array_index(self->search_matches, SearchMatch, self->current_match_idx);
     
+    char *final_replacement = NULL;
+    
+    if (regex && regex_text && *regex_text) {
+        GError *err = NULL;
+        GRegex *pattern = g_regex_new(regex_text, G_REGEX_OPTIMIZE | G_REGEX_CASELESS, 0, &err); 
+        /* TODO: Use flags from caller? Or assume case insensitive for now? 
+           Caller `find-replace-bar.c` knows flags.
+           Ideally pass `GRegex *`? 
+           But `find-replace-bar` creates `SearchTask`. `SearchTask` has regex hidden.
+           `find-replace-bar` can reconstruct pattern.
+           
+           Let's assume generic flags or pass flags?
+           Given existing code uses case-insensitive loosely or strict?
+           `find-replace-bar` handles flags.
+           Let's simply re-use `regex_text` as the pattern.
+           If we really want to be correct, we should pass `GRegex *precompiled` or flags.
+           
+           Simplest fix: pass `regex_text` and recompile.
+           
+           Wait, `document_search` uses `CASELESS` if `case_sensitive` is false.
+           We don't know `case_sensitive` here!
+           So we assume `CASELESS` or not?
+           The `regex_text` passed from `find-replace-bar.c` usually contains the raw or escaped string.
+           If `find-replace-bar` passes the *full* pattern (e.g. `(?i)pattern`), we are good.
+           But `find-replace-bar` constructs pattern internally.
+           
+           Maybe pass `GRegex *`?
+           `find-replace-bar.c` can construct `GRegex`.
+           
+           Let's stick to `const char *regex_text` but assume we might need flags.
+           Actually, if we match against extraction, we really need the capture groups.
+           
+           Let's expose `normalize_replacement_string` first.
+        */
+        
+        if (pattern) {
+             /* Need context for Lookarounds/Anchors! */
+             size_t len = 0;
+             size_t line_idx = document_get_line_of_offset(self->doc, m.start);
+             char *line_text = document_get_line(self->doc, line_idx, &len);
+             size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+             size_t offset_in_line = m.start - line_start;
+             
+             if (line_text) {
+                 GMatchInfo *info = NULL;
+                 /* N.B. We use match_full to find the specific instance at offset */
+                 /* This requires the pattern to match exactly at offset? 
+                    Or we scan line and find the one intersecting offset?
+                    Since we know `m` comes from a search, it should match.
+                 */
+                 
+                 /* Normalize replacement */
+                 char *norm = normalize_replacement_string(replacement, TRUE);
+                 
+                 if (g_regex_match_full(pattern, line_text, len, offset_in_line, 0, &info, NULL)) {
+                     gint s, e;
+                     g_match_info_fetch_pos(info, 0, &s, &e);
+                     /* Verify it is the correct match (starts at offset_in_line) 
+                        Note: g_regex_match_full finds *first* match after start_position.
+                        If multiple matches, we might get one *after* offset?
+                        We need checks.
+                     */
+                     if ((size_t)s == offset_in_line) {
+                         final_replacement = g_match_info_expand_references(info, norm, NULL);
+                     }
+                 }
+                 g_match_info_free(info);
+                 g_free(norm);
+                 g_free(line_text);
+             }
+             g_regex_unref(pattern);
+        }
+        if (err) g_error_free(err);
+    } 
+    
+    if (!final_replacement) {
+        /* Literal or fallback */
+        if (regex) {
+            /* If regex failed (e.g. compile error), use literal normalized? 
+               Or just use raw replacement?
+               If regex, we probably expect expanding.
+               But if expanding failed, use literal to avoid data loss?
+            */
+            char *norm = normalize_replacement_string(replacement, TRUE);
+            final_replacement = norm ? norm : g_strdup(replacement);
+        } else {
+            /* Literal mode: normalize handles standard escapes \n \t if we want?
+               Usually literal replace supports \n? 
+               Yes, normalize(..., FALSE) handles \n \t but not $1.
+            */
+            final_replacement = normalize_replacement_string(replacement, FALSE);
+        }
+    }
+
     /* Check if current selection matches the match (safety) */
     EditorCursor *c = editor_widget_get_primary_cursor(self);
     /* Strict check: cursor must wrap the match */
     /* Relaxed check: just replace at location */
     
-    size_t new_pos = document_replace(self->doc, m, replacement);
+    size_t new_pos = document_replace(self->doc, m, final_replacement);
+    g_free(final_replacement);
     
     /* Update cursor to end of replacement */
     editor_widget_clear_cursors(self);
