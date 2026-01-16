@@ -23,4 +23,10 @@ void vite_tab_set_modified(ViteTab *self, gboolean modified);
 void vite_tab_set_last_focused_child(ViteTab *self, GtkWidget *child);
 GtkWidget *vite_tab_get_last_focused_child(ViteTab *self);
 
+void vite_tab_set_loading(ViteTab *self, gboolean loading);
+void vite_tab_set_progress(ViteTab *self, double progress);
+gboolean vite_tab_is_loading(ViteTab *self);
+void vite_tab_set_cancellable(ViteTab *self, GCancellable *cancellable);
+void vite_tab_cancel_load(ViteTab *self);
+
 G_END_DECLS

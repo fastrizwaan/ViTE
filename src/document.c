@@ -20,6 +20,10 @@ struct _Document {
     /* Content Observation Listeners */
     GList *content_callbacks; /* List of struct { func, user_data } */
     gboolean callbacks_suspended;
+
+    /* Async Loading */
+    DocumentProgressCallback progress_cb;
+    void *progress_user_data;
 };
 
 typedef struct {
@@ -62,6 +66,22 @@ document_new(const char *filename)
     return doc;
 }
 
+Document *
+document_new_empty(void)
+{
+    Document *doc = malloc(sizeof(Document));
+    doc->pt = piece_table_new_empty();
+    doc->undo_stack = undo_stack_new();
+    doc->file_path = NULL;
+    doc->saved_command = NULL;
+    doc->mod_callbacks = NULL;
+    doc->content_callbacks = NULL;
+    doc->progress_cb = NULL;
+    doc->progress_user_data = NULL;
+    return doc;
+}
+
+
 void
 document_free(Document *doc)
 {
@@ -78,6 +98,13 @@ const char *
 document_get_file_path(Document *doc)
 {
     return doc->file_path;
+}
+
+void
+document_set_file_path(Document *doc, const char *path)
+{
+    g_free(doc->file_path);
+    doc->file_path = path ? g_strdup(path) : NULL;
 }
 
 char *
@@ -1990,3 +2017,145 @@ void document_replace_streaming_cancel(StreamingReplaceTask *task) {
 
 
 
+/* Async Loading Wrapper */
+
+static void
+on_pt_progress(double progress, gpointer user_data)
+{
+    Document *doc = user_data;
+    if (doc->progress_cb) {
+        doc->progress_cb(progress, doc->progress_user_data);
+    }
+}
+
+typedef struct {
+    Document *doc;
+    GAsyncReadyCallback callback;
+    gpointer user_data;
+    char *filename;
+} DocLoadCtx;
+
+static void
+on_pt_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
+{
+    DocLoadCtx *ctx = user_data;
+    /* We don't finish here, we let document_load_file_finish do it given the res */
+    
+    /* We need to pass 'res' to the user callback, but the user callback expects 
+       source to be Document, not PieceTable?
+       Standard GAsync pattern: The finish function takes the source object.
+       So document_load_file_finish(doc, res, error).
+       But 'res' is from PieceTable.
+       So document_load_file_finish will call piece_table_load_finish.
+    */
+    
+    if (ctx->callback) {
+        /* Pass NULL as source object if Document is not a GObject, or cast appropriately if expected. 
+           But callback signature is (GObject *source, ...).
+           Since Document is NOT a GObject, we should ideally pass NULL or change the callback signature.
+           However, main.c expects 'source' to be 'Document*'.
+           In C, pointer casting is just a value. G_OBJECT() macro performs a runtime check which FAILS.
+           So we should just pass (GObject*)ctx->doc but WITHOUT the checking macro.
+        */
+        ctx->callback((GObject*)ctx->doc, res, ctx->user_data);
+    }
+    
+    /* Update document state if successful? 
+       Actually standard pattern is specific finish function handles result extraction.
+       But we need to update doc state (undo stack, etc) upon success.
+       We can do that inside document_load_file_finish.
+    */
+    
+    g_free(ctx->filename);
+    g_free(ctx);
+}
+
+void
+document_load_file_async(Document *doc, const char *filename, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data)
+{
+    if (!doc) return;
+    
+    DocLoadCtx *ctx = g_new0(DocLoadCtx, 1);
+    ctx->doc = doc;
+    ctx->callback = callback;
+    ctx->user_data = user_data;
+    ctx->filename = g_strdup(filename);
+    
+    /* We pass our own callback to piece_table_load_async */
+    piece_table_load_async(doc->pt, filename, cancellable, 
+                           on_pt_progress, doc,
+                           on_pt_loaded, ctx);
+}
+
+gboolean
+document_load_file_finish(Document *doc, GAsyncResult *res, GError **error)
+{
+    /* res comes from piece_table_load_async (GTask) */
+    gboolean success = piece_table_load_finish(doc->pt, res, error);
+    
+    if (success) {
+        /* Reset document state */
+        undo_stack_free(doc->undo_stack);
+        doc->undo_stack = undo_stack_new();
+        
+        g_free(doc->file_path);
+        /* We need to recover filename? It was in the async task. 
+           But piece_table doesn't store filename in PT. 
+           We can look at the task source tag or data if we had access.
+           Wait, we passed filename to load_file_async. 
+           Ideally we should update it here.
+           But we don't have it easily here unless we stashed it in the GTask or passed it via source object.
+           Actually, the caller usually knows what file they loaded.
+           BUT, document_open meant setting the path.
+           Let's retrieve it from the GTask if possible?
+           Or just require caller to set it?
+           
+           Better: document_load_file_async caller (main.c) updates the path on success.
+           Wait, `document_new(filename)` sets it.
+           If we use `document_new_empty`, path is NULL.
+           Then `document_load_file_async`.
+           
+           I will fix this by setting the path in Document in the start of async load?
+           No, only on success.
+           
+           I'll rely on the caller (main.c) to set the path using `document_set_file_path` (which I need to add)
+           OR I can peek into the task data if I really want to.
+           
+           Actually, let's add `document_set_path` helper or just expose it?
+           `document.c` has `doc->file_path`.
+           
+           Let's just update `doc->file_path` inside `document_load_file_async` immediately? 
+           No, if it fails we shouldn't.
+           
+           I will add `char *pending_filename` to DocLoadCtx and access it?
+           No, Finish function receives `res`.
+           
+           Option: Store filename in GTask/AsyncResult's source object data?
+           
+           Simplest: Add `document_set_file_path` to header/impl and let caller handle it.
+           BUT `document_new` sets it. `main.c` relies on `document_get_file_path`.
+           
+           I will add `document_set_file_path(doc, filename)` usage in main.c's callback.
+        */
+        
+        doc->saved_command = NULL;
+        doc->callbacks_suspended = FALSE;
+        
+        /* Notify change */
+        check_modification_state(doc);
+        for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+            ContentCallbackData *cb = l->data;
+            cb->func(doc, cb->user_data);
+        }
+    }
+    return success;
+}
+
+void
+document_set_progress_callback(Document *doc, DocumentProgressCallback callback, void *user_data)
+{
+    if (doc) {
+        doc->progress_cb = callback;
+        doc->progress_user_data = user_data;
+    }
+}

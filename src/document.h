@@ -11,8 +11,16 @@ void document_suspend_callbacks(Document *doc);
 void document_resume_callbacks(Document *doc);
 
 Document *document_new(const char *filename);
+Document *document_new_empty(void);
+void document_load_file_async(Document *doc, const char *filename, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data);
+gboolean document_load_file_finish(Document *doc, GAsyncResult *res, GError **error);
+
+typedef void (*DocumentProgressCallback)(double progress, void *user_data);
+void document_set_progress_callback(Document *doc, DocumentProgressCallback callback, void *user_data);
+
 void document_free(Document *doc);
 const char *document_get_file_path(Document *doc);
+void document_set_file_path(Document *doc, const char *path);
 
 /* State Tracking */
 gboolean document_is_modified(Document *doc);

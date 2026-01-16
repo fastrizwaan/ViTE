@@ -36,6 +36,8 @@ struct _ViteTab {
     gboolean is_detached;          /* Whether >20px from start */
 
     GtkWidget *last_focused_child; /* Track last focused editor container (for splits) */
+    
+    GCancellable *cancellable;
 };
 
 G_DEFINE_TYPE(ViteTab, vite_tab, GTK_TYPE_BOX)
@@ -157,6 +159,11 @@ static void
 vite_tab_finalize (GObject *object)
 {
     ViteTab *self = VITE_TAB(object);
+    /* Ensure any pending load is cancelled */
+    if (self->cancellable) {
+        g_cancellable_cancel(self->cancellable);
+        g_object_unref(self->cancellable);
+    }
     g_free(self->title);
     G_OBJECT_CLASS(vite_tab_parent_class)->finalize(object);
 }
@@ -375,7 +382,7 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
 static void
 on_close_clicked (GtkButton *btn, ViteTab *self)
 {
-    if (self->loading) return;
+    /* If loading, we still allow close, which will trigger finalize and cancel the load */
     g_signal_emit(self, signals[SIGNAL_CLOSE_CLICKED], 0);
 }
 
@@ -969,3 +976,53 @@ vite_tab_set_modified(ViteTab *self, gboolean modified)
     
     update_close_button_state(self);
 }
+
+void
+vite_tab_set_loading(ViteTab *self, gboolean loading)
+{
+    self->loading = loading;
+    if (loading) {
+        gtk_widget_set_visible(self->spinner, TRUE);
+        gtk_spinner_start(GTK_SPINNER(self->spinner));
+        gtk_widget_set_visible(self->progress_bar, TRUE);
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(self->progress_bar), 0.0);
+    } else {
+        gtk_spinner_stop(GTK_SPINNER(self->spinner));
+        gtk_widget_set_visible(self->spinner, FALSE);
+        gtk_widget_set_visible(self->progress_bar, FALSE);
+        
+        /* Clear cancellable if we finished/stopped loading */
+        if (self->cancellable) {
+            g_object_unref(self->cancellable);
+            self->cancellable = NULL;
+        }
+    }
+}
+
+void
+vite_tab_set_progress(ViteTab *self, double progress)
+{
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(self->progress_bar), progress);
+}
+
+gboolean
+vite_tab_is_loading(ViteTab *self)
+{
+    return self->loading;
+}
+
+void
+vite_tab_set_cancellable(ViteTab *self, GCancellable *cancellable)
+{
+    if (self->cancellable) g_object_unref(self->cancellable);
+    self->cancellable = cancellable ? g_object_ref(cancellable) : NULL;
+}
+
+void
+vite_tab_cancel_load(ViteTab *self)
+{
+    if (self->cancellable) {
+        g_cancellable_cancel(self->cancellable);
+    }
+}
+

@@ -15,6 +15,7 @@ struct _ViteWindow {
     ViteTabBar *tab_bar;
     GtkStack *stack;
     AdwWindowTitle *window_title;
+    GtkWidget *header_progress;
 };
 
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
@@ -945,6 +946,13 @@ load_css(void)
     "    border-radius: 10px;"
     "    margin-right: 0px;"
     "    padding: 4px;"
+    "}"
+    ".header-progress progress, .header-progress trough {"
+    "    min-height: 2px;"
+    "}"
+    ".header-progress {"
+    "    padding: 0;"
+    "    margin: 0;"
     "}";
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, css);
@@ -1895,6 +1903,13 @@ setup_window(GtkWindow *window)
     gtk_widget_add_css_class(header, "flat");
     gtk_box_append(GTK_BOX(titlebar_container), header);
     
+    /* Progress Bar (positioned below header area, outside titlebar) */
+    GtkWidget *prog = gtk_progress_bar_new();
+    gtk_widget_set_visible(prog, FALSE);
+    gtk_widget_add_css_class(prog, "header-progress");
+    gtk_widget_set_size_request(prog, -1, 2);
+    win->header_progress = prog;
+    
     GtkWidget *title = adw_window_title_new("ViTE", NULL);
     win->window_title = ADW_WINDOW_TITLE(title);
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title);
@@ -2082,11 +2097,19 @@ setup_window(GtkWindow *window)
     g_signal_connect(win->tab_bar, "tab-dropped", G_CALLBACK(on_tab_dropped), win);
     g_signal_connect(tabs_popover, "map", G_CALLBACK(update_open_tabs_list), tabs_list);
     
+    /* Main Content Area (outside titlebar) */
+    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_window_set_child(window, main_box);
+    
+    /* Progress bar at the top of content (below titlebar area) */
+    gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->header_progress));
+    
     /* Initialize Stack */
     win->stack = GTK_STACK(gtk_stack_new());
     gtk_stack_set_transition_type(win->stack, GTK_STACK_TRANSITION_TYPE_CROSSFADE);
+    gtk_widget_set_vexpand(GTK_WIDGET(win->stack), TRUE);
     
-    gtk_window_set_child(window, GTK_WIDGET(win->stack));
+    gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->stack));
     
     /* Create Initial Tab if needed? 
        Actually activate() might do nothing? 
@@ -2117,6 +2140,122 @@ activate(GtkApplication *app, gpointer user_data)
 }
 
 
+
+typedef struct {
+    ViteTab *tab;
+    ViteTabBar *tab_bar; /* Weak Ref */
+    GtkWidget *header_progress; /* Weak Ref */
+    char *filename;
+} LoadContext;
+
+static gboolean
+free_load_context_idle(gpointer user_data)
+{
+    g_free(user_data);
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_load_progress(double progress, void *user_data)
+{
+    LoadContext *ctx = user_data;
+    /* Determine visibility based on tab count */
+    gboolean show_in_header = FALSE;
+    if (ctx->tab_bar) {
+        GList *tabs = vite_tab_bar_get_tabs(ctx->tab_bar);
+        guint n_tabs = g_list_length(tabs);
+        g_list_free(tabs);
+        
+        show_in_header = (n_tabs <= 1);
+    }
+    
+    /* Update Tab Progress */
+    if (ctx->tab) {
+        vite_tab_set_progress(ctx->tab, progress);
+        /* If showing in header, maybe hide tab progress? 
+           User said: "when only 1 tab ... show progress in headerbar". 
+           Implies NOT in tab? Or both?
+           "then when tabs appear ... ONLY show progress in the tab".
+           So 1 tab -> Header (maybe Tab too?)
+           2+ tabs -> Tab ONLY (Hide Header).
+           
+           Let's interpret as:
+           1 Tab: Header (+ Tab spinner is unobtrusive, keep it?)
+           2+ Tabs: Tab ONLY (Hide Header).
+           
+           Actually, if I hide header progress, I should make sure it's 0 or hidden.
+        */
+    }
+        
+    /* Update Header Progress */
+    if (ctx->header_progress) {
+         if (show_in_header) {
+             gtk_widget_set_visible(ctx->header_progress, TRUE);
+             gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ctx->header_progress), progress);
+         } else {
+             gtk_widget_set_visible(ctx->header_progress, FALSE);
+         }
+    }
+}
+
+static void
+on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
+{
+    LoadContext *ctx = user_data;
+    Document *doc = (Document*)source;
+    GError *err = NULL;
+    
+    gboolean success = document_load_file_finish(doc, res, &err);
+    
+    if (ctx->tab) {
+        vite_tab_set_loading(ctx->tab, FALSE);
+        
+        if (success) {
+             document_set_file_path(doc, ctx->filename);
+             
+             /* Force title update */
+             /* We can rely on modification callback? No, doc is not modified. 
+                Manually call update. */
+             vite_tab_set_title(ctx->tab, g_path_get_basename(ctx->filename)); /* Temporary, update_window_title_for_tab does full logic */
+             update_window_title_for_tab(ctx->tab);
+             
+        } else {
+             if (!g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+                 /* Show error dialog */
+                 GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(ctx->tab));
+                 if (root) {
+                     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Failed to open file", err->message));
+                     adw_alert_dialog_add_response(dialog, "ok", "OK");
+                     adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
+                 }
+             }
+        }
+    }
+    
+    if (ctx->header_progress) {
+         gtk_widget_set_visible(ctx->header_progress, FALSE);
+         g_object_remove_weak_pointer(G_OBJECT(ctx->header_progress), (gpointer *)&ctx->header_progress);
+         ctx->header_progress = NULL;
+    }
+    
+    if (ctx->tab) {
+        g_object_remove_weak_pointer(G_OBJECT(ctx->tab), (gpointer *)&ctx->tab);
+        ctx->tab = NULL;
+    }
+    
+    if (ctx->tab_bar) {
+        g_object_remove_weak_pointer(G_OBJECT(ctx->tab_bar), (gpointer *)&ctx->tab_bar);
+        ctx->tab_bar = NULL;
+    }
+    
+    if (err) g_error_free(err);
+    g_free(ctx->filename);
+    ctx->filename = NULL;
+    
+    /* Defer freeing ctx to allow pending idle progress callbacks to complete safely */
+    /* Defer freeing ctx to allow pending idle progress callbacks to complete safely */
+    g_idle_add(free_load_context_idle, ctx);
+}
 
 static void
 open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
@@ -2171,11 +2310,14 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
             GtkWindow *window = GTK_WINDOW(gtk_application_window_new(app));
             target_window = setup_window(window);
             gtk_window_set_default_size(window, 800, 600);
-            gtk_window_present(window); /* Ensure it's presented? Or done later? */
+            gtk_window_present(window);
         }
     }
         
     /* Check if we can reuse the active tab in TARGET window (Untitled & Unmodified) */
+    gboolean reused = FALSE;
+    ViteTab *reused_tab = NULL;
+    
     if (TRUE) {
              ViteTab *tab = vite_tab_bar_get_active_tab(target_window->tab_bar);
              if (tab) {
@@ -2183,76 +2325,100 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
                  GtkWidget *editor = get_editor_from_page(page);
                  if (EDITOR_IS_WIDGET(editor)) {
                            Document *current_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+                           /* Check if strictly untitled (no path) and unmodified */
                            if (!document_get_file_path(current_doc) && !document_is_modified(current_doc)) {
                                /* Reuse this tab */
-                               Document *doc = document_new(path);
-                               if (!doc) { 
-                                   g_warning("Failed to open %s", path); 
-                                   g_free(path); 
-                                   return; 
-                               }
-                               
-                               /* Free old doc */
-                               document_free(current_doc);
-                               
-                               /* Set new doc */
-                               editor_widget_set_document(EDITOR_WIDGET(editor), doc);
-                               
-                               /* Setup callbacks */
-                               /* Setup callbacks */
-                               document_add_modification_callback(doc, on_document_modified, tab);
-                               document_add_content_callback(doc, on_document_content_changed, tab);
-
-                               /* Set language for syntax highlighting */
-                               const char *dot = strrchr(path, '.');
-                               if (dot) editor_widget_set_language(EDITOR_WIDGET(editor), dot + 1);
-                               
-                               /* Update title */
-                               char *name = g_file_get_basename(file);
-                               vite_tab_set_title(tab, name);
-                               
-                               /* Update original_title */
-                               g_object_set_data_full(G_OBJECT(tab), "original_title", g_strdup(name), g_free);
-                               g_free(name);
-                               
-                               /* Add to recent files */
-                               char *uri = g_file_get_uri(file);
-                               add_to_local_recents(uri);
-                               g_free(uri);
-
-                               g_free(path);
-                               
-                               update_window_title_for_tab(tab);
-                               gtk_window_present(target_window->window);
-                               
-                               /* Ensure focus is grabbed safely */
-                               defer_focus(editor);
-                               
-                               return;
+                               reused = TRUE;
+                               reused_tab = tab;
                            }
-                     }
-              }
+                 }
+             }
     }
-    
-    Document *doc = document_new(path);
-    if (!doc) {
-        g_warning("Failed to open %s", path);
-        g_free(path);
-        return;
-    }
-    char *name = g_file_get_basename(file);
-    create_new_tab(target_window, name, doc);
-    
-    /* Add to recent files */
-    char *uri = g_file_get_uri(file);
-    add_to_local_recents(uri);
-    g_free(uri);
 
-    g_free(name);
-    g_free(path);
+    Document *doc = NULL;
+    ViteTab *tab_to_use = NULL;
+    char *basename = g_file_get_basename(file); // Allocate basename here
+
+    if (reused && reused_tab) {
+        GtkWidget *page = g_object_get_data(G_OBJECT(reused_tab), "page");
+        GtkWidget *editor = get_editor_from_page(page);
+        Document *old_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+        
+        // Remove callbacks from old doc
+        // document_remove_modification_callback(old_doc, on_document_modified, reused_tab); // Not strictly needed as doc is freed
+        // document_remove_content_callback(old_doc, on_document_content_changed, reused_tab);
+
+        doc = document_new_empty();
+        editor_widget_set_document(EDITOR_WIDGET(editor), doc);
+        document_free(old_doc);
+        
+        /* Update tab callbacks for new doc */
+        document_add_modification_callback(doc, on_document_modified, reused_tab);
+        document_add_content_callback(doc, on_document_content_changed, reused_tab);
+        
+        tab_to_use = reused_tab;
+        
+        vite_tab_set_title(tab_to_use, basename);
+        g_object_set_data_full(G_OBJECT(tab_to_use), "original_title", g_strdup(basename), g_free);
+        
+    } else {
+        doc = document_new_empty();
+        create_new_tab(target_window, basename, doc);
+        tab_to_use = vite_tab_bar_get_active_tab(target_window->tab_bar);
+    }
     
-    gtk_window_present(target_window->window);
+    /* Set language based on extension immediately */
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab_to_use), "page");
+    GtkWidget *editor = get_editor_from_page(page);
+    const char *dot = strrchr(path, '.');
+    if (dot && EDITOR_IS_WIDGET(editor)) {
+        editor_widget_set_language(EDITOR_WIDGET(editor), dot + 1);
+    }
+
+    /* Setup Async Load */
+    vite_tab_set_loading(tab_to_use, TRUE);
+    if (target_window->header_progress) {
+        GList *tabs = vite_tab_bar_get_tabs(target_window->tab_bar);
+        guint n_tabs = g_list_length(tabs);
+        g_list_free(tabs);
+        
+        if (n_tabs <= 1) {
+            gtk_widget_set_visible(target_window->header_progress, TRUE);
+            gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(target_window->header_progress), 0.0);
+        } else {
+            gtk_widget_set_visible(target_window->header_progress, FALSE);
+        }
+    }
+    
+    LoadContext *ctx = g_new0(LoadContext, 1);
+    ctx->tab = tab_to_use;
+    ctx->tab_bar = target_window->tab_bar;
+    ctx->header_progress = target_window->header_progress; 
+    ctx->filename = g_strdup(path);
+    
+    /* Weak references for safety */
+    g_object_add_weak_pointer(G_OBJECT(tab_to_use), (gpointer *)&ctx->tab);
+    if (ctx->tab_bar) {
+        g_object_add_weak_pointer(G_OBJECT(ctx->tab_bar), (gpointer *)&ctx->tab_bar);
+    }
+    if (ctx->header_progress) {
+        g_object_add_weak_pointer(G_OBJECT(ctx->header_progress), (gpointer *)&ctx->header_progress);
+    }
+    
+    document_set_progress_callback(doc, on_load_progress, ctx);
+    
+    GCancellable *cancellable = g_cancellable_new();
+    vite_tab_set_cancellable(tab_to_use, cancellable);
+    
+    document_load_file_async(doc, path, cancellable, on_load_complete, ctx);
+    g_object_unref(cancellable);
+    
+    add_to_local_recents(path);
+    g_free(path);
+    g_free(basename);
 }
+
+
 
 static void
 on_open(GtkApplication *app, GFile **files, int n_files, char *hint, gpointer user_data)

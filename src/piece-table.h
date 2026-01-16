@@ -66,7 +66,25 @@ typedef struct {
 } PieceTable;
 
 PieceTable *piece_table_new(const char *filename);
+PieceTable *piece_table_new_empty(void);
 void piece_table_free(PieceTable *pt);
+
+/* Async Loading */
+typedef void (*PieceTableLoadProgressCallback)(double progress, gpointer user_data);
+
+typedef struct {
+    PieceTable *pt;
+    char *filename;
+    GCancellable *cancellable;
+    PieceTableLoadProgressCallback progress_cb;
+    gpointer progress_data;
+} PieceTableLoadData;
+
+void piece_table_load_async(PieceTable *pt, const char *filename, GCancellable *cancellable, 
+                            PieceTableLoadProgressCallback progress_cb, gpointer progress_data,
+                            GAsyncReadyCallback callback, gpointer user_data);
+gboolean piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error);
+
 
 /* Iterator for fast sequential access */
 typedef struct {

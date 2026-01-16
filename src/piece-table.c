@@ -1718,3 +1718,259 @@ piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_le
     *out_len = res->len;
     return g_string_free(res, FALSE);
 }
+
+/* -- Async Loading Implementation -- */
+
+typedef struct {
+    char *data;
+    size_t size;
+    gboolean is_mmapped;
+    FileEncoding encoding;
+    NewlineType newline_style;
+    gboolean has_bom;
+    char *mmap_base;
+    size_t mmap_size;
+    PieceNode *root;
+    PieceNode **temp_nodes; /* Used during build */
+    size_t node_count;
+} LoadResult;
+
+static void
+load_result_free(LoadResult *res)
+{
+    if (res->root) {
+        free_tree(res->root); 
+    } else if (res->temp_nodes) {
+        if (res->node_count > 0 && res->temp_nodes) {
+             for (size_t i = 0; i < res->node_count; i++) {
+                 if (res->temp_nodes[i]) {
+                     free_tree(res->temp_nodes[i]);
+                 }
+             }
+        }
+    }
+    
+    if (res->temp_nodes) free(res->temp_nodes);
+    
+    if (res->is_mmapped && res->mmap_base && res->mmap_size > 0) {
+         munmap(res->mmap_base, res->mmap_size);
+    } else if (res->data && !res->is_mmapped) {
+        g_free(res->data);
+    }
+    g_free(res);
+}
+
+/* Idle callback to dispatch progress on main thread */
+typedef struct {
+    PieceTableLoadProgressCallback cb;
+    gpointer data;
+    double progress;
+} IdleProgressData;
+
+static gboolean
+dispatch_progress_idle(gpointer user_data)
+{
+    IdleProgressData *info = user_data;
+    if (info->cb) {
+        info->cb(info->progress, info->data);
+    }
+    g_free(info);
+    return G_SOURCE_REMOVE; 
+}
+
+
+/* Thread worker */
+static void
+load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable)
+{
+    PieceTableLoadData *data = task_data;
+    const char *filename = data->filename;
+    
+    int fd = open(filename, O_RDONLY);
+    if (fd == -1) {
+        g_task_return_new_error(task, G_FILE_ERROR, g_file_error_from_errno(errno), 
+                                "Failed to open file: %s", strerror(errno));
+        return;
+    }
+
+    struct stat sb;
+    if (fstat(fd, &sb) == -1) {
+        close(fd);
+        g_task_return_new_error(task, G_FILE_ERROR, g_file_error_from_errno(errno), 
+                                "Failed to stat file: %s", strerror(errno));
+        return;
+    }
+    
+    size_t size = sb.st_size;
+    char *mmap_ptr = NULL;
+    if (size > 0) {
+        mmap_ptr = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    }
+    close(fd);
+    
+    if (size > 0 && mmap_ptr == MAP_FAILED) {
+        g_task_return_new_error(task, G_FILE_ERROR, g_file_error_from_errno(errno), 
+                                "Failed to mmap file: %s", strerror(errno));
+        return;
+    }
+
+    LoadResult *res = g_new0(LoadResult, 1);
+    res->mmap_base = mmap_ptr;
+    res->mmap_size = size;
+    res->is_mmapped = (size > 0);
+    res->data = mmap_ptr;
+    res->size = size;
+
+    /* Detect Encoding */
+    size_t bom_len = 0;
+    if (res->data && res->size > 0) {
+        detect_encoding(res->data, res->size, &res->encoding, &res->has_bom, &bom_len);
+        
+        if (g_cancellable_is_cancelled(cancellable)) {
+            load_result_free(res);
+            g_task_return_error_if_cancelled(task);
+            return;
+        }
+
+        if (res->encoding != ENCODING_UTF8) {
+            const char *from_codeset = (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
+            gsize bytes_read, bytes_written;
+            GError *error = NULL;
+            char *utf8_data = g_convert(res->data + bom_len, res->size - bom_len, "UTF-8", from_codeset, &bytes_read, &bytes_written, &error);
+            
+            if (utf8_data) {
+                if (res->is_mmapped) munmap(res->mmap_base, res->mmap_size);
+                res->mmap_base = NULL;
+                res->mmap_size = 0;
+                res->is_mmapped = FALSE;
+                
+                res->data = utf8_data;
+                res->size = bytes_written;
+            } else {
+                 load_result_free(res);
+                 g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "Encoding conversion failed: %s", error->message);
+                 g_error_free(error);
+                 return;
+            }
+        } else if (bom_len > 0) {
+            res->data += bom_len;
+            res->size -= bom_len;
+        }
+        
+        detect_newline_style(res->data, res->size, &res->newline_style);
+    }
+
+    /* Build Tree */
+    if (res->size > 0) {
+        size_t chunk_size = 16 * 1024;
+        size_t count = (res->size + chunk_size - 1) / chunk_size;
+        
+        res->temp_nodes = calloc(count, sizeof(PieceNode*));
+        res->node_count = count;
+        
+        /* 1. Create nodes */
+        for (size_t i = 0; i < count; i++) {
+            if ((i % 128) == 0) {
+                 if (g_cancellable_is_cancelled(cancellable)) {
+                     load_result_free(res);
+                     g_task_return_error_if_cancelled(task);
+                     return;
+                 }
+                 
+                 
+                 if (data->progress_cb) {
+                     double p = (double)i / count;
+                     IdleProgressData *info = g_new0(IdleProgressData, 1);
+                     info->cb = data->progress_cb;
+                     info->data = data->progress_data;
+                     info->progress = p;
+                     g_idle_add(dispatch_progress_idle, info);
+                 }
+            }
+
+            size_t start = i * chunk_size;
+            size_t len = chunk_size;
+            if (start + len > res->size) len = res->size - start;
+            
+            size_t lf = count_newlines(res->data + start, len);
+            Piece p = { SOURCE_ORIGINAL, start, len, lf };
+            res->temp_nodes[i] = node_new(p);
+        }
+        
+        /* 2. Build Tree */
+        res->root = build_balanced_tree_recursive(res->temp_nodes, 0, (int)count - 1, NULL);
+        
+        free(res->temp_nodes);
+        res->temp_nodes = NULL;
+        res->node_count = 0;
+    }
+    
+    g_task_return_pointer(task, res, (GDestroyNotify)load_result_free);
+}
+
+
+PieceTable *
+piece_table_new_empty(void)
+{
+    PieceTable *pt = g_new0(PieceTable, 1);
+    pt->add_buffer = large_buffer_new();
+    pt->root = NULL;
+    return pt;
+}
+
+void
+piece_table_load_async(PieceTable *pt, const char *filename, GCancellable *cancellable, 
+                            PieceTableLoadProgressCallback progress_cb, gpointer progress_data,
+                            GAsyncReadyCallback callback, gpointer user_data)
+{
+    GTask *task = g_task_new(NULL, cancellable, callback, user_data);
+    PieceTableLoadData *data = g_new0(PieceTableLoadData, 1);
+    data->pt = pt; 
+    data->filename = g_strdup(filename);
+    data->progress_cb = progress_cb;
+    data->progress_data = progress_data;
+    data->cancellable = cancellable ? g_object_ref(cancellable) : NULL;
+    
+    g_task_set_task_data(task, data, (GDestroyNotify)g_free);
+    g_task_run_in_thread(task, load_file_worker);
+    g_object_unref(task);
+}
+
+gboolean
+piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error)
+{
+    LoadResult *lr = g_task_propagate_pointer(G_TASK(res), error);
+    if (!lr) return FALSE;
+    
+    /* Clean up old state */
+    if (pt->is_mmapped && pt->mmap_base && pt->mmap_size > 0) {
+        munmap(pt->mmap_base, pt->mmap_size);
+    } else if (pt->orig_data) {
+        g_free(pt->orig_data);
+    }
+    free_tree(pt->root);
+    
+    /* Apply new state */
+    pt->mmap_base = lr->mmap_base;
+    pt->mmap_size = lr->mmap_size;
+    pt->is_mmapped = lr->is_mmapped;
+    pt->orig_data = lr->data;
+    pt->orig_size = lr->size;
+    pt->root = lr->root;
+    pt->encoding = lr->encoding;
+    pt->newline_style = lr->newline_style;
+    pt->has_bom = lr->has_bom;
+    
+    /* Clear from LR so they aren't freed */
+    lr->mmap_base = NULL;
+    lr->data = NULL;
+    lr->root = NULL;
+    
+    /* Reset add buffer */
+    large_buffer_free(pt->add_buffer);
+    pt->add_buffer = large_buffer_new();
+    pt->change_count = 0;
+    
+    load_result_free(lr);
+    return TRUE;
+}
