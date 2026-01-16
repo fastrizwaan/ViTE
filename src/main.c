@@ -1730,6 +1730,144 @@ on_close_curr_tab_clicked (GtkButton *btn, gpointer user_data)
 
 
 
+
+/* Go to Line Popover Implementation */
+
+static void
+on_goto_line_popever_closed(GtkPopover *popover, gpointer user_data)
+{
+    gtk_widget_unparent(GTK_WIDGET(popover));
+}
+
+static void
+on_goto_perform(GtkWidget *widget, gpointer user_data)
+{
+    GtkWidget *popover_widget = gtk_widget_get_ancestor(widget, GTK_TYPE_POPOVER);
+    if (!popover_widget) return;
+    
+    GtkPopover *popover = GTK_POPOVER(popover_widget);
+    EditorWidget *editor = EDITOR_WIDGET(g_object_get_data(G_OBJECT(popover), "editor"));
+    GtkSpinButton *spin = GTK_SPIN_BUTTON(user_data);
+    
+    int line = gtk_spin_button_get_value_as_int(spin);
+    
+    /* Convert 1-based UI to 0-based internal */
+    if (line > 0) line--;
+    
+    editor_widget_scroll_to_line(editor, (size_t)line);
+    
+    /* Close popover */
+    gtk_popover_popdown(popover);
+    
+    /* Focus editor */
+    gtk_widget_grab_focus(GTK_WIDGET(editor));
+}
+
+static void
+show_goto_line_popover(GtkWidget *parent_widget, EditorWidget *editor)
+{
+    GtkWidget *popover = gtk_popover_new();
+    gtk_widget_set_parent(popover, parent_widget); /* Attach to overlay or parent */
+    gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
+    gtk_popover_set_position(GTK_POPOVER(popover), GTK_POS_BOTTOM);
+    
+    /* Force it to appear "inside" (at top center usually) by pointing to top edge? 
+       Or using valign/halign if supported? 
+       Let's try pointing to a rectangle at the top center of parent. */
+    int w = gtk_widget_get_width(parent_widget);
+    GdkRectangle rect = {w / 2, 0, 1, 1};
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    
+    /* Set alignment/pointing to top-right or center? 
+       Usually centered or near header. Let's verify existing overlay usage.
+       For now, standard popover behavior. */
+       
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_margin_top(box, 3);
+    gtk_widget_set_margin_bottom(box, 3);
+    gtk_widget_set_margin_start(box, 3);
+    gtk_widget_set_margin_end(box, 3);
+    gtk_popover_set_child(GTK_POPOVER(popover), box);
+    
+    GtkWidget *label = gtk_label_new("Go to Line:");
+    gtk_box_append(GTK_BOX(box), label);
+    
+    /* Determine max lines */
+    Document *doc = editor_widget_get_document(editor);
+    size_t total = document_get_line_count(doc);
+    if (total == 0) total = 1;
+    
+    GtkWidget *spin = gtk_spin_button_new_with_range(1, (double)total, 1);
+    gtk_box_append(GTK_BOX(box), spin);
+    
+    /* Activate default */
+    gtk_widget_set_can_focus(spin, TRUE);
+    gtk_popover_set_default_widget(GTK_POPOVER(popover), spin);
+    
+    GtkWidget *btn = gtk_button_new_with_label("Go");
+    gtk_widget_add_css_class(btn, "suggested-action");
+    gtk_box_append(GTK_BOX(box), btn);
+    
+    /* Store editor on popover */
+    g_object_set_data(G_OBJECT(popover), "editor", editor);
+    
+    g_signal_connect(btn, "clicked", G_CALLBACK(on_goto_perform), spin);
+    g_signal_connect(spin, "activate", G_CALLBACK(on_goto_perform), spin); /* Enter key triggers perform directly */
+    
+    g_signal_connect(popover, "closed", G_CALLBACK(on_goto_line_popever_closed), NULL);
+    
+    gtk_popover_popup(GTK_POPOVER(popover));
+}
+
+static void
+on_goto_line_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    
+    /* 1. Identify active editor in active tab/split */
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!tab) return;
+    
+    /* Get last focused child in the tab to identify the correct split */
+    GtkWidget *focused_child = vite_tab_get_last_focused_child(tab);
+    
+    /* If no specific child tracked, fallback to finding one */
+    if (!focused_child) {
+        GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+        if (page) focused_child = find_first_editor_recursive(page);
+        if (focused_child) {
+             /* usually find_first returns editor directly, need its overlay/container? */
+        }
+    }
+    
+    /* We want the EditorWidget and its parent Overlay to attach the popover to */
+    GtkWidget *editor = NULL;
+    GtkWidget *attach_target = NULL;
+    
+    if (focused_child) {
+        if (EDITOR_IS_WIDGET(focused_child)) {
+            editor = focused_child;
+            /* Walk up to find overlay */
+            attach_target = gtk_widget_get_ancestor(editor, GTK_TYPE_OVERLAY);
+        } else if (GTK_IS_OVERLAY(focused_child)) {
+             attach_target = focused_child;
+             editor = gtk_overlay_get_child(GTK_OVERLAY(focused_child));
+             /* If child is scrolled window? */
+             if (GTK_IS_SCROLLED_WINDOW(editor)) {
+                 editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(editor));
+             }
+        } else {
+             /* Might be a container, search down */
+            editor = find_first_editor_recursive(focused_child);
+            if (editor) attach_target = gtk_widget_get_ancestor(editor, GTK_TYPE_OVERLAY);
+        }
+    }
+    
+    if (editor && EDITOR_IS_WIDGET(editor) && attach_target) {
+        show_goto_line_popover(attach_target, EDITOR_WIDGET(editor));
+    }
+}
+
 static ViteWindow *
 setup_window(GtkWindow *window)
 {
@@ -1880,6 +2018,8 @@ setup_window(GtkWindow *window)
     g_menu_append_submenu(s1, "View", G_MENU_MODEL(view_menu));
     g_object_unref(view_menu);
     
+    g_menu_append(s1, "Go to Line...", "win.goto-line");
+    
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s1));
     g_object_unref(s1);
     
@@ -1895,9 +2035,16 @@ setup_window(GtkWindow *window)
         { "split-right", on_split_right, NULL, NULL, NULL },
         { "split-down", on_split_down, NULL, NULL, NULL },
         { "close-view", on_close_split_action, NULL, NULL, NULL },
-        { "preferences", on_preferences_action, NULL, NULL, NULL }
+        { "preferences", on_preferences_action, NULL, NULL, NULL },
+        { "goto-line", on_goto_line_action, NULL, NULL, NULL }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
+    
+    /* Accelerators */
+    if (app) {
+        const char *accels[] = {"<Ctrl>g", NULL};
+        gtk_application_set_accels_for_action(app, "win.goto-line", accels);
+    }
     
     GtkWidget *btn_menu = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(btn_menu), "open-menu-symbolic");

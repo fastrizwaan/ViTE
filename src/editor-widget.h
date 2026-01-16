@@ -25,5 +25,6 @@ GtkAdjustment *editor_widget_get_vadjustment(EditorWidget *self);
 void editor_widget_refresh_syntax(EditorWidget *self);
 void editor_widget_reset_cursor_to_start(EditorWidget *self);
 char *editor_widget_get_selected_text(EditorWidget *self);
+void editor_widget_scroll_to_line(EditorWidget *self, size_t line);
 
 #endif

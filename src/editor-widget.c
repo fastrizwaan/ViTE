@@ -4914,3 +4914,64 @@ editor_widget_get_selected_text(EditorWidget *self)
     /* Get selection text from document */
     return document_get_text_range(self->doc, start, end - start);
 }
+
+void
+editor_widget_scroll_to_line(EditorWidget *self, size_t line)
+{
+    if (!self->doc) return;
+
+    size_t total_lines = document_get_line_count(self->doc);
+    /* Input is 1-based usually from UI, but let's assume this function takes 0-based index 
+       or we handle it. The spec says "started of the line number", usually implies user matching.
+       Let's stick to 0-based index for internal API. */
+    
+    if (line >= total_lines) {
+        if (total_lines > 0) line = total_lines - 1;
+        else line = 0;
+    }
+
+    /* 1. Scroll to line */
+    double target_y = 0;
+    
+    editor_widget_ensure_metrics(self);
+
+    if (self->wrap_lines && total_lines > 50000) {
+        /* Statistical Mode */
+        target_y = (double)line * self->avg_visual_lines * self->line_height;
+    } else {
+        /* User exact mode or linear mode */
+        /* Ensure layout is built */
+        editor_widget_update_adjustments(self, -1, -1);
+        
+        if (self->line_y_offsets && line < self->line_y_offsets->len) {
+            target_y = g_array_index(self->line_y_offsets, double, line);
+        } else {
+            /* Fallback */
+            target_y = (double)line * self->line_height;
+        }
+    }
+    
+    if (self->vadjustment) {
+        /* Center it? Spec says "go the last line" or "scroll to the start of the line number".
+           Usually implies putting it at the top or visible. Putting at top is standard behavior for 'Goto Line'. */
+        gtk_adjustment_set_value(self->vadjustment, target_y);
+    }
+    
+    /* 2. Move cursor to start of line */
+    size_t line_start_offset = document_get_offset_of_line(self->doc, line);
+    
+    /* Clear existing cursors and add new one */
+    if (self->cursors) {
+        /* Reset to just one cursor */
+        g_array_set_size(self->cursors, 0);
+        
+        EditorCursor c;
+        c.cursor_offset = line_start_offset;
+        c.selection_anchor = line_start_offset;
+        c.target_x = -1;
+        g_array_append_val(self->cursors, c);
+    }
+    
+    /* Force redraw and update */
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
