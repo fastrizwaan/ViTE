@@ -890,8 +890,12 @@ void
 vite_tab_set_title (ViteTab *self, const char *title)
 {
     g_free(self->title);
-    self->title = g_strdup(title);
-    gtk_label_set_text(GTK_LABEL(self->label), title);
+    if (g_utf8_validate(title, -1, NULL)) {
+        self->title = g_strdup(title);
+    } else {
+        self->title = g_utf8_make_valid(title, -1);
+    }
+    gtk_label_set_text(GTK_LABEL(self->label), self->title);
     gtk_widget_set_tooltip_text(GTK_WIDGET(self), title);
     
     /* Re-apply modification state to update label */

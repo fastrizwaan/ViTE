@@ -502,9 +502,23 @@ on_document_content_changed(Document *doc, void *user_data)
         size_t len;
         char *line = document_get_line(doc, 0, &len);
         if (line && len > 0) {
-            /* Truncate to 20 chars if needed (just for reading, logic below handles usage) */
-            if (len > 20) line[20] = '\0';
-            else line[len] = '\0'; 
+            /* Truncate to 20 characters (safe UTF-8) */
+            if (g_utf8_validate(line, -1, NULL)) {
+                long char_count = g_utf8_strlen(line, -1);
+                if (char_count > 20) {
+                    char *ptr = g_utf8_offset_to_pointer(line, 20);
+                    if (ptr) *ptr = '\0';
+                }
+            } else {
+                 /* Fallback for invalid UTF-8: just clamp bytes but respect boundaries? 
+                    Actually, if invalid, just cap bytes but ensure we don't cut mid-sequence?
+                    Let's just use strict byte limit of 20 but back off if continuation. */
+                 if (len > 20) {
+                     int cut = 20;
+                     while (cut > 0 && (line[cut] & 0xC0) == 0x80) cut--;
+                     line[cut] = '\0';
+                 }
+            } 
             
             /* Basic hygiene: remove newlines */
             char *nl = strchr(line, '\n');

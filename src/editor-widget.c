@@ -1855,12 +1855,34 @@ editor_widget_backspace(EditorWidget *self)
              cur->selection_anchor = start;
              delta -= (long)(end - start);
         } else {
-             /* Delete char before */
+             /* Delete char before - UTF-8 Aware */
              if (cur->cursor_offset > 0) {
-                 document_delete(self->doc, cur->cursor_offset - 1, 1);
-                 cur->cursor_offset--;
-                 cur->selection_anchor = cur->cursor_offset;
-                 delta = -1;
+                 size_t lookback = (cur->cursor_offset >= 6) ? 6 : cur->cursor_offset;
+                 char *prev_text = document_get_text_range(self->doc, cur->cursor_offset - lookback, lookback);
+                 
+                 if (prev_text) {
+                     const char *end = prev_text + lookback;
+                     const char *p = end - 1;
+                     
+                     /* Skip over continuation bytes (0x80..0xBF) */
+                     while (p > prev_text && (*p & 0xC0) == 0x80) {
+                         p--;
+                     }
+                     
+                     size_t char_len = end - p;
+                     document_delete(self->doc, cur->cursor_offset - char_len, char_len);
+                     
+                     cur->cursor_offset -= char_len;
+                     cur->selection_anchor = cur->cursor_offset;
+                     delta = -(long)char_len;
+                     g_free(prev_text);
+                 } else {
+                     /* Fallback */
+                     document_delete(self->doc, cur->cursor_offset - 1, 1);
+                     cur->cursor_offset--;
+                     cur->selection_anchor = cur->cursor_offset;
+                     delta = -1;
+                 }
              }
         }
         
@@ -1908,12 +1930,30 @@ editor_widget_delete(EditorWidget *self)
              cur->selection_anchor = start;
              delta -= (long)(end - start);
         } else {
-             /* Delete char after */
+             /* Delete char after - UTF-8 Aware */
              size_t total = document_get_length(self->doc);
              if (cur->cursor_offset < total) {
-                 document_delete(self->doc, cur->cursor_offset, 1);
-                 /* Offset stays same */
-                 delta = -1;
+                 char *next_bytes = document_get_text_range(self->doc, cur->cursor_offset, 1);
+                 
+                 if (next_bytes) {
+                     unsigned char c = (unsigned char)next_bytes[0];
+                     size_t char_len = 1;
+                     
+                     if ((c & 0xF8) == 0xF0) char_len = 4;
+                     else if ((c & 0xF0) == 0xE0) char_len = 3;
+                     else if ((c & 0xE0) == 0xC0) char_len = 2;
+                     
+                     g_free(next_bytes);
+                     
+                     /* Ensure we don't go past EOF just in case */
+                     if (cur->cursor_offset + char_len > total) {
+                         char_len = total - cur->cursor_offset;
+                     }
+                     
+                     document_delete(self->doc, cur->cursor_offset, char_len);
+                     /* Offset stays same */
+                     delta = -(long)char_len;
+                 }
              }
         }
         
