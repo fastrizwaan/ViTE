@@ -97,8 +97,7 @@ struct _EditorWidget {
     gboolean use_custom_font;
     char *font_name;
     
-
-    
+    gboolean insert_mode;
     
     /* Cached scroll upper bound (recalculated only when dimensions change) */
     double cached_scroll_upper;
@@ -123,6 +122,7 @@ struct _EditorWidget {
     /* System font monitoring */
     GSettings *interface_settings;
 };
+
 
 static void editor_widget_scrollable_init (GtkScrollableInterface *iface);
 static void editor_widget_ensure_metrics(EditorWidget *self);
@@ -217,6 +217,43 @@ get_effective_gutter_width(EditorWidget *self)
 G_DEFINE_TYPE_WITH_CODE (EditorWidget, editor_widget, GTK_TYPE_WIDGET,
                          G_IMPLEMENT_INTERFACE (GTK_TYPE_SCROLLABLE, editor_widget_scrollable_init))
 
+/* Marshaler for (uint, uint) */
+static void
+_editor_marshal_VOID__UINT_UINT (GClosure     *closure,
+                                 GValue       *return_value,
+                                 guint         n_param_values,
+                                 const GValue *param_values,
+                                 gpointer      invocation_hint,
+                                 gpointer      marshal_data)
+{
+  typedef void (*GMarshalFunc_VOID__UINT_UINT) (gpointer     data1,
+                                                guint        arg_1,
+                                                guint        arg_2,
+                                                gpointer     data2);
+  GMarshalFunc_VOID__UINT_UINT callback;
+  GCClosure *cc = (GCClosure*) closure;
+  gpointer data1, data2;
+
+  g_return_if_fail (n_param_values == 3);
+
+  if (G_CCLOSURE_SWAP_DATA (closure))
+    {
+      data1 = closure->data;
+      data2 = g_value_peek_pointer (param_values + 0);
+    }
+  else
+    {
+      data1 = g_value_peek_pointer (param_values + 0);
+      data2 = closure->data;
+    }
+  callback = (GMarshalFunc_VOID__UINT_UINT) (marshal_data ? marshal_data : cc->callback);
+
+  callback (data1,
+            g_value_get_uint (param_values + 1),
+            g_value_get_uint (param_values + 2),
+            data2);
+}
+
 enum {
     PROP_0,
     PROP_HADJUSTMENT,
@@ -240,10 +277,54 @@ enum {
 
 enum {
     CARET_MOVED,
+    CURSOR_MOVED,
+    INSERT_MODE_CHANGED,
     LAST_SIGNAL
 };
 
 static guint editor_signals[LAST_SIGNAL] = { 0 };
+
+void
+editor_widget_get_cursor_position(EditorWidget *self, size_t *line, size_t *col)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    
+    EditorCursor *cur = editor_widget_get_primary_cursor(self);
+    if (!cur) {
+        if (line) *line = 0;
+        if (col) *col = 0;
+        return;
+    }
+    
+    size_t line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
+    size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+    size_t column = cur->cursor_offset - line_start;
+    
+    if (line) *line = line_idx;
+    if (col) *col = column;
+}
+
+gboolean
+editor_widget_get_insert_mode(EditorWidget *self)
+{
+    g_return_val_if_fail(EDITOR_IS_WIDGET(self), TRUE);
+    return self->insert_mode;
+}
+
+void
+editor_widget_set_insert_mode(EditorWidget *self, gboolean insert)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    if (self->insert_mode != insert) {
+        self->insert_mode = insert;
+        g_signal_emit(self, editor_signals[INSERT_MODE_CHANGED], 0);
+        
+        /* Redraw cursor as it might change shape (block vs bar) 
+           Implementation of cursor drawing needs to check this. */
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+    }
+}
+
 
 /* Scroll Calculation Helper */
 typedef struct {
@@ -1655,6 +1736,10 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     update_target_x(self);
     editor_widget_update_im_cursor_location(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
+
+    size_t line, col;
+    editor_widget_get_cursor_position(self, &line, &col);
+    g_signal_emit(self, editor_signals[CURSOR_MOVED], 0, (guint)line, (guint)col);
 }
 
 static void
@@ -2310,6 +2395,10 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
         editor_widget_update_adjustments(self, -1, -1);
         scroll_to_cursor(self);
         gtk_widget_queue_draw(GTK_WIDGET(self));
+
+        size_t line, col;
+        editor_widget_get_cursor_position(self, &line, &col);
+        g_signal_emit(self, editor_signals[CURSOR_MOVED], 0, (guint)line, (guint)col);
     }
     g_free(text);
 }
@@ -2351,6 +2440,10 @@ on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer us
             editor_widget_update_adjustments(self, -1, -1);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
+
+            size_t line, col;
+            editor_widget_get_cursor_position(self, &line, &col);
+            g_signal_emit(self, editor_signals[CURSOR_MOVED], 0, (guint)line, (guint)col);
         }
         g_free(text);
     }
@@ -2770,6 +2863,11 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
     }
     
     editor_widget_update_im_cursor_location(self);
+    {
+        size_t line, col;
+        editor_widget_get_cursor_position(self, &line, &col);
+        g_signal_emit(self, editor_signals[CURSOR_MOVED], 0, (guint)line, (guint)col);
+    }
 }
 
 static void
@@ -3480,6 +3578,11 @@ on_key_pressed(GtkEventControllerKey *controller,
     if (gtk_im_context_filter_keypress(self->im_context, gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller))))
         return TRUE;
 
+    if (keyval == GDK_KEY_Insert) {
+        editor_widget_set_insert_mode(self, !self->insert_mode);
+        return TRUE;
+    }
+
     gboolean handled = TRUE;
 
     if (self->is_dragging_selection && (keyval == GDK_KEY_Control_L || keyval == GDK_KEY_Control_R)) {
@@ -3934,6 +4037,12 @@ on_key_pressed(GtkEventControllerKey *controller,
             break;
     }
     
+    if (handled) {
+        size_t line, col;
+        editor_widget_get_cursor_position(self, &line, &col);
+        g_signal_emit(self, editor_signals[CURSOR_MOVED], 0, (guint)line, (guint)col);
+    }
+    
     return handled;
 }
 
@@ -4232,6 +4341,7 @@ editor_widget_init(EditorWidget *self)
     /* Initialize custom font name to default (used when custom font is enabled) */
     self->font_name = g_strdup("Monospace 11");
     self->use_custom_font = FALSE;
+    self->insert_mode = TRUE;
     
     /* Monitor system font changes from GNOME settings */
     self->interface_settings = g_settings_new("org.gnome.desktop.interface");
@@ -4471,6 +4581,33 @@ editor_widget_class_init(EditorWidgetClass *klass)
                                  NULL,
                                  G_TYPE_NONE, 0);
 
+    /**
+     * EditorWidget::cursor-moved:
+     * @editor: the editor widget
+     * @line: the new line index
+     * @col: the new column index
+     *
+     * Emitted when the primary cursor moves.
+     */
+    editor_signals[CURSOR_MOVED] = g_signal_new("cursor-moved",
+                                 G_TYPE_FROM_CLASS(klass),
+                                 G_SIGNAL_RUN_LAST,
+                                 0,
+                                 NULL, NULL,
+                                 _editor_marshal_VOID__UINT_UINT,
+                                 G_TYPE_NONE,
+                                 2,
+                                 G_TYPE_UINT,
+                                 G_TYPE_UINT);
+    
+    editor_signals[INSERT_MODE_CHANGED] = g_signal_new("insert-mode-changed",
+                                 G_TYPE_FROM_CLASS(klass),
+                                 G_SIGNAL_RUN_LAST,
+                                 0,
+                                 NULL, NULL,
+                                 NULL,
+                                 G_TYPE_NONE, 0);
+
     widget_class->snapshot = editor_widget_snapshot;
     widget_class->measure = editor_widget_measure;
     widget_class->size_allocate = editor_widget_size_allocate;
@@ -4564,6 +4701,31 @@ editor_widget_set_language(EditorWidget *self, const char *lang)
         syntax_context_set_language(self->syntax_ctx, lang);
         gtk_widget_queue_draw(GTK_WIDGET(self));
     }
+}
+
+void
+editor_widget_set_line_ending(EditorWidget *self, const char *line_ending_id)
+{
+    if (!self->doc) return;
+    
+    NewlineType type = NEWLINE_LF;
+    if (g_strcmp0(line_ending_id, "crlf") == 0) type = NEWLINE_CRLF;
+    else if (g_strcmp0(line_ending_id, "cr") == 0) type = NEWLINE_CR;
+    
+    document_set_newline_type(self->doc, type);
+    /* No redraw needed usually, unless we visualize line endings, but we don't yet. */
+}
+
+void
+editor_widget_set_encoding(EditorWidget *self, const char *encoding_id)
+{
+    if (!self->doc) return;
+    
+    FileEncoding enc = ENCODING_UTF8;
+    if (g_strcmp0(encoding_id, "utf-16le") == 0) enc = ENCODING_UTF16LE;
+    else if (g_strcmp0(encoding_id, "utf-16be") == 0) enc = ENCODING_UTF16BE;
+    
+    document_set_encoding(self->doc, enc);
 }
 
 Document *

@@ -26,5 +26,11 @@ void editor_widget_refresh_syntax(EditorWidget *self);
 void editor_widget_reset_cursor_to_start(EditorWidget *self);
 char *editor_widget_get_selected_text(EditorWidget *self);
 void editor_widget_scroll_to_line(EditorWidget *self, size_t line);
+void editor_widget_get_cursor_position(EditorWidget *self, size_t *line, size_t *col);
+gboolean editor_widget_get_insert_mode(EditorWidget *self);
+void editor_widget_set_language(EditorWidget *self, const char *lang);
+void editor_widget_set_line_ending(EditorWidget *self, const char *line_ending_id);
+void editor_widget_set_encoding(EditorWidget *self, const char *encoding_id);
+void editor_widget_set_insert_mode(EditorWidget *self, gboolean insert);
 
 #endif

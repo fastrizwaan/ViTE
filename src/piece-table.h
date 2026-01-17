@@ -135,4 +135,10 @@ size_t piece_table_get_line_count(PieceTable *pt);
 /* For debugging */
 void piece_table_print_tree(PieceTable *pt);
 
+void piece_table_set_newline_type(PieceTable *pt, NewlineType type);
+NewlineType piece_table_get_newline_type(PieceTable *pt);
+
+void piece_table_set_encoding(PieceTable *pt, FileEncoding enc);
+FileEncoding piece_table_get_encoding(PieceTable *pt);
+
 #endif

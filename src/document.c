@@ -285,7 +285,34 @@ void
 document_mark_saved(Document *doc)
 {
     doc->saved_command = undo_stack_peek(doc->undo_stack);
+    doc->saved_command = undo_stack_peek(doc->undo_stack);
     check_modification_state(doc);
+}
+
+void
+document_set_newline_type(Document *doc, NewlineType type)
+{
+    if (doc) piece_table_set_newline_type(doc->pt, type);
+    /* Notify observers? Maybe not considered a "content" change but a property change. 
+       We don't trigger modified/content callbacks for this usually, as it only affects save. */
+}
+
+NewlineType
+document_get_newline_type(Document *doc)
+{
+    return doc ? piece_table_get_newline_type(doc->pt) : NEWLINE_LF;
+}
+
+void
+document_set_encoding(Document *doc, FileEncoding enc)
+{
+    if (doc) piece_table_set_encoding(doc->pt, enc);
+}
+
+FileEncoding
+document_get_encoding(Document *doc)
+{
+    return doc ? piece_table_get_encoding(doc->pt) : ENCODING_UTF8;
 }
 
 void

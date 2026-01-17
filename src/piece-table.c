@@ -1974,3 +1974,27 @@ piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error)
     load_result_free(lr);
     return TRUE;
 }
+
+void
+piece_table_set_newline_type(PieceTable *pt, NewlineType type)
+{
+    if (pt) pt->newline_style = type;
+}
+
+NewlineType
+piece_table_get_newline_type(PieceTable *pt)
+{
+    return pt ? pt->newline_style : NEWLINE_LF;
+}
+
+void
+piece_table_set_encoding(PieceTable *pt, FileEncoding enc)
+{
+    if (pt) pt->encoding = enc;
+}
+
+FileEncoding
+piece_table_get_encoding(PieceTable *pt)
+{
+    return pt ? pt->encoding : ENCODING_UTF8;
+}

@@ -7,6 +7,7 @@
 #include "tab-bar.h"
 #include "tab.h"
 #include "find-replace-bar.h"
+#include "status-bar.h"
 
 typedef struct _ViteWindow ViteWindow;
 
@@ -16,6 +17,7 @@ struct _ViteWindow {
     GtkStack *stack;
     AdwWindowTitle *window_title;
     GtkWidget *header_progress;
+    GtkWidget *status_bar;
 };
 
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
@@ -97,6 +99,7 @@ static void on_recent_popover_unmap(GtkWidget *popover, gpointer user_data);
 static void on_tab_close_clicked(ViteTab *tab, gpointer user_data);
 static void on_tab_move_to_new_window(ViteTab *tab, gpointer user_data);
 static void load_css(void);
+static GtkWidget *get_active_editor(ViteWindow *win);
 static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
 
@@ -580,6 +583,69 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
     gtk_stack_set_visible_child(win->stack, page);
     vite_tab_bar_set_active_tab(win->tab_bar, tab);
     
+    /* Update Status Bar */
+    if (win && win->status_bar) {
+        GtkWidget *editor = NULL;
+        GtkWidget *focus = NULL;
+        if (win->window && GTK_IS_WINDOW(win->window)) {
+            focus = gtk_window_get_focus(win->window);
+        }
+        
+        GtkWidget *iter = focus;
+        while (iter) {
+            if (EDITOR_IS_WIDGET(iter)) {
+                editor = iter;
+                break;
+            }
+            iter = gtk_widget_get_parent(iter);
+        }
+        
+        /* Fallback: Active Tab's page */
+        if (!editor && page) {
+            editor = find_first_editor_recursive(page);
+        }
+
+        if (editor && EDITOR_IS_WIDGET(editor)) {
+             size_t ln, col;
+             editor_widget_get_cursor_position(EDITOR_WIDGET(editor), &ln, &col);
+             vite_status_bar_set_cursor_position(VITE_STATUS_BAR(win->status_bar), ln + 1, col + 1);
+             
+             vite_status_bar_set_insert_mode(VITE_STATUS_BAR(win->status_bar), editor_widget_get_insert_mode(EDITOR_WIDGET(editor)));
+             
+             /* Also update File Type / Encoding / Line Endings using Document properties */
+             Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+             if (doc) {
+                 /* TODO: Add document_get_language_name? or we rely on syntax context? 
+                    For now, rely on editor->syntax_context language name if available?
+                    Or just store/retrieve?
+                    Re-emitting "file-type-changed" isn't right because that sets it.
+                    We need "get_file_type".
+                 */
+                 
+                 /* Encoding */
+                 FileEncoding enc = document_get_encoding(doc);
+                 const char *enc_str = "UTF-8";
+                 if (enc == ENCODING_UTF16LE) enc_str = "UTF-16 LE";
+                 else if (enc == ENCODING_UTF16BE) enc_str = "UTF-16 BE";
+                 vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), enc_str);
+                 
+                 /* Line Ending */
+                 NewlineType nl = document_get_newline_type(doc);
+                 const char *nl_str = "LF";
+                 if (nl == NEWLINE_CRLF) nl_str = "CRLF";
+                 else if (nl == NEWLINE_CR) nl_str = "CR";
+                 vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), nl_str);
+                 
+                 /* File Type - tricky, need to know current language. 
+                    EditorWidget doesn't expose getter cleanly for string name?
+                    It has `syntax_context` but maybe not helper.
+                    I'll skip FileType update for now or default to "Plain Text" if not tracked.
+                    Usually we rely on the editor state.
+                  */
+             }
+        }
+    }
+    
     /* Update title based on active view in this page */
     /* Update title based on active view in this page */
     update_window_title_for_tab(tab);
@@ -833,7 +899,41 @@ load_css(void)
     "    border-radius: 6px;"
     "    padding-left: 4px;"
     "    padding-right: 4px;"
-    "    transition: all 200ms ease;"
+    "}"
+    "statusbar {"
+    "    background-color: alpha(@headerbar_bg_color, 1);"
+    "    border-top: 1px solid alpha(@window_fg_color, 0.04);"
+    "    min-height: 1px;"
+    "    padding-top: 1px;"
+    "    padding-bottom: 3px;"
+    "    padding-left: 4px;"
+    "    padding-right: 4px;"    
+    "    margin-left: 0px;"
+    "    margin-right: 0px;"
+    "}"
+    "statusbar label {"
+    "    font-size: small;"
+    "    opacity: 0.8;"
+    "}"
+    "statusbar button.flat {"
+    "    min-height: 0;"
+    "    padding-left: 6px;"
+    "    padding-right: 6px;"
+    "    padding-top: 3px;"
+    "    padding-bottom: 4px;"
+    "    margin-top: 2px;"
+    "    margin-bottom: 2px;"
+
+    "}"
+    "statusbar menubutton > button {"
+    "    min-height: 0;"
+    "    padding-left: 6px;"
+    "    padding-right: 6px;"
+    "    padding-top: 4px;"
+    "    padding-bottom: 4px;"
+    "    margin-top: 2px;"
+    "    margin-bottom: 2px;"
+
     "}"
     ".find-entry-wrapper:focus-within {"
     "    border-color: @theme_selected_bg_color;"
@@ -1636,6 +1736,24 @@ on_window_drop(GtkDropTarget *target, const GValue *value, double x, double y, V
 }
 
 static void
+on_cursor_moved(EditorWidget *editor, guint line, guint col, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    if (GTK_WIDGET(editor) == get_active_editor(win)) {
+        vite_status_bar_set_cursor_position(VITE_STATUS_BAR(win->status_bar), line + 1, col + 1);
+    }
+}
+
+static void
+on_insert_mode_changed(EditorWidget *editor, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    if (GTK_WIDGET(editor) == get_active_editor(win)) {
+        vite_status_bar_set_insert_mode(VITE_STATUS_BAR(win->status_bar), editor_widget_get_insert_mode(editor));
+    }
+}
+
+static void
 create_new_tab (ViteWindow *win, const char *title, Document *doc)
 {
     if (!win) return;
@@ -1643,6 +1761,10 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     GtkWidget *scrolled = gtk_scrolled_window_new();
     GtkWidget *editor = editor_widget_new();
     editor_widget_set_document(EDITOR_WIDGET(editor), doc);
+    
+    g_signal_connect(editor, "cursor-moved", G_CALLBACK(on_cursor_moved), win);
+    g_signal_connect(editor, "insert-mode-changed", G_CALLBACK(on_insert_mode_changed), win);
+    
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), editor);
     
     const char *doc_path = document_get_file_path(doc);
@@ -1876,6 +1998,105 @@ on_goto_line_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
     }
 }
 
+static GtkWidget *
+get_active_editor(ViteWindow *win)
+{
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!tab) return NULL;
+    
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    if (!page) return NULL;
+    
+    GtkWidget *overlay = vite_tab_get_last_focused_child(tab);
+    GtkWidget *editor = NULL;
+    
+    if (overlay && GTK_IS_OVERLAY(overlay)) {
+         editor = gtk_overlay_get_child(GTK_OVERLAY(overlay));
+    }
+    
+    if (!editor) {
+         editor = get_editor_from_page(page);
+    }
+    
+    return editor;
+}
+
+static void
+on_status_bar_file_type_changed(ViteStatusBar *bar, const char *lang_id, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         editor_widget_set_language(EDITOR_WIDGET(editor), lang_id);
+    }
+}
+
+static void
+on_status_bar_line_ending_changed(ViteStatusBar *bar, const char *line_ending_id, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         editor_widget_set_line_ending(EDITOR_WIDGET(editor), line_ending_id);
+    }
+}
+
+static void
+on_status_bar_encoding_changed(ViteStatusBar *bar, const char *encoding_id, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         editor_widget_set_encoding(EDITOR_WIDGET(editor), encoding_id);
+    }
+}
+
+static void
+on_set_encoding(GSimpleAction *action, GVariant *value, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    const char *encoding = g_variant_get_string(value, NULL);
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        editor_widget_set_encoding(EDITOR_WIDGET(editor), encoding);
+        
+        const char *enc_display = "UTF-8";
+        if (g_strcmp0(encoding, "utf-16le") == 0) enc_display = "UTF-16 LE";
+        else if (g_strcmp0(encoding, "utf-16be") == 0) enc_display = "UTF-16 BE";
+        vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), enc_display);
+    }
+}
+
+static void
+on_set_line_ending(GSimpleAction *action, GVariant *value, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    const char *le = g_variant_get_string(value, NULL);
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        editor_widget_set_line_ending(EDITOR_WIDGET(editor), le);
+        
+        const char *le_display = "LF";
+        if (g_strcmp0(le, "crlf") == 0) le_display = "CRLF";
+        else if (g_strcmp0(le, "cr") == 0) le_display = "CR";
+        vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), le_display);
+    }
+}
+
+static void
+on_toggle_insert_mode(GSimpleAction *action, GVariant *value, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         gboolean current = editor_widget_get_insert_mode(EDITOR_WIDGET(editor));
+         editor_widget_set_insert_mode(EDITOR_WIDGET(editor), !current);
+    }
+}
+
 static ViteWindow *
 setup_window(GtkWindow *window)
 {
@@ -2043,6 +2264,28 @@ setup_window(GtkWindow *window)
     g_menu_append(s2, "Preferences", "win.preferences");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s2));
     g_object_unref(s2);
+
+    /* Document Submenu */
+    GMenu *doc_menu = g_menu_new();
+    
+    /* Encoding Submenu */
+    GMenu *enc_menu = g_menu_new();
+    g_menu_append(enc_menu, "UTF-8", "win.set-encoding::utf-8");
+    g_menu_append(enc_menu, "UTF-16 LE", "win.set-encoding::utf-16le");
+    g_menu_append(enc_menu, "UTF-16 BE", "win.set-encoding::utf-16be");
+    g_menu_append_submenu(doc_menu, "Encoding", G_MENU_MODEL(enc_menu));
+    g_object_unref(enc_menu);
+    
+    /* Line Ending Submenu */
+    GMenu *le_menu = g_menu_new();
+    g_menu_append(le_menu, "Unix/Linux (LF)", "win.set-line-ending::lf");
+    g_menu_append(le_menu, "Windows (CRLF)", "win.set-line-ending::crlf");
+    g_menu_append(le_menu, "Legacy Mac (CR)", "win.set-line-ending::cr");
+    g_menu_append_submenu(doc_menu, "Line Ending", G_MENU_MODEL(le_menu));
+    g_object_unref(le_menu);
+    
+    g_menu_append_submenu(s1, "Document", G_MENU_MODEL(doc_menu));
+    g_object_unref(doc_menu);
     
     /* Actions */
     const GActionEntry win_entries[] = {
@@ -2051,7 +2294,10 @@ setup_window(GtkWindow *window)
         { "split-down", on_split_down, NULL, NULL, NULL },
         { "close-view", on_close_split_action, NULL, NULL, NULL },
         { "preferences", on_preferences_action, NULL, NULL, NULL },
-        { "goto-line", on_goto_line_action, NULL, NULL, NULL }
+        { "goto-line", on_goto_line_action, NULL, NULL, NULL },
+        { "set-encoding", on_set_encoding, "s", NULL, NULL },
+        { "set-line-ending", on_set_line_ending, "s", NULL, NULL },
+        { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
     
@@ -2110,6 +2356,13 @@ setup_window(GtkWindow *window)
     gtk_widget_set_vexpand(GTK_WIDGET(win->stack), TRUE);
     
     gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->stack));
+    
+    /* Status Bar */
+    win->status_bar = vite_status_bar_new();
+    gtk_box_append(GTK_BOX(main_box), win->status_bar);
+    g_signal_connect(win->status_bar, "file-type-changed", G_CALLBACK(on_status_bar_file_type_changed), win);
+    g_signal_connect(win->status_bar, "line-ending-changed", G_CALLBACK(on_status_bar_line_ending_changed), win);
+    g_signal_connect(win->status_bar, "encoding-changed", G_CALLBACK(on_status_bar_encoding_changed), win);
     
     /* Create Initial Tab if needed? 
        Actually activate() might do nothing? 

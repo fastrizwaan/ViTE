@@ -23,8 +23,13 @@ const char *document_get_file_path(Document *doc);
 void document_set_file_path(Document *doc, const char *path);
 
 /* State Tracking */
+/* State Tracking */
 gboolean document_is_modified(Document *doc);
 void document_mark_saved(Document *doc);
+void document_set_newline_type(Document *doc, NewlineType type);
+NewlineType document_get_newline_type(Document *doc);
+void document_set_encoding(Document *doc, FileEncoding enc);
+FileEncoding document_get_encoding(Document *doc);
 void document_add_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data);
 void document_remove_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data);
 
