@@ -12,9 +12,11 @@ struct _ViteStatusBar {
     
     GtkWidget *encoding_btn;
     GtkWidget *encoding_label;
+    GSimpleActionGroup *encoding_group;
     
     GtkWidget *line_ending_btn;
     GtkWidget *line_ending_label;
+    GSimpleActionGroup *line_ending_group;
     
     GtkWidget *cursor_label;
     GtkWidget *ins_label;
@@ -81,6 +83,8 @@ static void
 on_line_ending_activated(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     ViteStatusBar *self = VITE_STATUS_BAR(user_data);
+    g_simple_action_set_state(action, parameter);
+    
     const char *id = g_variant_get_string(parameter, NULL);
     
     const char *label_text = "LF";
@@ -96,13 +100,12 @@ create_line_ending_menu(ViteStatusBar *self)
 {
     GMenu *menu = g_menu_new();
     
-    GSimpleActionGroup *group = g_simple_action_group_new();
+    self->line_ending_group = g_simple_action_group_new();
     GActionEntry entries[] = {
-        { "set", on_line_ending_activated, "s", NULL, NULL }
+        { "set", NULL, "s", "'lf'", on_line_ending_activated }
     };
-    g_action_map_add_action_entries(G_ACTION_MAP(group), entries, G_N_ELEMENTS(entries), self);
-    gtk_widget_insert_action_group(self->line_ending_btn, "le", G_ACTION_GROUP(group));
-    g_object_unref(group);
+    g_action_map_add_action_entries(G_ACTION_MAP(self->line_ending_group), entries, G_N_ELEMENTS(entries), self);
+    gtk_widget_insert_action_group(self->line_ending_btn, "le", G_ACTION_GROUP(self->line_ending_group));
     
     g_menu_append(menu, "Unix/Linux (LF)", "le.set::lf");
     g_menu_append(menu, "Windows (CRLF)", "le.set::crlf");
@@ -117,6 +120,8 @@ static void
 on_encoding_activated(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     ViteStatusBar *self = VITE_STATUS_BAR(user_data);
+    g_simple_action_set_state(action, parameter);
+    
     const char *id = g_variant_get_string(parameter, NULL);
     
     const char *label_text = "UTF-8";
@@ -132,13 +137,12 @@ create_encoding_menu(ViteStatusBar *self)
 {
     GMenu *menu = g_menu_new();
     
-    GSimpleActionGroup *group = g_simple_action_group_new();
+    self->encoding_group = g_simple_action_group_new();
     GActionEntry entries[] = {
-        { "set", on_encoding_activated, "s", NULL, NULL }
+        { "set", NULL, "s", "'utf-8'", on_encoding_activated }
     };
-    g_action_map_add_action_entries(G_ACTION_MAP(group), entries, G_N_ELEMENTS(entries), self);
-    gtk_widget_insert_action_group(self->encoding_btn, "enc", G_ACTION_GROUP(group));
-    g_object_unref(group);
+    g_action_map_add_action_entries(G_ACTION_MAP(self->encoding_group), entries, G_N_ELEMENTS(entries), self);
+    gtk_widget_insert_action_group(self->encoding_btn, "enc", G_ACTION_GROUP(self->encoding_group));
     
     g_menu_append(menu, "UTF-8", "enc.set::utf-8");
     g_menu_append(menu, "UTF-16 LE", "enc.set::utf-16le");
@@ -381,24 +385,53 @@ vite_status_bar_set_file_type(ViteStatusBar *self, const char *file_type)
     g_free(markup);
 }
 
+
 void
-vite_status_bar_set_encoding(ViteStatusBar *self, const char *encoding)
+vite_status_bar_set_encoding(ViteStatusBar *self, const char *encoding_id)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
-    if (!encoding) encoding = "UTF-8";
-    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", encoding);
+    if (!encoding_id) encoding_id = "utf-8";
+    
+    /* Map ID to Display Name */
+    const char *display = "UTF-8";
+    if (g_strcmp0(encoding_id, "utf-16le") == 0) display = "UTF-16 LE";
+    else if (g_strcmp0(encoding_id, "utf-16be") == 0) display = "UTF-16 BE";
+    
+    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", display);
     gtk_label_set_markup(GTK_LABEL(self->encoding_label), markup);
     g_free(markup);
+    
+    /* Update Action State directly using ID */
+    if (self->encoding_group) {
+        GAction *act = g_action_map_lookup_action(G_ACTION_MAP(self->encoding_group), "set");
+        if (act) {
+            g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(encoding_id));
+        }
+    }
 }
 
 void
-vite_status_bar_set_line_ending(ViteStatusBar *self, const char *line_ending)
+vite_status_bar_set_line_ending(ViteStatusBar *self, const char *line_ending_id)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
-    if (!line_ending) line_ending = "LF";
-    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", line_ending);
+    if (!line_ending_id) line_ending_id = "lf";
+    
+    /* Map ID to Display Name */
+    const char *display = "LF";
+    if (g_strcmp0(line_ending_id, "crlf") == 0) display = "CRLF";
+    else if (g_strcmp0(line_ending_id, "cr") == 0) display = "CR";
+    
+    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", display);
     gtk_label_set_markup(GTK_LABEL(self->line_ending_label), markup);
     g_free(markup);
+    
+    /* Update Action State directly using ID */
+    if (self->line_ending_group) {
+        GAction *act = g_action_map_lookup_action(G_ACTION_MAP(self->line_ending_group), "set");
+        if (act) {
+            g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(line_ending_id));
+        }
+    }
 }
 
 void

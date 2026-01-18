@@ -34,4 +34,10 @@ void editor_widget_set_line_ending(EditorWidget *self, const char *line_ending_i
 void editor_widget_set_encoding(EditorWidget *self, const char *encoding_id);
 void editor_widget_set_insert_mode(EditorWidget *self, gboolean insert);
 
+void editor_widget_set_show_line_numbers(EditorWidget *self, gboolean show);
+gboolean editor_widget_get_show_line_numbers(EditorWidget *self);
+
+void editor_widget_set_word_wrap(EditorWidget *self, gboolean wrap);
+gboolean editor_widget_get_word_wrap(EditorWidget *self);
+
 #endif

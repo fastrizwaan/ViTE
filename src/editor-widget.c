@@ -312,6 +312,47 @@ editor_widget_get_insert_mode(EditorWidget *self)
 }
 
 void
+editor_widget_set_show_line_numbers(EditorWidget *self, gboolean show)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    if (self->show_line_numbers != show) {
+        self->show_line_numbers = show;
+        gtk_widget_queue_resize(GTK_WIDGET(self));
+        g_object_notify(G_OBJECT(self), "show-line-numbers");
+    }
+}
+
+gboolean
+editor_widget_get_show_line_numbers(EditorWidget *self)
+{
+    g_return_val_if_fail(EDITOR_IS_WIDGET(self), TRUE);
+    return self->show_line_numbers;
+}
+
+void
+editor_widget_set_word_wrap(EditorWidget *self, gboolean wrap)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    if (self->wrap_lines != wrap) {
+        self->wrap_lines = wrap;
+        /* Force layout recalculation */
+        if (self->line_y_offsets) {
+            g_array_set_size(self->line_y_offsets, 0);
+        }
+        gtk_widget_queue_resize(GTK_WIDGET(self));
+        g_object_notify(G_OBJECT(self), "wrap-lines");
+    }
+}
+
+gboolean
+editor_widget_get_word_wrap(EditorWidget *self)
+{
+    g_return_val_if_fail(EDITOR_IS_WIDGET(self), FALSE);
+    return self->wrap_lines;
+}
+
+
+void
 editor_widget_set_insert_mode(EditorWidget *self, gboolean insert)
 {
     g_return_if_fail(EDITOR_IS_WIDGET(self));
@@ -4453,24 +4494,25 @@ editor_widget_set_property (GObject      *object,
             self->vscroll_policy = g_value_get_enum(value);
             break;
         case PROP_SHOW_LINE_NUMBERS:
-            self->show_line_numbers = g_value_get_boolean(value);
-            gtk_widget_queue_resize(GTK_WIDGET(self));
+            editor_widget_set_show_line_numbers(self, g_value_get_boolean(value));
             break;
         case PROP_HIGHLIGHT_CURRENT_LINE:
             self->highlight_current_line = g_value_get_boolean(value);
             gtk_widget_queue_draw(GTK_WIDGET(self));
+            g_object_notify(G_OBJECT(self), "highlight-current-line");
             break;
         case PROP_SHOW_RIGHT_MARGIN:
             self->show_right_margin = g_value_get_boolean(value);
             gtk_widget_queue_draw(GTK_WIDGET(self));
+            g_object_notify(G_OBJECT(self), "show-right-margin");
             break;
         case PROP_RIGHT_MARGIN_POSITION:
             self->right_margin_position = g_value_get_int(value);
             gtk_widget_queue_draw(GTK_WIDGET(self));
+            g_object_notify(G_OBJECT(self), "right-margin-position");
             break;
         case PROP_WRAP_LINES:
-            self->wrap_lines = g_value_get_boolean(value);
-            gtk_widget_queue_resize(GTK_WIDGET(self)); /* Affects layout width */
+            editor_widget_set_word_wrap(self, g_value_get_boolean(value));
             break;
         case PROP_AUTO_INDENT:
             self->auto_indent = g_value_get_boolean(value);
