@@ -12,6 +12,7 @@ void editor_widget_set_document(EditorWidget *self, Document *doc);
 void editor_widget_set_language(EditorWidget *self, const char *lang);
 
 Document *editor_widget_get_document(EditorWidget *self);
+const char *editor_widget_get_language_name(EditorWidget *self);
 
 /* Search Integration */
 void editor_widget_set_search_results(EditorWidget *self, GArray *matches);

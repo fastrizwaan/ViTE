@@ -204,6 +204,19 @@ syntax_context_set_language(SyntaxContext *ctx, const char *lang_name)
     g_byte_array_set_size(ctx->state_chain, 0);
 }
 
+const char *
+syntax_context_get_language_name(SyntaxContext *ctx)
+{
+    if (!ctx) return "Plain Text";
+    switch (ctx->lang) {
+        case LANG_C: return "C";
+        case LANG_PYTHON: return "Python";
+        case LANG_BASH: return "Shell Script"; // Or "Bash"
+        case LANG_NONE: 
+        default: return "Plain Text";
+    }
+}
+
 void
 syntax_context_invalidate(SyntaxContext *ctx, size_t start_line)
 {

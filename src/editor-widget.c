@@ -4728,11 +4728,21 @@ editor_widget_set_encoding(EditorWidget *self, const char *encoding_id)
     document_set_encoding(self->doc, enc);
 }
 
+const char *editor_widget_get_language_name(EditorWidget *self);
+
 Document *
 editor_widget_get_document(EditorWidget *self)
 {
     g_return_val_if_fail(EDITOR_IS_WIDGET(self), NULL);
     return self->doc;
+}
+
+const char *
+editor_widget_get_language_name(EditorWidget *self)
+{
+    g_return_val_if_fail(EDITOR_IS_WIDGET(self), "Plain Text");
+    if (!self->syntax_ctx) return "Plain Text";
+    return syntax_context_get_language_name(self->syntax_ctx);
 }
 
 /* Search Integration */

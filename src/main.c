@@ -636,12 +636,9 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
                  else if (nl == NEWLINE_CR) nl_str = "CR";
                  vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), nl_str);
                  
-                 /* File Type - tricky, need to know current language. 
-                    EditorWidget doesn't expose getter cleanly for string name?
-                    It has `syntax_context` but maybe not helper.
-                    I'll skip FileType update for now or default to "Plain Text" if not tracked.
-                    Usually we rely on the editor state.
-                  */
+             /* File Type */
+             const char *lang_name = editor_widget_get_language_name(EDITOR_WIDGET(editor));
+             vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), lang_name);
              }
         }
     }
@@ -1827,16 +1824,12 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     }
     
     vite_tab_bar_insert_tab(win->tab_bar, VITE_TAB(tab), position);
-    vite_tab_bar_set_active_tab(win->tab_bar, VITE_TAB(tab));
     
-    if (win->stack) {
-        gtk_stack_set_visible_child(win->stack, page_root);
-    }
+    /* Use on_tab_clicked to activate and update UI (Status Bar, Title, etc.) */
+    on_tab_clicked(VITE_TAB(tab), NULL);
     
     /* Use defer_focus to safely grab focus after hierarchy is stable */
     defer_focus(editor);
-
-    update_window_title_for_tab(VITE_TAB(tab));
 }
 
 static void
@@ -2472,6 +2465,11 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
              vite_tab_set_title(ctx->tab, g_path_get_basename(ctx->filename)); /* Temporary, update_window_title_for_tab does full logic */
              update_window_title_for_tab(ctx->tab);
              
+             /* Refresh status bar (Encoding/Line Endings known now) */
+             if (vite_tab_is_active(ctx->tab)) {
+                 on_tab_clicked(ctx->tab, NULL);
+             }
+             
         } else {
              if (!g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
                  /* Show error dialog */
@@ -2626,6 +2624,10 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
     const char *dot = strrchr(path, '.');
     if (dot && EDITOR_IS_WIDGET(editor)) {
         editor_widget_set_language(EDITOR_WIDGET(editor), dot + 1);
+        /* Refresh status bar now that language is set */
+        if (vite_tab_is_active(tab_to_use)) {
+            on_tab_clicked(tab_to_use, NULL);
+        }
     }
 
     /* Setup Async Load */
