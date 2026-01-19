@@ -1015,7 +1015,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         
         /* Word Wrap - account for gutter and padding */
         if (self->wrap_lines) {
-            int available_w = width - text_start_x;
+            int available_w = width - text_start_x - 20; /* 20px buffer for scrollbar */
             if (available_w < 50) available_w = 50; /* Safe min width */
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
@@ -1511,7 +1511,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         pango_layout_set_text(layout, text, (len > MAX_PANGO_LINE_LEN) ? MAX_PANGO_LINE_LEN : (int)len);
         
         if (self->wrap_lines) {
-            int available_w = width - text_start_x;
+            int available_w = width - text_start_x - 20; /* 20px buffer for scrollbar */
             if (available_w < 50) available_w = 50; 
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
