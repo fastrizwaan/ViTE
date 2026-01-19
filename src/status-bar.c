@@ -86,12 +86,9 @@ on_line_ending_activated(GSimpleAction *action, GVariant *parameter, gpointer us
     g_simple_action_set_state(action, parameter);
     
     const char *id = g_variant_get_string(parameter, NULL);
+
     
-    const char *label_text = "LF";
-    if (g_strcmp0(id, "crlf") == 0) label_text = "CRLF";
-    else if (g_strcmp0(id, "cr") == 0) label_text = "CR";
-    
-    vite_status_bar_set_line_ending(self, label_text);
+    vite_status_bar_set_line_ending(self, id);
     g_signal_emit(self, signals[LINE_ENDING_CHANGED], 0, id);
 }
 
@@ -123,12 +120,9 @@ on_encoding_activated(GSimpleAction *action, GVariant *parameter, gpointer user_
     g_simple_action_set_state(action, parameter);
     
     const char *id = g_variant_get_string(parameter, NULL);
+
     
-    const char *label_text = "UTF-8";
-    if (g_strcmp0(id, "utf-16le") == 0) label_text = "UTF-16 LE";
-    else if (g_strcmp0(id, "utf-16be") == 0) label_text = "UTF-16 BE";
-    
-    vite_status_bar_set_encoding(self, label_text);
+    vite_status_bar_set_encoding(self, id);
     g_signal_emit(self, signals[ENCODING_CHANGED], 0, id);
 }
 
