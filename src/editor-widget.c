@@ -448,24 +448,49 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
         g_array_set_size(self->line_y_offsets, 0);
         
         /* Strategy Switch: Exact vs Statistical */
-        if (total_lines > 50000) {
-            /* Statistical Scroll Mode (O(1)) */
-            /* Do not populate line_y_offsets. Estimate avg visual lines. */
-            size_t total_bytes = document_get_length(self->doc);
-            double avg_bytes = (total_lines > 0) ? (double)total_bytes / total_lines : 0;
+        if (total_lines > 1500) {
+            /* Statistical Scroll Mode (O(1)) via Sampling */
+            /* We sample N lines to estimate the average height per logical line.
+               This accounts for both:
+               1) Wrapping frequency (long lines taking multiple rows)
+               2) Variable font height (fallback fonts being taller than metrics)
+            */
             
-            /* Estimate visual lines per logical line */
-            // average bytes / chars_per_line gives raw rows.
-            // But real text isn't a solid block. 
-            // Factor of 1.0 is safe lower bound.
-            double est_rows = avg_bytes / (double)chars_per_line;
-            if (est_rows < 1.0) est_rows = 1.0;
+            double total_sample_height = 0;
+            int samples = 50;
+            if (samples > total_lines) samples = total_lines;
             
-            self->avg_visual_lines = est_rows;
+            int step = total_lines / samples;
+            if (step < 1) step = 1;
             
-            /* Calculate total height estimate */
-            content_height = (double)total_lines * self->avg_visual_lines * self->line_height + self->padding_top * 2;
-             
+            int actual_samples = 0;
+            for (int i = 0; i < samples; i++) {
+                size_t idx = i * step;
+                if (idx >= total_lines) break;
+                
+                char *text = NULL;
+                PangoLayout *layout = create_pango_layout_for_line(self, idx, &text, NULL);
+                if (layout) {
+                    PangoRectangle logical;
+                    pango_layout_get_extents(layout, NULL, &logical);
+                    double h = (double)logical.height / PANGO_SCALE;
+                    if (h < self->line_height) h = self->line_height; /* Sanity floor */
+                    
+                    total_sample_height += h;
+                    actual_samples++;
+                    g_object_unref(layout);
+                }
+                if (text) g_free(text);
+            }
+            
+            double avg_height = (actual_samples > 0) ? (total_sample_height / actual_samples) : self->line_height;
+            
+            /* Update avg_visual_lines for other consumers (approximate) */
+            self->avg_visual_lines = avg_height / self->line_height;
+            
+            /* Calculate total height estimate using sampled average */
+            content_height = (double)total_lines * avg_height + self->padding_top * 2;
+            
         } else {
             /* Exact Scan Mode (O(N)) */
             self->avg_visual_lines = 1.0; /* Reset */
