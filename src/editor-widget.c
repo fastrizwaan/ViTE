@@ -1600,6 +1600,21 @@ on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer u
 }
 
 static void
+on_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    double gutter_w = get_effective_gutter_width(self);
+    
+    if (x < gutter_w && gutter_w > 0) {
+        /* Over gutter - use default arrow */
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default");
+    } else {
+        /* Over text - use I-beam */
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "text");
+    }
+}
+
+static void
 on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -4453,6 +4468,14 @@ editor_widget_init(EditorWidget *self)
     self->tab_width = 4;
     self->indent_width = 4;
     
+    gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "text");
+
+    /* Motion controller for dynamic cursor */
+    GtkEventController *motion = gtk_event_controller_motion_new();
+    g_signal_connect(motion, "enter", G_CALLBACK(on_motion), self);
+    g_signal_connect(motion, "motion", G_CALLBACK(on_motion), self);
+    gtk_widget_add_controller(GTK_WIDGET(self), motion);
+
     GtkEventController *controller = gtk_event_controller_key_new();
     g_signal_connect(controller, "key-pressed", G_CALLBACK(on_key_pressed), self);
     g_signal_connect(controller, "key-released", G_CALLBACK(on_key_released), self);
