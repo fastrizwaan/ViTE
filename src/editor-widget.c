@@ -115,6 +115,13 @@ struct _EditorWidget {
     GArray *search_matches; /* Array of SearchMatch */
     int current_match_idx;
 
+    /* Filter State */
+    GArray *filtered_lines; /* Array of size_t physical line indices */
+    char *filter_pattern;
+    GRegex *filter_regex_pattern;
+    gboolean filter_case_sensitive;
+    gboolean filter_is_regex;
+
     
     /* Statistical Scroll for Large Files */
     double avg_visual_lines;
@@ -145,6 +152,22 @@ editor_widget_get_primary_cursor(EditorWidget *self)
 {
     if (!self->cursors || self->cursors->len == 0) return NULL;
     return &g_array_index(self->cursors, EditorCursor, 0);
+}
+
+static size_t get_visual_line_count(EditorWidget *self) {
+    if (!self->doc) return 0;
+    if (self->filtered_lines) return self->filtered_lines->len;
+    return document_get_line_count(self->doc);
+}
+
+static size_t get_physical_line_index(EditorWidget *self, size_t visual_line_idx) {
+    if (self->filtered_lines) {
+        if (visual_line_idx < self->filtered_lines->len) {
+            return g_array_index(self->filtered_lines, size_t, visual_line_idx);
+        }
+        return (size_t)-1;
+    }
+    return visual_line_idx;
 }
 
 static void
@@ -419,7 +442,7 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
 
     editor_widget_ensure_metrics(self);
 
-    size_t total_lines = document_get_line_count(self->doc);
+    size_t total_lines = get_visual_line_count(self);
     
     double content_height = 0;
 
@@ -504,8 +527,16 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
             state.chars_per_line = chars_per_line;
             state.line_height = self->line_height;
             
-            /* O(N) Linear Scan using Piece Table Traversal */
-            document_foreach_line(self->doc, calculate_line_height_cb, &state);
+            /* O(N) Linear Scan */
+            if (self->filtered_lines) {
+                for (guint i = 0; i < self->filtered_lines->len; i++) {
+                    size_t phys_idx = g_array_index(self->filtered_lines, size_t, i);
+                    size_t line_len = document_get_line_length(self->doc, phys_idx);
+                    calculate_line_height_cb(line_len, &state);
+                }
+            } else {
+                document_foreach_line(self->doc, calculate_line_height_cb, &state);
+            }
             
             /* Backfill any missed lines (e.g. trailing empty line "A\n" counts as 2 lines but callback only runs once) */
             while (self->line_y_offsets->len < total_lines) {
@@ -865,9 +896,8 @@ editor_widget_ensure_metrics(EditorWidget *self)
 static void
 editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 {
-    // fprintf(stderr, "[DEBUG] snapshot start\n");
     EditorWidget *self = EDITOR_WIDGET(widget);
-    if (!self->doc) return;
+    if (!self->doc || self->line_height <= 0) return;
 
     /* Update theme colors */
     gtk_widget_get_color(widget, &self->color_text);
@@ -924,7 +954,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     /* Find start_line using binary search on line_y_offsets */
     size_t start_line = 0;
     double partial_y = 0;
-    size_t total_lines = document_get_line_count(self->doc);
+    size_t max_lines = get_visual_line_count(self);
     
     if (self->line_y_offsets && self->line_y_offsets->len > 0) {
         double *offsets = (double*)self->line_y_offsets->data;
@@ -943,7 +973,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             }
         }
         start_line = low;
-        if (start_line >= total_lines) start_line = total_lines - 1; /* clamp */
+        if (start_line >= max_lines && max_lines > 0) start_line = max_lines - 1; /* clamp */
         
         partial_y = scroll_y - offsets[start_line];
     } else {
@@ -964,7 +994,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     }
     
     size_t count_lines = (size_t)(height / self->line_height) + 2;
-    size_t max_lines = document_get_line_count(self->doc);
+    size_t phys_total_lines = document_get_line_count(self->doc);
 
     PangoContext *context = gtk_widget_get_pango_context(widget);
     
@@ -979,7 +1009,11 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     }
     for (guint c = 0; c < num_cursors; c++) {
         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
-        cursor_lines[c] = document_get_line_of_offset(self->doc, cur->cursor_offset);
+        if (self->doc) {
+            cursor_lines[c] = document_get_line_of_offset(self->doc, cur->cursor_offset);
+        } else {
+            cursor_lines[c] = (size_t)-1;
+        }
     }
 
 
@@ -987,12 +1021,14 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     double text_start_x = gutter_w + self->padding_left;
 
     for (size_t i = 0; i < count_lines; ++i) {
-        size_t line_idx = start_line + i;
-        // fprintf(stderr, "[DEBUG] snapshot loop: line_idx=%zu\n", line_idx);
-        if (line_idx >= max_lines) break;
+        size_t visual_line_idx = start_line + i;
+        if (visual_line_idx >= max_lines) break;
+
+        size_t phys_line = get_physical_line_index(self, visual_line_idx);
+        if (phys_line == (size_t)-1) continue;
 
         size_t len;
-        char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024);
+        char *text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024);
         // fprintf(stderr, "[DEBUG] snapshot loop: len=%zu\n", len);
 
         /* UTF-8 Validation */
@@ -1026,12 +1062,12 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         
         /* Syntax highlight and Search Highlight */
         /* MUST COPY cached attributes to avoid corrupting the syntax cache with search highlights! */
-        PangoAttrList *cached_attrs = syntax_highlight_line(self->syntax_ctx, line_idx, text);
+        PangoAttrList *cached_attrs = syntax_highlight_line(self->syntax_ctx, phys_line, text);
         PangoAttrList *attrs = cached_attrs ? pango_attr_list_copy(cached_attrs) : pango_attr_list_new();
         
         /* Inject Search Highlights */
         if (self->search_matches && self->search_matches->len > 0) {
-            size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
+            size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
             size_t raw_line_end = line_start_off + len;
             
             /* Binary search to find first match that could overlap this line */
@@ -1102,7 +1138,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
              gboolean highlight_this = FALSE;
              for (guint c = 0; c < num_cursors; c++) {
                  EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
-                 if (cursor_lines[c] == line_idx && cur->cursor_offset == cur->selection_anchor) {
+                 if (cursor_lines[c] == phys_line && cur->cursor_offset == cur->selection_anchor) {
                      highlight_this = TRUE;
                      break;
                  }
@@ -1121,7 +1157,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* Draw Line Number */
         if (self->show_line_numbers) {
             char lnum_buf[32];
-            snprintf(lnum_buf, sizeof(lnum_buf), "%zu", line_idx + 1);
+            snprintf(lnum_buf, sizeof(lnum_buf), "%zu", phys_line + 1);
             
             PangoLayout *lnum_layout = pango_layout_new(context);
             pango_layout_set_font_description(lnum_layout, self->font_desc);
@@ -1162,7 +1198,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
 
         /* 1. Draw Selections for all cursors */
-        size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
+        size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
         size_t raw_line_end = line_start_off + len + 1;
 
         for (guint c = 0; c < self->cursors->len; c++) {
@@ -1275,8 +1311,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* Draw DnD Drop Caret */
         if (self->is_dragging_selection && self->drag_drop_offset != (size_t)-1) {
             size_t drop_line = document_get_line_of_offset(self->doc, self->drag_drop_offset);
-            if (line_idx == drop_line) {
-                size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
+            if (phys_line == drop_line) {
+                size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
                 size_t index_in_line = self->drag_drop_offset - line_start_off;
                 if (index_in_line > len) index_in_line = len;
 
@@ -4407,6 +4443,19 @@ editor_widget_dispose(GObject *object)
         self->search_matches = NULL;
     }
     
+    if (self->filtered_lines) {
+        g_array_unref(self->filtered_lines);
+        self->filtered_lines = NULL;
+    }
+    if (self->filter_pattern) {
+        g_free(self->filter_pattern);
+        self->filter_pattern = NULL;
+    }
+    if (self->filter_regex_pattern) {
+        g_regex_unref(self->filter_regex_pattern);
+        self->filter_regex_pattern = NULL;
+    }
+    
     /* Disconnect GSettings signal and cleanup */
     if (self->interface_settings) {
         g_signal_handlers_disconnect_by_func(self->interface_settings, on_system_font_changed, self);
@@ -4510,6 +4559,14 @@ editor_widget_init(EditorWidget *self)
     gtk_widget_add_controller(GTK_WIDGET(self), scroll_ctrl);
     
     gtk_widget_set_focusable(GTK_WIDGET(self), TRUE);
+
+    /* Filter initialization */
+    self->filtered_lines = NULL;
+    self->filter_pattern = NULL;
+    self->filter_regex_pattern = NULL;
+    self->filter_case_sensitive = FALSE;
+    self->filter_is_regex = FALSE;
+    self->avg_visual_lines = 1.0;
 }
 
 static void
@@ -5094,8 +5151,7 @@ editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *
     size_t lines_visible = (size_t)(page_size / self->line_height) + 5; 
     size_t e = s + lines_visible;
     
-    size_t total = 0;
-    if (self->doc) total = document_get_line_count(self->doc);
+    size_t total = get_visual_line_count(self);
     
     if (s > total) s = total;
     if (e > total) e = total;
@@ -5120,11 +5176,15 @@ editor_widget_get_visible_offset_range(EditorWidget *self, size_t *start_offset,
     
     /* Get byte offsets for start and end lines */
     if (start_offset) {
-        *start_offset = document_get_offset_of_line(self->doc, start_line);
+        size_t phys_start = get_physical_line_index(self, start_line);
+        if (phys_start == (size_t)-1) phys_start = 0;
+        *start_offset = document_get_offset_of_line(self->doc, phys_start);
     }
     if (end_offset) {
-        /* End is offset of end_line + 1 (exclusive) */
-        *end_offset = document_get_offset_of_line(self->doc, end_line);
+        /* End is offset of end_line (exclusive) */
+        size_t phys_end = get_physical_line_index(self, end_line);
+        if (phys_end == (size_t)-1) phys_end = document_get_line_count(self->doc);
+        *end_offset = document_get_offset_of_line(self->doc, phys_end);
     }
 }
 
@@ -5235,5 +5295,49 @@ editor_widget_scroll_to_line(EditorWidget *self, size_t line)
     }
     
     /* Force redraw and update */
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+void editor_widget_set_filtered_lines(EditorWidget *self, size_t *lines, size_t count, const char *pattern, gboolean regex, gboolean case_sensitive) {
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+
+    /* Cleanup old filter */
+    if (self->filtered_lines) {
+        g_array_free(self->filtered_lines, TRUE);
+        self->filtered_lines = NULL;
+    }
+    if (self->filter_pattern) {
+        g_free(self->filter_pattern);
+        self->filter_pattern = NULL;
+    }
+    if (self->filter_regex_pattern) {
+        g_regex_unref(self->filter_regex_pattern);
+        self->filter_regex_pattern = NULL;
+    }
+
+    if (lines != NULL && count > 0) {
+        self->filtered_lines = g_array_new(FALSE, FALSE, sizeof(size_t));
+        g_array_append_vals(self->filtered_lines, lines, count);
+        
+        self->filter_pattern = g_strdup(pattern);
+        self->filter_is_regex = regex;
+        self->filter_case_sensitive = case_sensitive;
+        
+        if (regex && pattern) {
+            GError *error = NULL;
+            self->filter_regex_pattern = g_regex_new(pattern, 
+                (case_sensitive ? 0 : G_REGEX_CASELESS) | G_REGEX_OPTIMIZE, 0, &error);
+            if (error) {
+                g_warning("Filter regex error: %s", error->message);
+                g_error_free(error);
+            }
+        }
+    }
+
+    /* Reset scroll and update adjustments */
+    if (self->vadjustment) {
+        gtk_adjustment_set_value(self->vadjustment, 0);
+    }
+    editor_widget_update_adjustments(self, -1, -1);
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }

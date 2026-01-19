@@ -37,7 +37,10 @@ void editor_widget_set_insert_mode(EditorWidget *self, gboolean insert);
 void editor_widget_set_show_line_numbers(EditorWidget *self, gboolean show);
 gboolean editor_widget_get_show_line_numbers(EditorWidget *self);
 
+
 void editor_widget_set_word_wrap(EditorWidget *self, gboolean wrap);
 gboolean editor_widget_get_word_wrap(EditorWidget *self);
+
+void editor_widget_set_filtered_lines(EditorWidget *self, size_t *lines, size_t count, const char *pattern, gboolean regex, gboolean case_sensitive);
 
 #endif

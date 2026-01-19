@@ -19,6 +19,8 @@ sources = files(
   'src/syntax.c',
   'src/editor-widget.c',
   'src/find-replace-bar.c',
+  'src/filter-bar.c',
+  'src/status-bar.c',
   'src/tab.c',
   'src/tab-bar.c',
   'src/fading-label.c',

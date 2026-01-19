@@ -8,6 +8,7 @@
 #include "tab.h"
 #include "find-replace-bar.h"
 #include "status-bar.h"
+#include "filter-bar.h"
 
 typedef struct _ViteWindow ViteWindow;
 
@@ -364,6 +365,14 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
         
         /* Store logical association */
         g_object_set_data(G_OBJECT(root_box), "find_bar", find_bar);
+        
+        /* Add Filter Bar below Find Bar */
+        GtkWidget *filter_bar = vite_filter_bar_new(EDITOR_WIDGET(real_editor));
+        gtk_widget_set_visible(filter_bar, FALSE);
+        gtk_widget_set_halign(filter_bar, GTK_ALIGN_FILL);
+        gtk_widget_set_valign(filter_bar, GTK_ALIGN_START);
+        gtk_box_append(GTK_BOX(root_box), filter_bar);
+        g_object_set_data(G_OBJECT(root_box), "filter_bar", filter_bar);
     }
     
     return root_box;
@@ -1834,8 +1843,8 @@ static void
 on_cursor_moved(EditorWidget *editor, guint line, guint col, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
-    if (GTK_WIDGET(editor) == get_active_editor(win)) {
-        vite_status_bar_set_cursor_position(VITE_STATUS_BAR(win->status_bar), line + 1, col + 1);
+    if (win->status_bar && GTK_WIDGET(editor) == get_active_editor(win)) {
+        vite_status_bar_set_cursor_position(VITE_STATUS_BAR(win->status_bar), line, col);
     }
 }
 
@@ -1843,7 +1852,7 @@ static void
 on_insert_mode_changed(EditorWidget *editor, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
-    if (GTK_WIDGET(editor) == get_active_editor(win)) {
+    if (win->status_bar && GTK_WIDGET(editor) == get_active_editor(win)) {
         vite_status_bar_set_insert_mode(VITE_STATUS_BAR(win->status_bar), editor_widget_get_insert_mode(editor));
     }
 }
@@ -2044,6 +2053,39 @@ show_goto_line_popover(GtkWidget *parent_widget, EditorWidget *editor)
 }
 
 static void
+on_filter_action(GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *active = get_active_editor(win);
+    if (!active) return;
+
+    /* Traverse up to find the root_box of the current view split */
+    GtkWidget *parent = active;
+    while (parent && !g_object_get_data(G_OBJECT(parent), "filter_bar")) {
+        parent = gtk_widget_get_parent(parent);
+    }
+
+    if (parent) {
+        GtkWidget *filter_bar = GTK_WIDGET(g_object_get_data(G_OBJECT(parent), "filter_bar"));
+        if (filter_bar) {
+            gboolean visible = gtk_widget_get_visible(filter_bar);
+            gtk_widget_set_visible(filter_bar, !visible);
+            if (!visible) {
+                 /* Pre-fill with selection */
+                 char *sel = editor_widget_get_selected_text(EDITOR_WIDGET(active));
+                 if (sel && strlen(sel) > 0) {
+                     vite_filter_bar_set_text(VITE_FILTER_BAR(filter_bar), sel);
+                 }
+                 g_free(sel);
+                 gtk_widget_grab_focus(filter_bar);
+            } else {
+                 gtk_widget_grab_focus(active);
+            }
+        }
+    }
+}
+
+static void
 on_goto_line_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
@@ -2113,7 +2155,11 @@ get_active_editor(ViteWindow *win)
     if (tab) {
         GtkWidget *overlay = vite_tab_get_last_focused_child(tab);
         if (overlay && GTK_IS_OVERLAY(overlay)) {
-             return gtk_overlay_get_child(GTK_OVERLAY(overlay));
+             GtkWidget *child = gtk_overlay_get_child(GTK_OVERLAY(overlay));
+             if (GTK_IS_SCROLLED_WINDOW(child)) {
+                 return gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(child));
+             }
+             return child;
         }
     }
     
@@ -2472,14 +2518,18 @@ setup_window(GtkWindow *window)
         { "show-line-numbers", NULL, NULL, "true", on_show_line_numbers_toggled },
         { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled },
         { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled },
-        { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL }
+        { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL },
+        { "filter", on_filter_action, NULL, NULL, NULL }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
     
     /* Accelerators */
     if (app) {
-        const char *accels[] = {"<Ctrl>g", NULL};
-        gtk_application_set_accels_for_action(app, "win.goto-line", accels);
+        const char *accels_goto[] = {"<Ctrl>g", NULL};
+        gtk_application_set_accels_for_action(app, "win.goto-line", accels_goto);
+        
+        const char *accels_filter[] = {"<Ctrl><Alt>f", NULL};
+        gtk_application_set_accels_for_action(app, "win.filter", accels_filter);
     }
     
     GtkWidget *btn_menu = gtk_menu_button_new();

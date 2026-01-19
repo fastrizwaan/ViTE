@@ -2186,3 +2186,208 @@ document_set_progress_callback(Document *doc, DocumentProgressCallback callback,
         doc->progress_user_data = user_data;
     }
 }
+
+/* Filter Implementation */
+void filter_result_free(FilterResult *res) {
+    if (!res) return;
+    if (res->lines) g_free(res->lines);
+    g_free(res);
+}
+
+FilterResult *document_filter_lines(Document *doc, const char *pattern, gboolean regex, gboolean case_sensitive) {
+    /* Synchronous wrapper around async implementation for backward compatibility if needed, 
+       or just keep original for small files? 
+       Actually, let's keep the original sync implementation for now or redirect?
+       For now, let's keep the original implementation but maybe optimized?
+       No, the plan is to use async entirely in the UI. 
+       Let's leave this existing sync function as is for now, or minimal update.
+    */
+    if (!doc || !pattern || !*pattern) return NULL;
+
+    GRegex *reg = NULL;
+    if (regex) {
+        GError *err = NULL;
+        GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+        if (!case_sensitive) flags |= G_REGEX_CASELESS;
+        
+        reg = g_regex_new(pattern, flags, 0, &err);
+        if (err) {
+            g_warning("Invalid regex for filter: %s", err->message);
+            g_error_free(err);
+            return NULL; 
+        }
+    }
+
+    size_t total_lines = document_get_line_count(doc);
+    GArray *matches = g_array_sized_new(FALSE, FALSE, sizeof(size_t), total_lines / 10);
+
+    char *lower_pattern = NULL;
+    if (!regex && !case_sensitive) {
+        lower_pattern = g_utf8_strdown(pattern, -1);
+    }
+
+    /* Stack optimization for non-regex search? */
+    /* Implementation kept simple for sync version */
+
+    for (size_t i = 0; i < total_lines; i++) {
+        size_t len;
+        char *line = document_get_line(doc, i, &len);
+        if (!line) continue;
+        
+        gboolean match = FALSE;
+        if (regex) {
+            match = g_regex_match(reg, line, 0, NULL);
+        } else {
+            if (case_sensitive) {
+                match = (strstr(line, pattern) != NULL);
+            } else {
+                char *lower_line = g_utf8_strdown(line, -1);
+                match = (strstr(lower_line, lower_pattern) != NULL);
+                g_free(lower_line);
+            }
+        }
+        
+        if (match) {
+            g_array_append_val(matches, i);
+        }
+        
+        g_free(line);
+    }
+
+    if (reg) g_regex_unref(reg);
+    if (lower_pattern) g_free(lower_pattern);
+
+    FilterResult *res = g_new0(FilterResult, 1);
+    res->count = matches->len;
+    res->lines = (size_t*)g_array_free(matches, FALSE);
+    
+    return res;
+}
+
+struct _DocumentFilterTask {
+    Document *doc;
+    PieceTableIter iter;
+    GArray *matches;
+    
+    char *pattern;
+    GRegex *regex_pattern;
+    gboolean is_regex;
+    gboolean case_sensitive;
+    
+    char *lower_pattern; /* For case-insensitive string search */
+    
+    size_t total_lines;
+    size_t processed_lines;
+};
+
+DocumentFilterTask *document_filter_async_start(Document *doc, const char *pattern, gboolean regex, gboolean case_sensitive) {
+    if (!doc || !pattern) return NULL;
+    
+    DocumentFilterTask *task = g_new0(DocumentFilterTask, 1);
+    task->doc = doc;
+    task->pattern = g_strdup(pattern);
+    task->is_regex = regex;
+    task->case_sensitive = case_sensitive;
+    
+    if (regex) {
+        GError *err = NULL;
+        GRegexCompileFlags flags = G_REGEX_OPTIMIZE;
+        if (!case_sensitive) flags |= G_REGEX_CASELESS;
+        task->regex_pattern = g_regex_new(pattern, flags, 0, &err);
+        if (err) {
+            g_warning("Invalid regex: %s", err->message);
+            g_error_free(err);
+            /* Continue anyway, will just match nothing */
+        }
+    } else {
+        if (!case_sensitive) {
+            task->lower_pattern = g_utf8_strdown(pattern, -1);
+        }
+    }
+    
+    task->total_lines = document_get_line_count(doc);
+    task->matches = g_array_sized_new(FALSE, FALSE, sizeof(size_t), 1024);
+    
+    /* Initialize Iterator */
+    piece_table_iter_init(doc->pt, &task->iter);
+    
+    return task;
+}
+
+gboolean document_filter_async_step(DocumentFilterTask *task, gint64 time_budget_us) {
+    if (!task) return TRUE;
+    
+    gint64 start_time = g_get_monotonic_time();
+    char buf[4096]; /* 4KB stack buffer for line checking */
+    
+    while (task->processed_lines < task->total_lines) {
+        /* Check time budget */
+        if ((g_get_monotonic_time() - start_time) > time_budget_us) {
+            return FALSE; /* Yield */
+        }
+        
+        /* Get next line into buffer without malloc if possible */
+        /* Note: piece_table_iter_get_next_line handles the traversal */
+        size_t len = piece_table_iter_get_next_line(&task->iter, buf, sizeof(buf) - 1);
+        buf[len] = '\0'; /* Null terminate for regex/strstr */
+        
+        /* If line was truncated (len == sizeof(buf)-1), we might miss matches at the end.
+           For filter, this is an acceptable trade-off for speed vs correctness on extremely long lines.
+           Or we could alloc only for long lines. let's stick to stack for speed. 
+           Most code lines are < 4KB. */
+           
+        gboolean match = FALSE;
+        
+        if (task->is_regex) {
+            if (task->regex_pattern) {
+                match = g_regex_match(task->regex_pattern, buf, 0, NULL);
+            }
+            /* If invalid regex, match remains FALSE */
+        } else {
+            if (task->case_sensitive) {
+                match = (strstr(buf, task->pattern) != NULL);
+            } else {
+                /* Optimization: Avoid full lowercasing if not needed? 
+                   We do need to lowercase the line to search case-insensitively. */
+                char *lower_line = g_utf8_strdown(buf, len);
+                if (task->lower_pattern) {
+                    match = (strstr(lower_line, task->lower_pattern) != NULL);
+                }
+                g_free(lower_line);
+            }
+        }
+        
+        if (match) {
+            g_array_append_val(task->matches, task->processed_lines);
+        }
+        
+        task->processed_lines++;
+    }
+    
+    return TRUE; /* Finished */
+}
+
+FilterResult *document_filter_async_finish(DocumentFilterTask *task) {
+    if (!task) return NULL;
+    
+    FilterResult *res = g_new0(FilterResult, 1);
+    res->count = task->matches->len;
+    res->lines = (size_t*)g_array_free(task->matches, FALSE);
+    task->matches = NULL; /* Prevent double free in cancel */
+    
+    /* Cleanup task */
+    document_filter_async_cancel(task);
+    
+    return res;
+}
+
+void document_filter_async_cancel(DocumentFilterTask *task) {
+    if (!task) return;
+    
+    if (task->pattern) g_free(task->pattern);
+    if (task->lower_pattern) g_free(task->lower_pattern);
+    if (task->regex_pattern) g_regex_unref(task->regex_pattern);
+    if (task->matches) g_array_free(task->matches, TRUE);
+    
+    g_free(task);
+}

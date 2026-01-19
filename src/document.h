@@ -127,4 +127,24 @@ gboolean document_search_task_get_whole_word(SearchTask *task);
 
 char *normalize_replacement_string(const char *replacement, gboolean for_regex);
 
+
+/* Filter API */
+typedef struct {
+    size_t *lines; /* Array of physical line indices */
+    size_t count;
+} FilterResult;
+
+void filter_result_free(FilterResult *res);
+FilterResult *document_filter_lines(Document *doc, const char *pattern, gboolean regex, gboolean case_sensitive);
+
+/* Async Filtering */
+typedef struct _DocumentFilterTask DocumentFilterTask;
+
+DocumentFilterTask *document_filter_async_start(Document *doc, const char *pattern, gboolean regex, gboolean case_sensitive);
+/* Returns TRUE if finished, FALSE if should continue yielding */
+gboolean document_filter_async_step(DocumentFilterTask *task, gint64 time_budget_us);
+FilterResult *document_filter_async_finish(DocumentFilterTask *task);
+void document_filter_async_cancel(DocumentFilterTask *task);
+
+
 #endif
