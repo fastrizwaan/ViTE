@@ -25,6 +25,8 @@ struct _ViteWindow {
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
 static int untitled_count = 1;
 
+#define MAX_RECENT_FILES 10000
+
 static void open_file(GtkApplication *app, ViteWindow *target_window, GFile *file);
 static void create_new_tab (ViteWindow *win, const char *title, Document *doc);
 static ViteWindow *setup_window(GtkWindow *window);
@@ -1320,8 +1322,8 @@ add_to_local_recents(const char *uri)
     /* Prepend to top */
     uris = g_list_prepend(uris, g_strdup(uri));
     
-    /* Limit to 50 items */
-    while (g_list_length(uris) > 50) {
+    /* Limit to MAX_RECENT_FILES */
+    while (g_list_length(uris) > MAX_RECENT_FILES) {
         GList *last = g_list_last(uris);
         g_free(last->data);
         uris = g_list_delete_link(uris, last);
@@ -1456,7 +1458,7 @@ update_recent_files_list(GtkListBox *list_box, GtkApplication *app, GtkPopover *
     GList *uris = load_local_recents();
     int count = 0;
     
-    for (GList *l = uris; l != NULL && count < 20; l = l->next) {
+    for (GList *l = uris; l != NULL && count < MAX_RECENT_FILES; l = l->next) {
         const char *uri = l->data;
         GFile *file = g_file_new_for_uri(uri);
         char *path = g_file_get_path(file);
@@ -2470,6 +2472,10 @@ setup_window(GtkWindow *window)
     /* By default AdwSplitButton looks joined. We can add specific classes if needed. */
      gtk_widget_set_tooltip_text(split_btn, "Open File");
      gtk_widget_add_css_class(split_btn, "open-split-btn");
+    /* Set tooltip for the dropdown arrow (if accessible) or just relied on general one. 
+       AdwSplitButton documentation suggests "dropdown-tooltip" property. */
+    adw_split_button_set_dropdown_tooltip(ADW_SPLIT_BUTTON(split_btn), "Recent Files");
+
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), split_btn);
     
     /* New Tab (Icon Only) */
@@ -2797,6 +2803,11 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
                     /* FOUND! Switch to this window and tab */
                     on_tab_clicked(tab, NULL);
                     gtk_window_present(check_win->window);
+                    
+                    /* Also add to recents to bump it up */
+                    char *uri = g_file_get_uri(file);
+                    add_to_local_recents(uri);
+                    g_free(uri);
                             
                     g_free(path);
                     g_list_free(tabs);
@@ -2931,7 +2942,9 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
     document_load_file_async(doc, path, cancellable, on_load_complete, ctx);
     g_object_unref(cancellable);
     
-    add_to_local_recents(path);
+    char *uri = g_file_get_uri(file);
+    add_to_local_recents(uri);
+    g_free(uri);
     g_free(path);
     g_free(basename);
 }
