@@ -13,6 +13,7 @@ struct _ViteFindReplaceBar {
     GtkWidget *replace_box;
     GtkWidget *replace_status_label;
     GtkWidget *replace_all_btn;
+    GtkWidget *toggle_repl_btn;
     
     GtkWidget *regex_check;
     GtkWidget *case_check;
@@ -27,7 +28,14 @@ struct _ViteFindReplaceBar {
     guint viewport_update_timeout_id;
     
     ReplaceTask *current_replace_task;
+
     StreamingReplaceTask *current_streaming_replace;
+    
+    /* Filter Mode State */
+    gboolean filter_mode;
+    DocumentFilterTask *current_filter_task;
+    FilterResult *current_filter_result;
+    guint filter_tick_id;
 };
 
 G_DEFINE_TYPE(ViteFindReplaceBar, vite_find_replace_bar, GTK_TYPE_BOX)
@@ -64,7 +72,23 @@ static void vite_find_replace_bar_dispose(GObject *object) {
     
     if (self->current_streaming_replace) {
         document_replace_streaming_cancel(self->current_streaming_replace);
+        document_replace_streaming_cancel(self->current_streaming_replace);
         self->current_streaming_replace = NULL;
+    }
+    
+    if (self->current_filter_task) {
+        document_filter_async_cancel(self->current_filter_task);
+        self->current_filter_task = NULL;
+    }
+    
+    if (self->current_filter_result) {
+        filter_result_free(self->current_filter_result);
+        self->current_filter_result = NULL;
+    }
+    
+    if (self->filter_tick_id) {
+        g_source_remove(self->filter_tick_id);
+        self->filter_tick_id = 0;
     }
     
     G_OBJECT_CLASS(vite_find_replace_bar_parent_class)->dispose(object);
@@ -73,6 +97,32 @@ static void vite_find_replace_bar_dispose(GObject *object) {
 static void
 update_matches_label(ViteFindReplaceBar *self) {
     if (!self) return;
+    
+    if (self->filter_mode) {
+        /* Filter Mode Label Update */
+        if (!self->current_filter_result) {
+             /* If task running? */
+             if (self->current_filter_task) {
+                 gtk_label_set_text(GTK_LABEL(self->matches_label), "Filtering...");
+                 gtk_widget_set_visible(self->matches_label, TRUE);
+             } else {
+                 gtk_widget_set_visible(self->matches_label, FALSE);
+             }
+             return;
+        }
+        size_t count = self->current_filter_result->count;
+        if (count == 0) {
+            gtk_label_set_text(GTK_LABEL(self->matches_label), "No matches");
+        } else {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%zu matches", count);
+            gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
+        }
+        gtk_widget_set_visible(self->matches_label, TRUE);
+        return;
+    }
+    
+    /* Find Mode Label Update */
     if (!self->current_search) {
          gtk_widget_set_visible(self->matches_label, FALSE);
          return;
@@ -213,8 +263,101 @@ static void update_viewport_search(ViteFindReplaceBar *self) {
     if (viewport_matches) g_array_unref(viewport_matches);
 }
 
+static gboolean filter_async_step(gpointer user_data) {
+    ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
+    
+    if (!self->current_filter_task) {
+        self->filter_tick_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    
+    /* Run for up to 2ms */
+    gboolean finished = document_filter_async_step(self->current_filter_task, 2000);
+    
+    if (!finished) {
+        /* Update Progress */
+        size_t processed = document_filter_task_get_processed(self->current_filter_task);
+        size_t total = document_filter_task_get_total(self->current_filter_task);
+        size_t matches = document_filter_task_get_match_count(self->current_filter_task);
+        
+        int percent = (total > 0) ? (int)((processed * 100) / total) : 0;
+        char buf[64];
+        snprintf(buf, sizeof(buf), "Filtering... %d%% (%zu)", percent, matches);
+        gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
+        gtk_widget_set_visible(self->matches_label, TRUE);
+    } else {
+        /* Get results */
+        FilterResult *res = document_filter_async_finish(self->current_filter_task);
+        self->current_filter_task = NULL;
+        self->filter_tick_id = 0;
+        
+        self->current_filter_result = res;
+        
+        /* Update Editor */
+        const char *pattern = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
+        gboolean regex = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->regex_check));
+        gboolean case_sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->case_check));
+        
+        if (res->count > 0) {
+            /* Transfer ownership of matches to editor */
+            editor_widget_set_filtered_lines(self->editor, 
+                                           res->matches, 
+                                           pattern, regex, case_sensitive);
+            res->matches = NULL; 
+        } else {
+            editor_widget_set_filtered_lines(self->editor, NULL, NULL, FALSE, FALSE);
+        }
+        
+        update_matches_label(self);
+        return G_SOURCE_REMOVE;
+    }
+    
+    return G_SOURCE_CONTINUE;
+}
+
 static gboolean perform_search(ViteFindReplaceBar *self) {
     self->search_timeout_id = 0;
+    
+    Document *doc = editor_widget_get_document(self->editor);
+    if (!doc) return G_SOURCE_REMOVE;
+
+    const char *text = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
+    
+    /* --- FILTER MODE BRANCH --- */
+    if (self->filter_mode) {
+        /* Cancel previous filter */
+        if (self->filter_tick_id) {
+            g_source_remove(self->filter_tick_id);
+            self->filter_tick_id = 0;
+        }
+        if (self->current_filter_task) {
+            document_filter_async_cancel(self->current_filter_task);
+            self->current_filter_task = NULL;
+        }
+        if (self->current_filter_result) {
+            filter_result_free(self->current_filter_result);
+            self->current_filter_result = NULL;
+        }
+        
+        if (!text || !*text) {
+             editor_widget_set_filtered_lines(self->editor, NULL, NULL, FALSE, FALSE);
+             gtk_widget_set_visible(self->matches_label, FALSE);
+             return G_SOURCE_REMOVE;
+        }
+        
+        gboolean regex = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->regex_check));
+        gboolean case_sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->case_check));
+        
+        self->current_filter_task = document_filter_async_start(doc, text, regex, case_sensitive);
+        if (self->current_filter_task) {
+            self->filter_tick_id = g_idle_add(filter_async_step, self);
+            gtk_label_set_text(GTK_LABEL(self->matches_label), "Filtering...");
+            gtk_widget_set_visible(self->matches_label, TRUE);
+        }
+        return G_SOURCE_REMOVE;
+    }
+
+    /* --- FIND MODE BRANCH --- */
     
     /* Cancel any previous async search */
     if (self->current_search) {
@@ -222,10 +365,8 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
         self->current_search = NULL;
     }
     
-    Document *doc = editor_widget_get_document(self->editor);
     if (!doc) return G_SOURCE_REMOVE;
     
-    const char *text = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
     if (!text || !*text) {
         editor_widget_set_search_results(self->editor, NULL);
         gtk_widget_set_visible(self->matches_label, FALSE);
@@ -521,6 +662,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_add_css_class(toggle_repl_btn, "flat");
     g_signal_connect_swapped(toggle_repl_btn, "clicked", G_CALLBACK(vite_find_replace_bar_toggle_replace), self);
     gtk_box_append(GTK_BOX(row1), toggle_repl_btn);
+    self->toggle_repl_btn = toggle_repl_btn;
 
     /* Options Menu */
     GtkWidget *options_btn = gtk_menu_button_new();
@@ -611,7 +753,61 @@ void vite_find_replace_bar_toggle_replace(ViteFindReplaceBar *bar) {
     else gtk_widget_grab_focus(bar->find_entry);
 }
 
+static void set_filter_mode(ViteFindReplaceBar *bar, gboolean enabled) {
+    if (bar->filter_mode == enabled) return;
+    
+    bar->filter_mode = enabled;
+    
+    /* Clean up previous state */
+    /* If switching FROM Filter Mode -> Clear Filter results */
+    if (!enabled) {
+         if (bar->current_filter_task) {
+             document_filter_async_cancel(bar->current_filter_task);
+             bar->current_filter_task = NULL;
+         }
+         if (bar->filter_tick_id) {
+             g_source_remove(bar->filter_tick_id);
+             bar->filter_tick_id = 0;
+         }
+         if (bar->current_filter_result) {
+             filter_result_free(bar->current_filter_result);
+             bar->current_filter_result = NULL;
+         }
+         /* Clear Editor Filter State */
+         editor_widget_set_filtered_lines(bar->editor, NULL, NULL, FALSE, FALSE);
+         
+         /* Restore UI for Find */
+         gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(bar->find_entry), "Find");
+         gtk_widget_set_visible(bar->toggle_repl_btn, TRUE);
+         
+    } else {
+        /* Switching TO Filter Mode */
+        /* Clear Find State */
+        if (bar->current_search) {
+            document_search_async_cancel(bar->current_search);
+            bar->current_search = NULL;
+        }
+        editor_widget_set_search_results(bar->editor, NULL);
+        gtk_widget_set_visible(bar->replace_box, FALSE);
+        
+        /* Update UI for Filter */
+        gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(bar->find_entry), "Filter lines (Ctrl+Alt+F)");
+        gtk_widget_set_visible(bar->toggle_repl_btn, FALSE);
+    }
+    
+    /* Re-evaluate with empty/current text */
+    /* Clear label */
+    gtk_widget_set_visible(bar->matches_label, FALSE);
+    
+    /* Trigger search/filter if text exists */
+    const char *text = gtk_editable_get_text(GTK_EDITABLE(bar->find_entry));
+    if (text && *text) {
+        perform_search(bar);
+    }
+}
+
 void vite_find_replace_bar_show(ViteFindReplaceBar *bar) {
+    set_filter_mode(bar, FALSE);
     gtk_widget_set_visible(GTK_WIDGET(bar), TRUE);
     gtk_widget_grab_focus(bar->find_entry);
     
@@ -626,10 +822,33 @@ void vite_find_replace_bar_show(ViteFindReplaceBar *bar) {
     (void)doc; 
 }
 
+
+
+void vite_find_replace_bar_show_filter(ViteFindReplaceBar *bar) {
+    set_filter_mode(bar, TRUE);
+    gtk_widget_set_visible(GTK_WIDGET(bar), TRUE);
+    gtk_widget_grab_focus(bar->find_entry);
+}
+
 void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
     gtk_widget_set_visible(GTK_WIDGET(bar), FALSE);
     gtk_editable_set_text(GTK_EDITABLE(bar->find_entry), "");
-    editor_widget_set_search_results(bar->editor, NULL);
+    
+    if (bar->filter_mode) {
+         /* Clear filter results */
+         editor_widget_set_filtered_lines(bar->editor, NULL, NULL, FALSE, FALSE);
+         if (bar->current_filter_task) {
+             document_filter_async_cancel(bar->current_filter_task);
+             bar->current_filter_task = NULL;
+         }
+         if (bar->current_filter_result) {
+             filter_result_free(bar->current_filter_result);
+             bar->current_filter_result = NULL;
+         }
+    } else {
+         editor_widget_set_search_results(bar->editor, NULL);
+    }
+    
     gtk_widget_grab_focus(GTK_WIDGET(bar->editor));
 }
 
@@ -640,6 +859,7 @@ void vite_find_replace_bar_set_search_text(ViteFindReplaceBar *bar, const char *
 
 void vite_find_replace_bar_show_replace(ViteFindReplaceBar *bar, gboolean has_search_text) {
     if (!bar) return;
+    set_filter_mode(bar, FALSE);
     gtk_widget_set_visible(GTK_WIDGET(bar), TRUE);
     gtk_widget_set_visible(bar->replace_box, TRUE);
     

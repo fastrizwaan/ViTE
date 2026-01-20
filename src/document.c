@@ -2395,3 +2395,18 @@ void document_filter_async_cancel(DocumentFilterTask *task) {
     
     g_free(task);
 }
+
+size_t document_filter_task_get_processed(DocumentFilterTask *task) {
+    if (!task) return 0;
+    return task->processed_lines;
+}
+
+size_t document_filter_task_get_total(DocumentFilterTask *task) {
+    if (!task) return 0;
+    return task->total_lines;
+}
+
+size_t document_filter_task_get_match_count(DocumentFilterTask *task) {
+    if (!task || !task->matches_storage) return 0;
+    return compact_matches_count(task->matches_storage);
+}

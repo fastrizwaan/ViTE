@@ -148,5 +148,10 @@ gboolean document_filter_async_step(DocumentFilterTask *task, gint64 time_budget
 FilterResult *document_filter_async_finish(DocumentFilterTask *task);
 void document_filter_async_cancel(DocumentFilterTask *task);
 
+/* Filter Progress API */
+size_t document_filter_task_get_processed(DocumentFilterTask *task);
+size_t document_filter_task_get_total(DocumentFilterTask *task);
+size_t document_filter_task_get_match_count(DocumentFilterTask *task);
+
 
 #endif

@@ -8,7 +8,7 @@
 #include "tab.h"
 #include "find-replace-bar.h"
 #include "status-bar.h"
-#include "filter-bar.h"
+
 
 typedef struct _ViteWindow ViteWindow;
 
@@ -366,13 +366,6 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
         /* Store logical association */
         g_object_set_data(G_OBJECT(root_box), "find_bar", find_bar);
         
-        /* Add Filter Bar below Find Bar */
-        GtkWidget *filter_bar = vite_filter_bar_new(EDITOR_WIDGET(real_editor));
-        gtk_widget_set_visible(filter_bar, FALSE);
-        gtk_widget_set_halign(filter_bar, GTK_ALIGN_FILL);
-        gtk_widget_set_valign(filter_bar, GTK_ALIGN_START);
-        gtk_box_append(GTK_BOX(root_box), filter_bar);
-        g_object_set_data(G_OBJECT(root_box), "filter_bar", filter_bar);
     }
     
     return root_box;
@@ -2061,26 +2054,64 @@ on_filter_action(GSimpleAction *action, GVariant *param, gpointer user_data)
 
     /* Traverse up to find the root_box of the current view split */
     GtkWidget *parent = active;
-    while (parent && !g_object_get_data(G_OBJECT(parent), "filter_bar")) {
+    while (parent && !g_object_get_data(G_OBJECT(parent), "find_bar")) {
         parent = gtk_widget_get_parent(parent);
     }
 
     if (parent) {
-        GtkWidget *filter_bar = GTK_WIDGET(g_object_get_data(G_OBJECT(parent), "filter_bar"));
-        if (filter_bar) {
-            gboolean visible = gtk_widget_get_visible(filter_bar);
-            gtk_widget_set_visible(filter_bar, !visible);
-            if (!visible) {
-                 /* Pre-fill with selection */
-                 char *sel = editor_widget_get_selected_text(EDITOR_WIDGET(active));
-                 if (sel && strlen(sel) > 0) {
-                     vite_filter_bar_set_text(VITE_FILTER_BAR(filter_bar), sel);
-                 }
-                 g_free(sel);
-                 gtk_widget_grab_focus(filter_bar);
-            } else {
-                 gtk_widget_grab_focus(active);
-            }
+        GtkWidget *find_bar = GTK_WIDGET(g_object_get_data(G_OBJECT(parent), "find_bar"));
+        if (find_bar) {
+            /* Check if we are already in filter mode and visible */
+            gboolean visible = gtk_widget_get_visible(find_bar);
+            /* TODO: Check if currently in filter mode? 
+               ViteFindReplaceBar doesn't expose a getter for mode easily, 
+               but we can just show it. If it was find mode, it switches to filter.
+               If it was hidden, it shows.
+               If it was already filter mode and visible, maybe we want to hide it?
+               The old logic toggled visibility.
+               
+               For unified bar:
+               - If hidden: show in filter mode.
+               - If visible:
+                 - If in find mode: switch to filter mode.
+                 - If in filter mode: hide.
+               
+               We need a way to check current mode?
+               Or just always show?
+               
+               Let's assume standard behavior: Ctrl+Alt+F always shows filter bar. 
+               If it's already focused and in filter mode, maybe toggle?
+               Let's stick to simple: Show filter. Toggle if already visible?
+               
+               Wait, `vite_find_replace_bar_show_filter` sets mode and shows.
+               
+               Let's verify if we want toggle behavior.
+            */
+            
+            /* Logic: 
+               If bar is NOT visible -> Show Filter.
+               If bar IS visible:
+                 If we can check mode, and it is FILTER, then hide.
+                 Else (FIND mode) -> Switch to Filter.
+            */
+            
+            /* We don't have public API to check mode yet. 
+               But we can just call show_filter. 
+               
+               However, user wants to toggle it off too? 
+               Usually Esc or the button closes it. 
+               Ctrl+F usually just focuses it if open.
+               Let's just show/focus it for now.
+            */
+             
+             vite_find_replace_bar_show_filter(VITE_FIND_REPLACE_BAR(find_bar));
+             
+             /* Pre-fill with selection */
+             char *sel = editor_widget_get_selected_text(EDITOR_WIDGET(active));
+             if (sel && strlen(sel) > 0) {
+                 vite_find_replace_bar_set_search_text(VITE_FIND_REPLACE_BAR(find_bar), sel);
+             }
+             g_free(sel);
         }
     }
 }

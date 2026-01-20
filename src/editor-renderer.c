@@ -240,6 +240,70 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             }
         }
         
+        /* Filter Matches Collection */
+        GArray *filter_highlight_ranges = NULL;
+        if (self->filtered_lines && self->filter_pattern && *self->filter_pattern) {
+             if (self->filter_is_regex && self->filter_regex_pattern) {
+                 GMatchInfo *match_info;
+                 if (g_regex_match(self->filter_regex_pattern, text, 0, &match_info)) {
+                     while (g_match_info_matches(match_info)) {
+                         int start_pos, end_pos;
+                         g_match_info_fetch_pos(match_info, 0, &start_pos, &end_pos);
+                         
+                         if (start_pos >= 0 && end_pos > start_pos) {
+                             if (!filter_highlight_ranges) 
+                                 filter_highlight_ranges = g_array_new(FALSE, FALSE, sizeof(int) * 2);
+                             int range[2] = {start_pos, end_pos};
+                             g_array_append_vals(filter_highlight_ranges, range, 1);
+                         }
+                         g_match_info_next(match_info, NULL);
+                     }
+                 }
+                 g_match_info_free(match_info);
+             } else {
+                 /* Plain text search */
+                 const char *needle = self->filter_pattern;
+                 char *haystack_lower = NULL;
+                 char *needle_lower = NULL;
+                 
+                 const char *haystack = text;
+                 const char *search_needle = needle;
+                 gboolean free_needed = FALSE;
+                 
+                 if (!self->filter_case_sensitive) {
+                     haystack_lower = g_utf8_strdown(text, -1);
+                     needle_lower = g_utf8_strdown(needle, -1);
+                     haystack = haystack_lower;
+                     search_needle = needle_lower;
+                     free_needed = TRUE;
+                 }
+                 
+                 size_t needle_len = strlen(search_needle);
+                 const char *current = haystack;
+                 const char *p = NULL;
+                 
+                 if (needle_len > 0) {
+                     while ((p = strstr(current, search_needle)) != NULL) {
+                         int byte_offset = (int)(p - haystack);
+                         
+                         if (!filter_highlight_ranges) 
+                             filter_highlight_ranges = g_array_new(FALSE, FALSE, sizeof(int) * 2);
+                         int range[2] = {byte_offset, byte_offset + (int)needle_len};
+                         g_array_append_vals(filter_highlight_ranges, range, 1);
+                         
+                         current = p + needle_len; 
+                     }
+                 }
+                 
+                 if (free_needed) {
+                    g_free(haystack_lower);
+                    g_free(needle_lower);
+                 }
+             }
+        }
+
+
+        
         pango_layout_set_attributes(layout, attrs);
         pango_attr_list_unref(attrs);
         
@@ -379,6 +443,95 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         
         /* 2. Draw Text */
         gtk_snapshot_append_layout(snapshot, layout, &self->color_text);
+
+        /* Draw Custom Filter Underlines */
+        /* Draw Custom Filter Underlines */
+        if (filter_highlight_ranges) {
+            /* We need to draw underlines matching the syntax color of the text.
+               We iterate the Pango attributes (which contain syntax colors) and 
+               intersect them with our filter matching ranges.
+            */
+            PangoAttrIterator *attr_iter = pango_attr_list_get_iterator(attrs);
+            
+            do {
+                int a_start, a_end;
+                pango_attr_iterator_range(attr_iter, &a_start, &a_end);
+                
+                /* Get Color for this range */
+                GdkRGBA range_color = self->color_text;
+                PangoAttribute *fg_attr = pango_attr_iterator_get(attr_iter, PANGO_ATTR_FOREGROUND);
+                if (fg_attr) {
+                    PangoColor *pc = &((PangoAttrColor*)fg_attr)->color;
+                    range_color.red = (float)pc->red / 65535.0f;
+                    range_color.green = (float)pc->green / 65535.0f;
+                    range_color.blue = (float)pc->blue / 65535.0f;
+                    /* Use opaque alpha as PangoColors don't have alpha, 
+                       and we want to revert the force-1.0-alpha logic but match text (which is opaque) */
+                    range_color.alpha = 1.0; 
+                }
+
+                /* Check intersection with all filter matches */
+                for (guint i = 0; i < filter_highlight_ranges->len; i++) {
+                    int *range = &g_array_index(filter_highlight_ranges, int, i * 2);
+                    int m_start = range[0];
+                    int m_end = range[1];
+                    
+                    /* Intersection */
+                    int i_start = MAX(a_start, m_start);
+                    int i_end = MIN(a_end, m_end);
+                    
+                    if (i_start < i_end) {
+                        /* We have an intersection [i_start, i_end] with color range_color.
+                           Now find the visual X coordinates for this logical range on the line(s). */
+                        
+                        /* Layout iter is needed to map index to line Y/X */
+                        PangoLayoutIter *liter = pango_layout_get_iter(layout);
+                        do {
+                            PangoLayoutLine *line = pango_layout_iter_get_line_readonly(liter);
+                            int l_start = line->start_index;
+                            int l_end = l_start + line->length;
+                            
+                            /* Line intersection with our colored match range */
+                            int li_start = MAX(i_start, l_start);
+                            int li_end = MIN(i_end, l_end);
+                            
+                            if (li_start < li_end) {
+                                int baseline = pango_layout_iter_get_baseline(liter);
+                                double y_base = (double)baseline / PANGO_SCALE;
+                                /* Pixel-snap the underline vertical position */
+                                double underline_y = floor(y_base + 3.0 + 0.5);
+                                
+                                int *ranges = NULL;
+                                int n_ranges = 0;
+                                pango_layout_line_get_x_ranges(line, li_start, li_end, &ranges, &n_ranges);
+                                
+                                if (ranges) {
+                                    for (int r = 0; r < n_ranges; r++) {
+                                        double x0 = (double)ranges[2*r] / PANGO_SCALE;
+                                        double x1 = (double)ranges[2*r+1] / PANGO_SCALE;
+                                        
+                                        /* Pixel-snap the horizontal range to avoid sub-pixel rendering blur */
+                                        x0 = floor(x0 + 0.5);
+                                        x1 = floor(x1 + 0.5);
+                                        double w = x1 - x0;
+                                        
+                                        if (w >= 1.0) {
+                                            gtk_snapshot_append_color(snapshot, &range_color,
+                                                &GRAPHENE_RECT_INIT((float)x0, (float)underline_y, (float)w, 1.0f));
+                                        }
+                                    }
+                                    g_free(ranges);
+                                }
+                            }
+                        } while (pango_layout_iter_next_line(liter));
+                        pango_layout_iter_free(liter);
+                    }
+                }
+            } while (pango_attr_iterator_next(attr_iter));
+            
+            pango_attr_iterator_destroy(attr_iter);
+            g_array_free(filter_highlight_ranges, TRUE);
+        }
         
         /* 3. Draw Cursors for all cursors */
         /* User requested 0.4px specifically (verified "sharp" on their display). 
