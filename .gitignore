@@ -6,3 +6,6 @@ vite
 
 svite
 .github
+tests
+*.log
+.github
