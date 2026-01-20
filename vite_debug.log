@@ -1,9 +1,0 @@
-[DEBUG] activate start
-[DEBUG] setup_window calling
-[DEBUG] setup_window done
-[DEBUG] editor_widget_init start 0x1d1f5db0
-[DEBUG] snapshot start 0x1d1f5db0 doc=0x1d404060
-[DEBUG] snapshot line 0 -> phys 0
-[DEBUG] snapshot line 0 text obtained, len=0
-[DEBUG] snapshot line 0 highlighting start ctx=0x1d4ce060
-[DEBUG] snapshot line 0 highlighting done
