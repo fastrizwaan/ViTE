@@ -590,15 +590,15 @@ is_alt_word_char_at(Document *doc, size_t offset)
 size_t
 get_visual_line_count(EditorWidget *self) {
     if (!self->doc) return 0;
-    if (self->filtered_lines) return self->filtered_lines->len;
+    if (self->filtered_lines) return compact_matches_count(self->filtered_lines);
     return document_get_line_count(self->doc);
 }
 
 size_t
 get_physical_line_index(EditorWidget *self, size_t visual_line_idx) {
     if (self->filtered_lines) {
-        if (visual_line_idx < self->filtered_lines->len) {
-            return g_array_index(self->filtered_lines, size_t, visual_line_idx);
+        if (visual_line_idx < compact_matches_count(self->filtered_lines) && self->filtered_lines->data) {
+            return self->filtered_lines->data[visual_line_idx];
         }
         return (size_t)-1;
     }

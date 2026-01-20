@@ -124,8 +124,10 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
             state.line_height = self->line_height;
             
             if (self->filtered_lines) {
-                for (guint i = 0; i < self->filtered_lines->len; i++) {
-                    size_t phys_idx = g_array_index(self->filtered_lines, size_t, i);
+                size_t count = compact_matches_count(self->filtered_lines);
+                for (guint i = 0; i < count; i++) {
+                    size_t phys_idx = self->filtered_lines->data ? self->filtered_lines->data[i] : (size_t)-1;
+                    if (phys_idx == (size_t)-1) continue;
                     size_t line_len = document_get_line_length(self->doc, phys_idx);
                     calculate_line_height_cb(line_len, &state);
                 }

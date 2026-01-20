@@ -97,12 +97,13 @@ static gboolean filter_async_step(gpointer user_data) {
         gboolean case_sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->case_check));
         
         if (res->count > 0) {
+            /* Transfer ownership of matches to editor */
             editor_widget_set_filtered_lines(self->editor, 
-                                           res->lines, 
-                                           res->count,
+                                           res->matches, 
                                            pattern, regex, case_sensitive);
+            res->matches = NULL; 
         } else {
-            editor_widget_set_filtered_lines(self->editor, NULL, 0, NULL, FALSE, FALSE);
+            editor_widget_set_filtered_lines(self->editor, NULL, NULL, FALSE, FALSE);
         }
         
         update_results_label(self);
@@ -133,7 +134,7 @@ static gboolean apply_filter(ViteFilterBar *self) {
     Document *doc = editor_widget_get_document(self->editor);
     if (!doc) {
         self->filter_active = FALSE;
-        editor_widget_set_filtered_lines(self->editor, NULL, 0, NULL, FALSE, FALSE);
+        editor_widget_set_filtered_lines(self->editor, NULL, NULL, FALSE, FALSE);
         update_results_label(self);
         return G_SOURCE_REMOVE;
     }
@@ -142,7 +143,7 @@ static gboolean apply_filter(ViteFilterBar *self) {
     if (!pattern || !*pattern) {
         /* Empty pattern means show all lines */
         self->filter_active = FALSE;
-        editor_widget_set_filtered_lines(self->editor, NULL, 0, NULL, FALSE, FALSE);
+        editor_widget_set_filtered_lines(self->editor, NULL, NULL, FALSE, FALSE);
         gtk_widget_set_visible(self->results_label, FALSE);
         return G_SOURCE_REMOVE;
     }
@@ -284,7 +285,7 @@ void vite_filter_bar_close(ViteFilterBar *bar) {
         filter_result_free(bar->current_filter_result);
         bar->current_filter_result = NULL;
     }
-    editor_widget_set_filtered_lines(bar->editor, NULL, 0, NULL, FALSE, FALSE);
+    editor_widget_set_filtered_lines(bar->editor, NULL, NULL, FALSE, FALSE);
     
     gtk_widget_grab_focus(GTK_WIDGET(bar->editor));
 }
@@ -309,7 +310,7 @@ void vite_filter_bar_clear_filter(ViteFilterBar *bar) {
         filter_result_free(bar->current_filter_result);
         bar->current_filter_result = NULL;
     }
-    editor_widget_set_filtered_lines(bar->editor, NULL, 0, NULL, FALSE, FALSE);
+    editor_widget_set_filtered_lines(bar->editor, NULL, NULL, FALSE, FALSE);
     gtk_widget_set_visible(bar->results_label, FALSE);
 }
 

@@ -199,7 +199,7 @@ editor_widget_dispose(GObject *object)
         self->search_matches = NULL;
     }
     if (self->filtered_lines) {
-        g_array_unref(self->filtered_lines);
+        compact_matches_free(self->filtered_lines);
         self->filtered_lines = NULL;
     }
     

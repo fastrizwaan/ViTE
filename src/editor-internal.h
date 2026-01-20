@@ -124,8 +124,10 @@ struct _EditorWidget {
     GArray *search_matches; /* Array of SearchMatch */
     int current_match_idx;
 
+#include "compact-matches.h"
+
     /* Filter State */
-    GArray *filtered_lines; /* Array of size_t physical line indices */
+    CompactMatches *filtered_lines; /* MMap storage of physical line indices */
     char *filter_pattern;
     GRegex *filter_regex_pattern;
     gboolean filter_case_sensitive;

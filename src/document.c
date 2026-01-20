@@ -2190,7 +2190,7 @@ document_set_progress_callback(Document *doc, DocumentProgressCallback callback,
 /* Filter Implementation */
 void filter_result_free(FilterResult *res) {
     if (!res) return;
-    if (res->lines) g_free(res->lines);
+    if (res->matches) compact_matches_free(res->matches);
     g_free(res);
 }
 
@@ -2219,7 +2219,8 @@ FilterResult *document_filter_lines(Document *doc, const char *pattern, gboolean
     }
 
     size_t total_lines = document_get_line_count(doc);
-    GArray *matches = g_array_sized_new(FALSE, FALSE, sizeof(size_t), total_lines / 10);
+    /* Use 0 match length for line indices */
+    CompactMatches *matches_storage = compact_matches_new(0);
 
     char *lower_pattern = NULL;
     if (!regex && !case_sensitive) {
@@ -2248,7 +2249,7 @@ FilterResult *document_filter_lines(Document *doc, const char *pattern, gboolean
         }
         
         if (match) {
-            g_array_append_val(matches, i);
+            compact_matches_append(matches_storage, i);
         }
         
         g_free(line);
@@ -2258,8 +2259,8 @@ FilterResult *document_filter_lines(Document *doc, const char *pattern, gboolean
     if (lower_pattern) g_free(lower_pattern);
 
     FilterResult *res = g_new0(FilterResult, 1);
-    res->count = matches->len;
-    res->lines = (size_t*)g_array_free(matches, FALSE);
+    res->matches = matches_storage;
+    res->count = compact_matches_count(res->matches);
     
     return res;
 }
@@ -2278,6 +2279,8 @@ struct _DocumentFilterTask {
     
     size_t total_lines;
     size_t processed_lines;
+    
+    CompactMatches *matches_storage;
 };
 
 DocumentFilterTask *document_filter_async_start(Document *doc, const char *pattern, gboolean regex, gboolean case_sensitive) {
@@ -2306,7 +2309,8 @@ DocumentFilterTask *document_filter_async_start(Document *doc, const char *patte
     }
     
     task->total_lines = document_get_line_count(doc);
-    task->matches = g_array_sized_new(FALSE, FALSE, sizeof(size_t), 1024);
+    /* Initialize with match_length=0 since we store line indices */
+    task->matches_storage = compact_matches_new(0);
     
     /* Initialize Iterator */
     piece_table_iter_init(doc->pt, &task->iter);
@@ -2358,7 +2362,7 @@ gboolean document_filter_async_step(DocumentFilterTask *task, gint64 time_budget
         }
         
         if (match) {
-            g_array_append_val(task->matches, task->processed_lines);
+            compact_matches_append(task->matches_storage, task->processed_lines);
         }
         
         task->processed_lines++;
@@ -2371,9 +2375,9 @@ FilterResult *document_filter_async_finish(DocumentFilterTask *task) {
     if (!task) return NULL;
     
     FilterResult *res = g_new0(FilterResult, 1);
-    res->count = task->matches->len;
-    res->lines = (size_t*)g_array_free(task->matches, FALSE);
-    task->matches = NULL; /* Prevent double free in cancel */
+    res->matches = task->matches_storage;
+    res->count = compact_matches_count(res->matches);
+    task->matches_storage = NULL; /* Transfer ownership */
     
     /* Cleanup task */
     document_filter_async_cancel(task);
@@ -2387,7 +2391,7 @@ void document_filter_async_cancel(DocumentFilterTask *task) {
     if (task->pattern) g_free(task->pattern);
     if (task->lower_pattern) g_free(task->lower_pattern);
     if (task->regex_pattern) g_regex_unref(task->regex_pattern);
-    if (task->matches) g_array_free(task->matches, TRUE);
+    if (task->matches_storage) compact_matches_free(task->matches_storage);
     
     g_free(task);
 }

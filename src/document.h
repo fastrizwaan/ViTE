@@ -128,9 +128,11 @@ gboolean document_search_task_get_whole_word(SearchTask *task);
 char *normalize_replacement_string(const char *replacement, gboolean for_regex);
 
 
+#include "compact-matches.h"
+
 /* Filter API */
 typedef struct {
-    size_t *lines; /* Array of physical line indices */
+    CompactMatches *matches; /* MMap storage of physical line indices */
     size_t count;
 } FilterResult;
 

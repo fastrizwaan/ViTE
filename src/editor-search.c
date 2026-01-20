@@ -188,20 +188,19 @@ editor_widget_get_current_match_index(EditorWidget *self)
     return self->current_match_idx;
 }
 
+
 void
-editor_widget_set_filtered_lines(EditorWidget *self, size_t *lines, size_t count, const char *pattern, gboolean regex, gboolean case_sensitive)
+editor_widget_set_filtered_lines(EditorWidget *self, CompactMatches *matches, const char *pattern, gboolean regex, gboolean case_sensitive)
 {
     g_return_if_fail(EDITOR_IS_WIDGET(self));
     
     if (self->filtered_lines) {
-        g_array_unref(self->filtered_lines);
+        compact_matches_free(self->filtered_lines);
         self->filtered_lines = NULL;
     }
     
-    if (lines && count > 0) {
-        self->filtered_lines = g_array_sized_new(FALSE, FALSE, sizeof(size_t), count);
-        g_array_append_vals(self->filtered_lines, lines, count);
-    }
+    /* Take ownership of matches */
+    self->filtered_lines = matches;
     
     /* Store filter settings */
     g_free(self->filter_pattern);
