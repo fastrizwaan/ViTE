@@ -2614,7 +2614,7 @@ setup_window(GtkWindow *window)
     
     /* Initialize Stack */
     win->stack = GTK_STACK(gtk_stack_new());
-    gtk_stack_set_transition_type(win->stack, GTK_STACK_TRANSITION_TYPE_CROSSFADE);
+    gtk_stack_set_transition_type(win->stack, GTK_STACK_TRANSITION_TYPE_NONE);
     gtk_widget_set_vexpand(GTK_WIDGET(win->stack), TRUE);
     
     gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->stack));
