@@ -226,6 +226,147 @@ word_prev(EditorWidget *self, size_t offset)
     return offset;
 }
 
+static gboolean
+is_whitespace_char_at(EditorWidget *self, size_t offset)
+{
+    if (!self->doc) return FALSE;
+    size_t total = document_get_length(self->doc);
+    if (offset >= total) return FALSE;
+
+    char *text = document_get_text_range(self->doc, offset, 4);
+    if (!text) return FALSE;
+
+    gunichar ch = g_utf8_get_char_validated(text, -1);
+    g_free(text);
+
+    return g_unichar_isspace(ch);
+}
+
+typedef enum {
+    SEGMENT_WORD,
+    SEGMENT_WHITESPACE,
+    SEGMENT_OTHER
+} SegmentType;
+
+static SegmentType
+get_segment_type_at(EditorWidget *self, size_t offset)
+{
+    if (is_word_char_at(self, offset)) return SEGMENT_WORD;
+    if (is_whitespace_char_at(self, offset)) return SEGMENT_WHITESPACE;
+    return SEGMENT_OTHER;
+}
+
+void
+editor_widget_find_segment_boundary(EditorWidget *self, size_t offset, size_t *start, size_t *end)
+{
+    size_t total = document_get_length(self->doc);
+    if (offset >= total) {
+        /* Edge case: end of file */
+        if (total > 0) offset = total - 1; /* Check char before EOF */
+        else {
+             *start = 0; *end = 0; return; 
+        }
+    }
+
+    SegmentType type = get_segment_type_at(self, offset);
+    size_t s = offset;
+    size_t e = offset;
+
+    /* Expand backwards */
+    while (s > 0) {
+        size_t prev = utf8_prev_grapheme(self, s);
+        if (get_segment_type_at(self, prev) != type) break;
+        s = prev;
+    }
+    /* Expand forwards */
+    while (e < total) {
+        if (get_segment_type_at(self, e) != type) break;
+        e = utf8_next_grapheme(self, e);
+    }
+    
+    *start = s;
+    *end = e;
+}
+
+/* Ctrl+Right: End of Word -> End of Next Word */
+size_t
+word_end_next(EditorWidget *self, size_t offset)
+{
+    size_t total = document_get_length(self->doc);
+    if (offset >= total) return total;
+
+    /* Logic:
+       1. Check type of current char.
+       2. If WHITESPACE: Consume all WS, then consume the NEXT non-WS segment (Word or Other).
+       3. If WORD or OTHER: Consume only THIS segment.
+    */
+    
+    SegmentType type = get_segment_type_at(self, offset);
+    size_t curr = offset;
+    
+    if (type == SEGMENT_WHITESPACE) {
+        /* Consume Whitespace */
+        while (curr < total && get_segment_type_at(self, curr) == SEGMENT_WHITESPACE) {
+            curr = utf8_next_grapheme(self, curr);
+        }
+        
+        /* Now we are at start of next segment (Word or Other). Consume it too. */
+        if (curr < total) {
+            SegmentType next_type = get_segment_type_at(self, curr);
+            /* Safety: Don't consume if it turned into another whitespace (unlikely) or EOF */
+            while (curr < total && get_segment_type_at(self, curr) == next_type) {
+                curr = utf8_next_grapheme(self, curr);
+            }
+        }
+    } else {
+        /* Consume homogeneous segment (Word or Other) */
+        while (curr < total && get_segment_type_at(self, curr) == type) {
+            curr = utf8_next_grapheme(self, curr);
+        }
+    }
+    
+    return curr;
+}
+
+/* Ctrl+Left: Start of Segment (If WS, merge Prev Segment) */
+size_t
+word_start_or_prev_end_left(EditorWidget *self, size_t offset)
+{
+    if (offset == 0) return 0;
+    
+    size_t prev_off = utf8_prev_grapheme(self, offset);
+    SegmentType type = get_segment_type_at(self, prev_off);
+    
+    size_t curr = offset;
+    
+    if (type == SEGMENT_WHITESPACE) {
+        /* Consume Whitespace */
+        while (curr > 0) {
+             size_t p = utf8_prev_grapheme(self, curr);
+             if (get_segment_type_at(self, p) != SEGMENT_WHITESPACE) break;
+             curr = p;
+        }
+        /* Now consume previous segment (Word or Other) */
+        if (curr > 0) {
+             prev_off = utf8_prev_grapheme(self, curr);
+             SegmentType prev_type = get_segment_type_at(self, prev_off);
+             while (curr > 0) {
+                 size_t p = utf8_prev_grapheme(self, curr);
+                 if (get_segment_type_at(self, p) != prev_type) break;
+                 curr = p;
+             }
+        }
+    } else {
+        /* Consume homogeneous segment (Word or Other) */
+        while (curr > 0) {
+            size_t p = utf8_prev_grapheme(self, curr);
+            if (get_segment_type_at(self, p) != type) break;
+            curr = p;
+        }
+    }
+    return curr;
+}
+
 void
 editor_widget_ensure_metrics(EditorWidget *self)
 {
@@ -375,6 +516,7 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r')) {
         len--;
     }
+    text[len] = '\0';
 
     /* Use high-level helper to ensure context is correct */
     PangoLayout *layout = gtk_widget_create_pango_layout(GTK_WIDGET(self), text);

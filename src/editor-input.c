@@ -679,7 +679,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                  for (guint c = 0; c < self->cursors->len; c++) {
                      EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
                      if (state & GDK_CONTROL_MASK) {
-                         cur->cursor_offset = word_prev(self, cur->cursor_offset);
+                         cur->cursor_offset = word_start_or_prev_end_left(self, cur->cursor_offset);
                      } else {
                          cur->cursor_offset = utf8_prev_grapheme(self, cur->cursor_offset);
                      }
@@ -698,7 +698,7 @@ on_key_pressed(GtkEventControllerKey *controller,
                  for (guint c = 0; c < self->cursors->len; c++) {
                      EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
                      if (state & GDK_CONTROL_MASK) {
-                         cur->cursor_offset = word_next(self, cur->cursor_offset);
+                         cur->cursor_offset = word_end_next(self, cur->cursor_offset);
                      } else {
                          cur->cursor_offset = utf8_next_grapheme(self, cur->cursor_offset);
                      }

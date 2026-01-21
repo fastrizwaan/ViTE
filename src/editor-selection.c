@@ -159,8 +159,8 @@ update_selection_extension(EditorWidget *self, size_t off)
         size_t current_end = off;
         
         if (self->multi_click_mode == 2) {
-            /* Word mode */
-            editor_widget_find_word_boundary(self, off, &current_start, &current_end);
+            /* Word mode with smart segment snapping */
+            editor_widget_find_segment_boundary(self, off, &current_start, &current_end);
         } else if (self->multi_click_mode == 3) {
             /* Line mode */
             find_line_at_offset(self->doc, off, &current_start, &current_end);
@@ -173,7 +173,13 @@ update_selection_extension(EditorWidget *self, size_t off)
         } else if (off > self->multi_click_end) {
             /* Dragging after the original selection - extend forwards */
             self->selection_anchor = self->multi_click_start;
-            self->cursor_offset = current_end;
+            /* If we are just at the start of the new segment, don't snap to its end yet. 
+               This allows granular stops between segments (e.g. End of Space vs Start of Next Word). */
+            if (off == current_start) {
+                self->cursor_offset = current_start;
+            } else {
+                self->cursor_offset = current_end;
+            }
         } else {
             /* Still within original selection - keep original bounds */
             self->selection_anchor = self->multi_click_start;
