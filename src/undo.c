@@ -1,15 +1,42 @@
 #include "undo.h"
+#include "piece-table.h"
+#include "resource-check.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+/* Threshold for keeping undo data in RAM vs disk.
+ * Lower than before (50MB vs 100MB) for better memory efficiency.
+ * Also dynamically checked against available RAM. */
+#define UNDO_RAM_THRESHOLD (50 * 1024 * 1024)
 
 UndoStack *
 undo_stack_new(void)
 {
-    UndoStack *s = malloc(sizeof(UndoStack));
+    UndoStack *s = g_malloc0(sizeof(UndoStack));
     s->undo_stack = NULL;
     s->redo_stack = NULL;
     s->in_undo_redo = FALSE;
     s->current_group = NULL;
+    
+    /* Create log file for text storage */
+    s->log_file_path = g_strdup("/tmp/vite_undo_log_XXXXXX");
+    int fd = mkstemp(s->log_file_path);
+    if (fd != -1) {
+        s->log_file = fdopen(fd, "w+");
+        if (!s->log_file) {
+            close(fd);
+            g_warning("Failed to open undo log file");
+        }
+    } else {
+        g_warning("Failed to create undo log file: %s", strerror(errno));
+    }
+    
     return s;
 }
 
@@ -19,7 +46,20 @@ static void
 free_command(gpointer data)
 {
     UndoCommand *cmd = data;
-    g_free(cmd->text);
+    
+    if (cmd->cached_text) {
+        g_free(cmd->cached_text);
+    }
+    
+    if (cmd->undo_path) {
+        unlink(cmd->undo_path);
+        g_free(cmd->undo_path);
+    }
+    if (cmd->redo_path) {
+        unlink(cmd->redo_path);
+        g_free(cmd->redo_path);
+    }
+    
     if (cmd->group_commands) {
         g_list_free_full(cmd->group_commands, free_command);
     }
@@ -34,10 +74,19 @@ undo_stack_free(UndoStack *stack)
     if (stack->current_group) {
         free_command(stack->current_group);
     }
-    free(stack);
+    
+    if (stack->log_file) {
+        fclose(stack->log_file);
+    }
+    if (stack->log_file_path) {
+        unlink(stack->log_file_path);
+        g_free(stack->log_file_path);
+    }
+    
+    g_free(stack);
 }
 
-static void
+void
 undo_stack_push_command(UndoStack *stack, UndoCommand *cmd)
 {
     if (stack->current_group) {
@@ -55,12 +104,114 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
 {
     if (stack->in_undo_redo) return;
     
+    /* Validate size is not corrupted/overflowed */
+    if (!resource_size_valid(len)) {
+        g_warning("undo_stack_push_insert: Invalid size %zu (likely overflow)", len);
+        return;
+    }
+    
     UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_INSERT;
     cmd->start = start;
     cmd->length = len;
-    cmd->text = g_strndup(text, len);
     
+    /* Use disk for large content or when RAM is low */
+    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || !resource_can_allocate(len + 1);
+    
+    if (!use_disk) {
+        cmd->cached_text = g_try_malloc(len + 1);
+        if (cmd->cached_text) {
+            memcpy(cmd->cached_text, text, len);
+            cmd->cached_text[len] = '\0';
+        } else {
+            use_disk = TRUE; /* Fallback to disk if malloc failed */
+        }
+    }
+    
+    if (use_disk && stack->log_file && len > 0) {
+        fseeko(stack->log_file, 0, SEEK_END);
+        cmd->log_offset = ftello(stack->log_file);
+        fwrite(text, 1, len, stack->log_file);
+        fflush(stack->log_file);
+        g_debug("undo_stack_push_insert: Wrote %zu bytes to disk log", len);
+    }
+    
+    undo_stack_push_command(stack, cmd);
+}
+
+void
+undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t len)
+{
+    if (stack->in_undo_redo) return;
+    
+    /* Validate size */
+    if (!resource_size_valid(len)) {
+        g_warning("undo_stack_push_insert_from_fd: Invalid size %zu", len);
+        return;
+    }
+
+    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    cmd->type = UNDO_OP_INSERT;
+    cmd->start = start;
+    cmd->length = len;
+
+    /* Use disk for large content or when RAM is low */
+    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || !resource_can_allocate(len + 1);
+    
+    if (!use_disk) {
+        /* RAM PATH - try to allocate */
+        cmd->cached_text = g_try_malloc(len + 1);
+        
+        if (cmd->cached_text) {
+            /* Read from FD */
+            off_t original_pos = lseek(fd, 0, SEEK_CUR);
+            lseek(fd, 0, SEEK_SET);
+            
+            char *ptr = cmd->cached_text;
+            size_t total_read = 0;
+            while (total_read < len) {
+                 size_t to_read = len - total_read;
+                 if (to_read > 1024*1024) to_read = 1024*1024;
+                 ssize_t r = read(fd, ptr + total_read, to_read);
+                 if (r <= 0) break;
+                 total_read += r;
+            }
+            cmd->cached_text[len] = '\0';
+            lseek(fd, original_pos, SEEK_SET);
+        } else {
+            use_disk = TRUE; /* Fallback to disk if malloc failed */
+        }
+    }
+    
+    if (use_disk) {
+        /* DISK PATH */
+        if (stack->log_file && len > 0 && fd >= 0) {
+            fseeko(stack->log_file, 0, SEEK_END);
+            cmd->log_offset = ftello(stack->log_file);
+            
+            /* Copy data loop */
+            char buf[65536]; /* 64KB buffer */
+            size_t written = 0;
+            off_t original_pos = lseek(fd, 0, SEEK_CUR);
+            lseek(fd, 0, SEEK_SET);
+    
+            while (written < len) {
+                size_t to_read = len - written;
+                if (to_read > sizeof(buf)) to_read = sizeof(buf);
+                
+                ssize_t r = read(fd, buf, to_read);
+                if (r <= 0) break;
+                
+                fwrite(buf, 1, r, stack->log_file);
+                written += r;
+            }
+            fflush(stack->log_file);
+            
+            lseek(fd, original_pos, SEEK_SET); /* Restore FD pos */
+            g_debug("undo_stack_push_insert_from_fd: Wrote %zu bytes to disk log", written);
+        }
+    }
+
     undo_stack_push_command(stack, cmd);
 }
 
@@ -69,11 +220,50 @@ undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text,
 {
     if (stack->in_undo_redo) return;
     
+    /* Validate size */
+    if (!resource_size_valid(len)) {
+        g_warning("undo_stack_push_delete: Invalid size %zu (likely overflow)", len);
+        return;
+    }
+    
     UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_DELETE;
     cmd->start = start;
     cmd->length = len;
-    cmd->text = g_strndup(deleted_text, len);
+    
+    /* Use disk for large content or when RAM is low */
+    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || !resource_can_allocate(len + 1);
+    
+    if (!use_disk) {
+        cmd->cached_text = g_try_malloc(len + 1);
+        if (cmd->cached_text) {
+            memcpy(cmd->cached_text, deleted_text, len);
+            cmd->cached_text[len] = '\0';
+        } else {
+            use_disk = TRUE; /* Fallback to disk if malloc failed */
+        }
+    }
+    
+    if (use_disk && stack->log_file && len > 0) {
+        fseeko(stack->log_file, 0, SEEK_END);
+        cmd->log_offset = ftello(stack->log_file);
+        fwrite(deleted_text, 1, len, stack->log_file);
+        fflush(stack->log_file);
+        g_debug("undo_stack_push_delete: Wrote %zu bytes to disk log", len);
+    }
+    
+    undo_stack_push_command(stack, cmd);
+}
+
+void
+undo_stack_push_restore_path(UndoStack *stack, const char *undo_path, const char *redo_path)
+{
+    if (stack->in_undo_redo) return;
+
+    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    cmd->type = UNDO_OP_RESTORE_FROM_PATH;
+    cmd->undo_path = g_strdup(undo_path);
+    cmd->redo_path = g_strdup(redo_path);
     
     undo_stack_push_command(stack, cmd);
 }
@@ -124,24 +314,63 @@ undo_stack_set_group_selection_after(UndoStack *stack, size_t start, size_t end)
 }
 
 static void
-execute_command(UndoCommand *cmd, PieceTable *pt, gboolean undo)
+execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean undo)
 {
     if (cmd->type == UNDO_OP_INSERT) {
-        if (undo) piece_table_delete(pt, cmd->start, cmd->length);
-        else piece_table_insert(pt, cmd->start, cmd->text, cmd->length);
+        if (undo) {
+             /* Delete what was inserted */
+             piece_table_delete(pt, cmd->start, cmd->length);
+        } else {
+             /* Redo Insert */
+             if (cmd->cached_text) {
+                 piece_table_insert(pt, cmd->start, cmd->cached_text, cmd->length);
+             } else if (stack->log_file && cmd->length > 0) {
+                 /* Disk Fallback: Zero-RAM insert from log file */
+                 fflush(stack->log_file);
+                 int fd = fileno(stack->log_file);
+                 piece_table_insert_from_fd_range(pt, cmd->start, fd, cmd->log_offset, cmd->length);
+             }
+        }
     } else if (cmd->type == UNDO_OP_DELETE) {
-        if (undo) piece_table_insert(pt, cmd->start, cmd->text, cmd->length);
-        else piece_table_delete(pt, cmd->start, cmd->length);
+        if (undo) {
+             /* Undo Delete -> Insert back */
+             if (cmd->cached_text) {
+                 piece_table_insert(pt, cmd->start, cmd->cached_text, cmd->length);
+             } else if (stack->log_file && cmd->length > 0) {
+                 /* Disk Fallback: Zero-RAM insert from log file */
+                 fflush(stack->log_file);
+                 int fd = fileno(stack->log_file);
+                 piece_table_insert_from_fd_range(pt, cmd->start, fd, cmd->log_offset, cmd->length);
+             }
+        } else {
+             /* Redo Delete */
+             piece_table_delete(pt, cmd->start, cmd->length);
+        }
+    } else if (cmd->type == UNDO_OP_RESTORE_FROM_PATH) {
+        /* Swap backing file */
+        const char *path = undo ? cmd->undo_path : cmd->redo_path;
+        
+        if (path) {
+            int fd = open(path, O_RDONLY);
+            if (fd >= 0) {
+                struct stat st;
+                fstat(fd, &st);
+                size_t sz = st.st_size;
+                piece_table_replace_from_fd(pt, fd, sz, 0);
+                close(fd);
+            }
+        }
+        
     } else if (cmd->type == UNDO_OP_GROUP) {
         if (undo) {
             /* Undo in reverse order */
             for (GList *l = g_list_last(cmd->group_commands); l; l = l->prev) {
-                execute_command(l->data, pt, TRUE);
+                execute_command(stack, l->data, pt, TRUE);
             }
         } else {
             /* Redo in forward order */
             for (GList *l = cmd->group_commands; l; l = l->next) {
-                execute_command(l->data, pt, FALSE);
+                execute_command(stack, l->data, pt, FALSE);
             }
         }
     }
@@ -154,19 +383,11 @@ get_command_info(UndoCommand *cmd, gboolean undo, UndoInfo *info)
     info->success = TRUE;
     
     if (cmd->type == UNDO_OP_GROUP) {
-        /* For Group Undo: The "primary" location is usually the INITIAL action of the group
-           (e.g., Drag Source). However, we iterate in reverse. 
-           We likely want the location of the *last* command executed during undo 
-           (which is the *first* command in the group's list). */
         if (undo) {
              /* Last executed is the first in list */
              GList *first = cmd->group_commands;
              if (first) get_command_info((UndoCommand*)first->data, undo, info);
         } else {
-             /* Redo: Last executed is last in list? 
-                Actually for Drag Drop Redo: Delete A, Insert B. 
-                We probably want to end up at B. 
-                Last executed is Insert B. */
              GList *last = g_list_last(cmd->group_commands);
              if (last) get_command_info((UndoCommand*)last->data, undo, info);
         }
@@ -189,13 +410,11 @@ get_command_info(UndoCommand *cmd, gboolean undo, UndoInfo *info)
     info->length = cmd->length;
     
     if (cmd->type == UNDO_OP_INSERT) {
-        /* Undo Insert -> Delete. is_insert = FALSE. */
-        /* Redo Insert -> Insert. is_insert = TRUE. */
         info->is_insert = !undo;
     } else if (cmd->type == UNDO_OP_DELETE) {
-        /* Undo Delete -> Insert. is_insert = TRUE. */
-        /* Redo Delete -> Delete. is_insert = FALSE. */
         info->is_insert = undo;
+    } else if (cmd->type == UNDO_OP_RESTORE_FROM_PATH) {
+        info->is_insert = FALSE; /* Full reload */
     }
 }
 
@@ -210,7 +429,7 @@ undo_stack_undo(UndoStack *stack, PieceTable *pt)
     stack->redo_stack = g_list_prepend(stack->redo_stack, cmd);
     
     stack->in_undo_redo = TRUE;
-    execute_command(cmd, pt, TRUE);
+    execute_command(stack, cmd, pt, TRUE);
     stack->in_undo_redo = FALSE;
     
     get_command_info(cmd, TRUE, &info);
@@ -228,7 +447,7 @@ undo_stack_redo(UndoStack *stack, PieceTable *pt)
     stack->undo_stack = g_list_prepend(stack->undo_stack, cmd);
     
     stack->in_undo_redo = TRUE;
-    execute_command(cmd, pt, FALSE);
+    execute_command(stack, cmd, pt, FALSE);
     stack->in_undo_redo = FALSE;
     
     get_command_info(cmd, FALSE, &info);

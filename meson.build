@@ -13,6 +13,7 @@ m_dep = cc.find_library('m', required : false)
 sources = files(
   'src/main.c',
   'src/piece-table.c',
+  'src/resource-check.c',
   'src/document.c',
   'src/undo.c',
   'src/preferences.c',
@@ -24,6 +25,7 @@ sources = files(
   'src/editor-scrolling.c',
   'src/editor-search.c',
   'src/editor-utils.c',
+  'src/vite-clipboard.c',
   'src/editor-clipboard.c',
   'src/editor-widget.c',
   'src/find-replace-bar.c',
@@ -40,23 +42,23 @@ executable('vite',
   dependencies : [gtk_dep, adw_dep, m_dep],
   install : false)
 
-# Reproduction Test
-test_sources = files(
-  'tests/reproduce_crash.c',
-  'src/piece-table.c',
-  'src/document.c',
-  'src/undo.c',
-  'src/preferences.c',
-  'src/syntax.c',
-  'src/editor-widget.c',
-  'src/find-replace-bar.c',
-  'src/tab.c',
-  'src/tab-bar.c',
-  'src/fading-label.c',
-  'src/compact-matches.c'
-)
+# Reproduction Test (disabled - test file doesn't exist)
+# test_sources = files(
+#   'tests/reproduce_crash.c',
+#   'src/piece-table.c',
+#   'src/document.c',
+#   'src/undo.c',
+#   'src/preferences.c',
+#   'src/syntax.c',
+#   'src/editor-widget.c',
+#   'src/find-replace-bar.c',
+#   'src/tab.c',
+#   'src/tab-bar.c',
+#   'src/fading-label.c',
+#   'src/compact-matches.c'
+# )
 
-reproduce_crash_exe = executable('reproduce_crash',
-  test_sources,
-  dependencies : [gtk_dep, adw_dep, m_dep],
-  install : false)
+# reproduce_crash_exe = executable('reproduce_crash',
+#   test_sources,
+#   dependencies : [gtk_dep, adw_dep, m_dep],
+#   install : false)

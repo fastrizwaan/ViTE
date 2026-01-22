@@ -7,6 +7,9 @@
 #include <fcntl.h>
 #include <errno.h>
 
+#include "vite-clipboard.h"
+#include "resource-check.h"
+
 struct _Document {
     PieceTable *pt;
     UndoStack *undo_stack;
@@ -49,10 +52,6 @@ check_modification_state(Document *doc)
     }
 }
 
-/* ... (skipping unchanged functions) ... */
-
-
-
 Document *
 document_new(const char *filename)
 {
@@ -85,6 +84,9 @@ document_new_empty(void)
 void
 document_free(Document *doc)
 {
+    /* Invalidate any clipboard references to this document */
+    vite_clipboard_invalidate_for_document(vite_clipboard_get_default(), doc);
+
     piece_table_free(doc->pt);
     undo_stack_free(doc->undo_stack);
     g_free(doc->file_path);
@@ -145,6 +147,13 @@ document_get_length(Document *doc)
     return piece_table_get_length(doc->pt);
 }
 
+uint64_t
+document_get_version(Document *doc)
+{
+    if (!doc || !doc->pt) return 0;
+    return doc->pt->change_count;
+}
+
 char *
 document_get_text_range(Document *doc, size_t offset, size_t len)
 {
@@ -180,10 +189,127 @@ document_insert(Document *doc, size_t offset, const char *text, size_t len)
 }
 
 void
+document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len)
+{
+    if (len == 0 || fd < 0) return;
+    
+    /* TODO: Proper huge undo support.
+       For now, we push a "placeholder" or skipping undo for the huge content text,
+       BUT we must push the delete op for Undo to work (Delete is cheap).
+       The REDO will be broken unless we store the FD/Path.
+       
+       However, since we are pasting from a temp file that might disappear,
+       redo persistence is tricky.
+       Ideally we copy the temp file to our own undo-cache if we want robust Redo.
+       
+       For this prototype step, we might just skip undo_stack push for the text content
+       but push the "Deletion" reverse op.
+       Actually `undo_stack_push_insert` usually stores the Text to be inserted (Ref for Redo).
+       And implied Reverse Op is Delete.
+       
+       If we pass NULL to push_insert, it might crash.
+    */
+    
+    /* Push to undo stack with huge content support */
+    undo_stack_push_insert_from_fd(doc->undo_stack, offset, fd, len);
+    
+    /* REMOVED premature insert with 0 LF count to avoid double insertion */
+    
+    /* Calculate LF count (streaming read) */
+    size_t lf_count = 0;
+    off_t orig_pos = lseek(fd, 0, SEEK_CUR);
+    lseek(fd, 0, SEEK_SET);
+    
+    char buf[16384];
+    ssize_t r;
+    while ((r = read(fd, buf, sizeof(buf))) > 0) {
+        for (ssize_t i = 0; i < r; i++) {
+            if (buf[i] == '\n') lf_count++;
+        }
+    }
+    lseek(fd, orig_pos, SEEK_SET);
+    
+    /* Update Piece Table */
+    /* Re-call insert with accurate count */
+    piece_table_insert_from_fd(doc->pt, offset, fd, len, lf_count);
+    
+    check_modification_state(doc);
+    
+    if (doc->callbacks_suspended) return;
+
+    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        cb->func(doc, cb->user_data);
+    }
+}
+
+static void
+document_delete_streaming(Document *doc, size_t offset, size_t len)
+{
+    UndoStack *stack = doc->undo_stack;
+    
+    if (!stack->in_undo_redo && stack->log_file) {
+        /* Write content directly to undo log in chunks */
+        UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+        cmd->type = UNDO_OP_DELETE;
+        cmd->start = offset;
+        cmd->length = len;
+        
+        fseeko(stack->log_file, 0, SEEK_END);
+        cmd->log_offset = ftello(stack->log_file);
+        
+        /* Stream in 1MB chunks */
+        size_t chunk_size = 1024 * 1024;
+        size_t written = 0;
+        
+        while (written < len) {
+            size_t to_write = MIN(chunk_size, len - written);
+            char *chunk = piece_table_get_text_range(doc->pt, offset + written, to_write);
+            if (chunk) {
+                fwrite(chunk, 1, to_write, stack->log_file);
+                g_free(chunk);
+            }
+            written += to_write;
+        }
+        fflush(stack->log_file);
+        
+        undo_stack_push_command(stack, cmd);
+    }
+    
+    piece_table_delete(doc->pt, offset, len);
+    check_modification_state(doc);
+    
+    if (doc->callbacks_suspended) return;
+    
+    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        cb->func(doc, cb->user_data);
+    }
+}
+
+void
 document_delete(Document *doc, size_t offset, size_t len)
 {
     if (len == 0) return;
+    
+    /* 50MB threshold for streaming */
+    #define UNDO_RAM_THRESHOLD (50 * 1024 * 1024)
+    
+    /* For huge deletions, use disk-backed undo directly */
+    if (len >= UNDO_RAM_THRESHOLD || !resource_can_allocate(len + 1)) {
+        document_delete_streaming(doc, offset, len);
+        return;
+    }
+
     char *deleted = piece_table_get_text_range(doc->pt, offset, len);
+    
+    if (!deleted) {
+        /* If allocation failed, fallback to streaming */
+        g_warning("document_delete: Failed to allocate erase buffer, falling back to streaming");
+        document_delete_streaming(doc, offset, len);
+        return;
+    }
+    
     undo_stack_push_delete(doc->undo_stack, offset, deleted, len);
     g_free(deleted);
     
@@ -2410,3 +2536,256 @@ size_t document_filter_task_get_match_count(DocumentFilterTask *task) {
     if (!task || !task->matches_storage) return 0;
     return compact_matches_count(task->matches_storage);
 }
+/* --- Streaming Change Case Implementation --- */
+
+struct _StreamingChangeCaseTask {
+    Document *doc;
+    size_t start;
+    size_t end;
+    CharTransformFunc simple_func;
+    int type; /* 0=simple, 1=title, 2=invert */
+    ReplaceProgressCallback callback;
+    void *user_data;
+    
+    FILE *output_file;
+    char *output_path;
+    
+    PieceTableIter iter;
+    size_t current_offset;
+    size_t total_size;
+    
+    size_t output_size;
+    size_t lf_count;
+    
+    guint idle_id;
+    
+    /* State for title case */
+    gboolean new_word;
+};
+
+static void
+streaming_change_case_task_free(StreamingChangeCaseTask *task)
+{
+    if (!task) return;
+    
+    if (task->output_file) fclose(task->output_file);
+    if (task->output_path) {
+        unlink(task->output_path);
+        g_free(task->output_path);
+    }
+    
+    g_free(task);
+}
+
+
+
+/* Helper to snapshot current document state to a temp file */
+static char *
+document_snapshot_to_file(Document *doc)
+{
+    char *path = g_strdup("/tmp/vite_snapshot_XXXXXX");
+    int fd = mkstemp(path);
+    if (fd == -1) {
+        g_free(path);
+        return NULL;
+    }
+    
+    FILE *f = fdopen(fd, "w");
+    if (!f) {
+        close(fd);
+        unlink(path);
+        g_free(path);
+        return NULL;
+    }
+    
+    /* Stream entire document to file */
+    PieceTableIter iter;
+    piece_table_iter_init(doc->pt, &iter);
+    
+    size_t chunk_len;
+    const char *chunk;
+    
+    while ((chunk = piece_table_iter_get_chunk(&iter, &chunk_len))) {
+        if (chunk_len > 0) {
+            fwrite(chunk, 1, chunk_len, f);
+        }
+        piece_table_iter_advance(&iter, chunk_len);
+    }
+    
+    fclose(f);
+    return path; /* Caller owns path and file */
+}
+
+static gboolean
+streaming_change_case_idle_step(gpointer user_data)
+{
+    StreamingChangeCaseTask *task = user_data;
+    Document *doc = task->doc;
+    
+    /* Process a chunk of time (e.g. 2-5ms) or fixed bytes */
+    /* Let's process 64KB per step to yield to UI */
+    const size_t BYTES_PER_STEP = 65536;
+    size_t processed_this_step = 0;
+    
+    char buf[4096];
+    
+    while (processed_this_step < BYTES_PER_STEP) {
+        size_t available = 0;
+        const char *ptr = piece_table_iter_get_chunk(&task->iter, &available);
+        
+        if (!ptr || available == 0) break;
+        
+        size_t chunk_len = MIN(available, sizeof(buf));
+        
+        /* Copy to mutable buffer */
+        memcpy(buf, ptr, chunk_len);
+        
+        piece_table_iter_advance(&task->iter, chunk_len);
+        
+        /* Apply transform if in range */
+        size_t chunk_start = task->current_offset;
+        size_t chunk_end = task->current_offset + chunk_len;
+        
+        /* Check intersection with selection [start, end) */
+        size_t intersect_start = MAX(chunk_start, task->start);
+        size_t intersect_end = MIN(chunk_end, task->end);
+        
+        if (intersect_start < intersect_end) {
+            /* There is overlap */
+            size_t buf_off_start = intersect_start - chunk_start;
+            size_t len = intersect_end - intersect_start;
+            
+            for (size_t i = 0; i < len; i++) {
+                char c = buf[buf_off_start + i];
+                char r = c;
+                
+                if (task->type == 1) { /* Title Case */
+                    if (g_ascii_isalpha(c)) {
+                        r = task->new_word ? g_ascii_toupper(c) : g_ascii_tolower(c);
+                        task->new_word = FALSE;
+                    } else if (g_ascii_isspace(c) || g_ascii_ispunct(c)) {
+                        task->new_word = TRUE;
+                    }
+                } else if (task->type == 2) { /* Invert Case */
+                    if (g_ascii_isupper(c)) r = g_ascii_tolower(c);
+                    else if (g_ascii_islower(c)) r = g_ascii_toupper(c);
+                } else if (task->simple_func) {
+                    r = task->simple_func(c);
+                }
+                
+                buf[buf_off_start + i] = r;
+            }
+        } else {
+             /* Outside selection */
+             if (task->type == 1) {
+                 if (chunk_end <= task->start) {
+                     for (size_t i = 0; i < chunk_len; i++) {
+                         char c = buf[i];
+                         if (g_ascii_isalpha(c)) task->new_word = FALSE;
+                         else if (g_ascii_isspace(c) || g_ascii_ispunct(c)) task->new_word = TRUE;
+                     }
+                 }
+             }
+        }
+        
+        /* Write to output */
+        fwrite(buf, 1, chunk_len, task->output_file);
+        task->output_size += chunk_len;
+        task->lf_count += count_lf(buf, chunk_len);
+        
+        task->current_offset += chunk_len;
+        processed_this_step += chunk_len;
+        
+        /* Report progress */
+        if (task->callback && (task->current_offset % 65536 == 0)) {
+            task->callback(task->current_offset, task->total_size, FALSE, task->user_data);
+        }
+    }
+    
+    if (task->current_offset >= task->total_size) {
+        /* Done */
+        fflush(task->output_file);
+        int fd = fileno(task->output_file);
+        fsync(fd);
+        
+        /* Snapshot BEFORE replacing logic */
+        char *undo_path = document_snapshot_to_file(doc);
+        char *redo_path = g_strdup(task->output_path);
+
+        /* Push Undo CMD */
+        if (undo_path) {
+             undo_stack_push_restore_path(doc->undo_stack, undo_path, redo_path);
+             g_free(undo_path);
+             g_free(redo_path);
+        }
+        
+        /* Replace document content */
+        piece_table_replace_from_fd(doc->pt, fd, task->output_size, task->lf_count);
+        
+        if (task->callback) {
+            task->callback(task->total_size, task->total_size, TRUE, task->user_data);
+        }
+        
+        task->idle_id = 0;
+        streaming_change_case_task_free(task);
+        return G_SOURCE_REMOVE;
+    }
+    
+    return G_SOURCE_CONTINUE;
+}
+
+StreamingChangeCaseTask *
+document_change_case_streaming_start(Document *doc, 
+                                     size_t start, size_t end,
+                                     CharTransformFunc simple_func,
+                                     int type,
+                                     ReplaceProgressCallback callback, void *user_data)
+{
+    if (!doc) return NULL;
+    
+    StreamingChangeCaseTask *task = g_new0(StreamingChangeCaseTask, 1);
+    task->doc = doc;
+    task->start = MIN(start, end);
+    task->end = MAX(start, end);
+    task->simple_func = simple_func;
+    task->type = type;
+    task->callback = callback;
+    task->user_data = user_data;
+    task->new_word = TRUE; /* Default start state */
+    
+    /* Create temp file */
+    task->output_path = g_strdup("/tmp/vite_case_XXXXXX");
+    int fd = mkstemp(task->output_path);
+    if (fd < 0) {
+        g_warning("Failed to create temp file: %s", strerror(errno));
+        streaming_change_case_task_free(task);
+        return NULL;
+    }
+    
+    task->output_file = fdopen(fd, "w+");
+    if (!task->output_file) {
+        close(fd);
+        streaming_change_case_task_free(task);
+        return NULL;
+    }
+    
+    piece_table_iter_init(doc->pt, &task->iter);
+
+    task->total_size = document_get_length(doc);
+    task->current_offset = 0;
+    
+    task->idle_id = g_idle_add(streaming_change_case_idle_step, task);
+    return task;
+}
+
+void
+document_change_case_streaming_cancel(StreamingChangeCaseTask *task)
+{
+    if (!task) return;
+    if (task->idle_id) {
+        g_source_remove(task->idle_id);
+        task->idle_id = 0;
+    }
+    streaming_change_case_task_free(task);
+}
+

@@ -1,4 +1,5 @@
 #include "piece-table.h"
+#include "resource-check.h"
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -6,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
 
 /* -- LargeBuffer: 64-bit sized buffer for multi-GB content -- */
 
@@ -18,6 +20,8 @@ large_buffer_new(void)
     buf->len = 0;
     return buf;
 }
+
+static void insert_piece_at_offset(PieceTable *pt, size_t offset, Piece new_piece);
 
 static void
 large_buffer_free(LargeBuffer *buf)
@@ -33,15 +37,37 @@ large_buffer_append(LargeBuffer *buf, const char *data, size_t len)
 {
     if (len == 0) return;
     
+    /* Overflow check: ensure addition won't wrap around */
+    if (len > SIZE_MAX - buf->len) {
+        g_warning("large_buffer_append: Size overflow detected (len=%zu, current=%zu)", len, buf->len);
+        return;
+    }
+    
     size_t new_len = buf->len + len;
+    
+    /* Sanity check for obviously corrupt/overflowed values */
+    if (!resource_size_valid(new_len)) {
+        g_warning("large_buffer_append: Suspiciously large size %zu (likely overflow)", new_len);
+        return;
+    }
+    
     if (new_len > buf->capacity) {
-        /* Grow by doubling, or by the needed amount, whichever is larger */
+        /* Check for overflow in capacity calculation */
         size_t new_cap = buf->capacity * 2;
+        if (new_cap < buf->capacity) { /* Overflow in doubling */
+            new_cap = new_len + 1024;
+        }
         if (new_cap < new_len) new_cap = new_len + 1024;
+        
+        /* Resource check before allocation */
+        if (!resource_can_allocate(new_cap)) {
+            g_warning("large_buffer_append: Cannot safely allocate %zu bytes (insufficient RAM or too large)", new_cap);
+            return;
+        }
         
         char *new_data = realloc(buf->data, new_cap);
         if (!new_data) {
-            g_error("large_buffer_append: Failed to allocate %zu bytes", new_cap);
+            g_warning("large_buffer_append: realloc failed for %zu bytes: %s", new_cap, strerror(errno));
             return;
         }
         buf->data = new_data;
@@ -52,7 +78,23 @@ large_buffer_append(LargeBuffer *buf, const char *data, size_t len)
     buf->len = new_len;
 }
 
+
 /* -- Utils -- */
+
+static const char *
+get_piece_data(PieceTable *pt, const Piece *p)
+{
+    if (p->source == SOURCE_ORIGINAL) return pt->orig_data;
+    if (p->source == SOURCE_ADD) return (const char *)pt->add_buffer->data;
+    if (p->source >= SOURCE_EXTERNAL_START) {
+        guint idx = p->source - SOURCE_EXTERNAL_START;
+        if (pt->external_sources && idx < pt->external_sources->len) {
+            PieceTableSource *src = g_ptr_array_index(pt->external_sources, idx);
+            return src->mmap_base;
+        }
+    }
+    return "";
+}
 
 static void
 detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_bom, size_t *bom_len)
@@ -162,7 +204,7 @@ count_newlines(const char *data, size_t len)
 static size_t
 piece_newlines(PieceTable *pt, Piece *p)
 {
-    const char *data = (p->source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = get_piece_data(pt, p);
     return count_newlines(data + p->start, p->length);
 }
 
@@ -350,9 +392,9 @@ find_node_for_line(PieceTable *pt, size_t line_index, size_t *out_node_start_lf,
         if (target_lf < seen_lf + left_lf) {
              curr = curr->left;
         } else {
-             size_t node_lf = piece_newlines(pt, &curr->piece);
+             size_t node_lf = curr->piece.cached_lf;
              if (target_lf < seen_lf + left_lf + node_lf) {
-                 const char *data = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+                 const char *data = get_piece_data(pt, &curr->piece);
                  size_t internal_idx = target_lf - (seen_lf + left_lf);
                  size_t found = 0;
                  const char *ptr = data + curr->piece.start;
@@ -477,6 +519,7 @@ piece_table_new(const char *filename)
     }
 
     pt->add_buffer = large_buffer_new();
+    pt->external_sources = g_ptr_array_new_full(0, g_free); /* We need custom free func, see piece_table_free */
     
     if (pt->orig_size > 0) {
         /* Chunking strategy */
@@ -522,6 +565,21 @@ piece_table_free(PieceTable *pt)
         g_free(pt->orig_data);
     }
     large_buffer_free(pt->add_buffer);
+    
+    /* Clean up external sources */
+    if (pt->external_sources) {
+        for (guint i = 0; i < pt->external_sources->len; i++) {
+            PieceTableSource *src = g_ptr_array_index(pt->external_sources, i);
+            if (src->mmap_base && src->size > 0) {
+                munmap(src->mmap_base, src->size);
+            }
+            if (src->fd >= 0) close(src->fd);
+            g_free(src->path);
+            g_free(src);
+        }
+        g_ptr_array_free(pt->external_sources, TRUE);
+    }
+    
     free(pt);
 }
 
@@ -550,133 +608,39 @@ void
 piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
 {
     if (len == 0) return;
-    pt->change_count++;
+    /* pt->change_count++ handled in insert_piece_at_offset or we do it here?
+       insert_piece_at_offset increments it.
+       But if we chunk, we increment 1100 times? 
+       That's fine, change_count is just a revision ID.
+    */
     
     /* Add text to buffer */
     size_t start_in_add = pt->add_buffer->len;
     large_buffer_append(pt->add_buffer, text, len);
     
-    size_t lf_count = count_newlines(text, len);
-    Piece new_piece = { SOURCE_ADD, start_in_add, len, lf_count };
-    PieceNode *new_node = node_new(new_piece);
-
-    if (!pt->root) {
-        pt->root = new_node;
-        update_node(pt, pt->root);
+    /* Chunking strategy */
+    size_t chunk_size = 64 * 1024;
+    size_t current_off = 0;
+    
+    /* If len is small, just do one insert */
+    if (len <= chunk_size) {
+        size_t lf_count = count_newlines(text, len);
+        Piece new_piece = { SOURCE_ADD, start_in_add, len, lf_count };
+        insert_piece_at_offset(pt, offset, new_piece);
         return;
     }
 
-    /* Split logic */
-    size_t node_start_off;
-    PieceNode *at_node = find_node_at_offset(pt, offset, &node_start_off);
-    
-    if (!at_node) {
-        /* Append at end */
-        /* Splay rightmost? Use simpler append */
-        /* Assuming offset == length, find max */
-     PieceNode *curr = pt->root;
-     while (curr->right) curr = curr->right;
-     
-     curr->right = new_node;
-        new_node->parent = curr;
-        splay(pt, new_node); /* Updates everything */
-        return;
-    }
-
-    /* We split 'at_node' at 'offset - node_start_off' */
-    size_t split_point = offset - node_start_off;
-    
-    /* If split point is 0, we insert before */
-    if (split_point == 0) {
-        /* at_node is root due to splay. new_node becomes root.
-           left of new_node is at_node->left.
-           right of new_node is at_node.
-           at_node->left = NULL.
-        */
-        new_node->left = at_node->left;
-        if (new_node->left) new_node->left->parent = new_node;
+    while (current_off < len) {
+        size_t chunk = chunk_size;
+        if (current_off + chunk > len) chunk = len - current_off;
         
-        new_node->right = at_node;
-        at_node->parent = new_node;
-        at_node->left = NULL;
+        size_t chunk_lf = count_newlines(text + current_off, chunk);
+        Piece p = { SOURCE_ADD, start_in_add + current_off, chunk, chunk_lf };
         
-        pt->root = new_node;
-        update_node(pt, at_node);
-        update_node(pt, new_node);
-        return;
-    } else if (split_point == at_node->piece.length) {
-         /* Insert after. new_node becomes root. 
-            new_node->right = at_node->right.
-            new_node->left = at_node.
-            at_node->right = NULL.
-         */
-         
-         /* But wait, generic insertion into BST/Splay:
-            Insert and Splay. 
-         */
-         /* Simplified: Just modifying the tree structure directly */
-         new_node->right = at_node->right;
-         if (new_node->right) new_node->right->parent = new_node;
-         
-         new_node->left = at_node;
-         at_node->parent = new_node;
-         at_node->right = NULL;
-         
-         pt->root = new_node;
-         update_node(pt, at_node);
-         update_node(pt, new_node);
-         return;
+        insert_piece_at_offset(pt, offset + current_off, p);
+        
+        current_off += chunk;
     }
-    
-    /* Middle split: at_node becomes Left part. new_node is middle. Right part is new node. */
-    /* Create wrapper for right part */
-    Piece right_piece = at_node->piece;
-    right_piece.start += split_point;
-    right_piece.length -= split_point;
-    /* Calculate and cache LF for right piece */
-    const char *src_data = (right_piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
-    right_piece.cached_lf = count_newlines(src_data + right_piece.start, right_piece.length);
-    PieceNode *right_node = node_new(right_piece);
-
-    /* Update left piece (at_node) - use subtraction optimization */
-    size_t old_total_lf = at_node->piece.cached_lf;
-    at_node->piece.length = split_point;
-    at_node->piece.cached_lf = old_total_lf - right_piece.cached_lf;
-    at_node->size_subtree = split_point; // Temporary before full update
-
-    /* Stitch:
-       Left (at_node) < New < Right
-       at_node is root.
-       We can make New root. 
-       New->left = at_node.
-       New->right = Right.
-       Right->right = at_node->right.
-       What about at_node->left? Stays with at_node.
-       at_node->right = NULL. 
-    */
-    
-    /* Correct splay insert logic:
-       Root is at_node.
-       Detach at_node->right.
-    */
-    PieceNode *old_right = at_node->right;
-    
-    /* Construct New Root: */
-    pt->root = new_node;
-    
-    new_node->left = at_node;
-    at_node->parent = new_node;
-    at_node->right = NULL; /* Cut */
-    
-    new_node->right = right_node;
-    right_node->parent = new_node;
-    
-    right_node->right = old_right;
-    if (old_right) old_right->parent = right_node;
-    
-    update_node(pt, at_node);
-    update_node(pt, right_node);
-    update_node(pt, new_node);
 }
 
 /* Optimized bulk replacement: replaces entire content with new content.
@@ -1015,7 +979,19 @@ char *
 piece_table_get_text_range(PieceTable *pt, size_t offset, size_t len)
 {
     if (len == 0) return g_strdup("");
-    GString *res = g_string_new("");
+    
+    if (!resource_size_valid(len)) {
+        g_warning("piece_table_get_text_range: Invalid size %zu", len);
+        return NULL;
+    }
+    
+    if (!resource_can_allocate(len + 1)) {
+        g_warning("piece_table_get_text_range: Cannot allocate %zu bytes", len + 1);
+        return NULL;
+    }
+
+    GString *res = g_string_sized_new(len);
+    if (!res) return NULL;
     
     /* Naive: iterate */
     /* Or split/find nodes. iterating chars is slow. 
@@ -1034,7 +1010,7 @@ piece_table_get_text_range(PieceTable *pt, size_t offset, size_t len)
         size_t avail = n->piece.length - off_in_node;
         size_t chunk = (avail < remaining) ? avail : remaining;
         
-        const char *data = (n->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+        const char *data = get_piece_data(pt, &n->piece);
         g_string_append_len(res, data + n->piece.start + off_in_node, chunk);
         
         cur += chunk;
@@ -1058,7 +1034,7 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
     }
     
     size_t relative_lf = line_index - start_lf;
-    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = get_piece_data(pt, &node->piece);
     data += node->piece.start;
     size_t len = node->piece.length;
     
@@ -1106,7 +1082,7 @@ piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len)
         
         if (!curr) break; 
         
-        const char *cdata = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+        const char *cdata = get_piece_data(pt, &curr->piece);
         cdata += curr->piece.start;
         size_t clen = curr->piece.length;
         const char *cend = cdata + clen;
@@ -1143,7 +1119,7 @@ piece_table_get_line_into(PieceTable *pt, size_t line_index, char *buf, size_t b
     size_t current_len = 0;
     
     size_t relative_lf = line_index - start_lf;
-    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = get_piece_data(pt, &node->piece);
     data += node->piece.start;
     size_t len = node->piece.length;
     
@@ -1200,7 +1176,7 @@ piece_table_get_line_into(PieceTable *pt, size_t line_index, char *buf, size_t b
         
         if (!curr) break; 
         
-        const char *cdata = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+        const char *cdata = get_piece_data(pt, &curr->piece);
         cdata += curr->piece.start;
         size_t clen = curr->piece.length;
         const char *cend = cdata + clen;
@@ -1237,7 +1213,7 @@ piece_table_get_line_length(PieceTable *pt, size_t line_index)
     if (!node) return 0;
     
     size_t relative_lf = line_index - start_lf;
-    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = get_piece_data(pt, &node->piece);
     data += node->piece.start;
     size_t len = node->piece.length;
     
@@ -1282,7 +1258,7 @@ piece_table_get_line_length(PieceTable *pt, size_t line_index)
         
         if (!curr) break;
         
-        const char *cdata = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+        const char *cdata = get_piece_data(pt, &curr->piece);
         cdata += curr->piece.start;
         size_t clen = curr->piece.length;
         const char *cend = cdata + clen;
@@ -1320,7 +1296,7 @@ piece_table_get_line_of_offset(PieceTable *pt, size_t offset)
     
     /* Count newlines in node up to (offset - node_start) */
     size_t local_off = offset - node_start;
-    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = get_piece_data(pt, &node->piece);
     size_t local_lf = count_newlines(data + node->piece.start, local_off);
     
     return lines_before + local_lf;
@@ -1348,7 +1324,7 @@ piece_table_get_offset_of_line(PieceTable *pt, size_t line_index)
     size_t relative_lf = line_index - start_lf;
     size_t internal_offset = 0;
     
-    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = get_piece_data(pt, &node->piece);
     /* Use direct pointer math */
     
     size_t len = node->piece.length;
@@ -1381,7 +1357,7 @@ traverse_node_for_lines(PieceTable *pt, PieceNode *node, void (*func)(size_t len
     traverse_node_for_lines(pt, node->left, func, user_data, acc_len);
     
     /* Process current piece */
-    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = get_piece_data(pt, &node->piece);
     const char *ptr = data + node->piece.start;
     const char *end = ptr + node->piece.length;
     
@@ -1472,7 +1448,7 @@ piece_table_iter_get_next_line(PieceTableIter *iter, char *buf, size_t buf_len)
     size_t copied = 0;
     
     while (iter->current_node) {
-        const char *data = (iter->current_node->piece.source == SOURCE_ORIGINAL) ? iter->pt->orig_data : (char*)iter->pt->add_buffer->data;
+        const char *data = get_piece_data(iter->pt, &iter->current_node->piece);
         data += iter->current_node->piece.start;
         size_t len = iter->current_node->piece.length;
         
@@ -1531,7 +1507,7 @@ piece_table_iter_get_next_line_string(PieceTableIter *iter, GString *buf)
     size_t copied = 0;
     
     while (iter->current_node) {
-        const char *data = (iter->current_node->piece.source == SOURCE_ORIGINAL) ? iter->pt->orig_data : (char*)iter->pt->add_buffer->data;
+        const char *data = get_piece_data(iter->pt, &iter->current_node->piece);
         data += iter->current_node->piece.start;
         size_t len = iter->current_node->piece.length;
         
@@ -1596,7 +1572,6 @@ piece_table_iter_init_at_line(PieceTable *pt, PieceTableIter *iter, size_t line_
             curr = curr->left;
         } else {
             accumulated_lines += left_lf;
-            
             size_t node_lf = curr->piece.cached_lf;
             
             if (line_index <= accumulated_lines + node_lf) {
@@ -1606,7 +1581,7 @@ piece_table_iter_init_at_line(PieceTable *pt, PieceTableIter *iter, size_t line_
                 
                 size_t lines_to_skip = line_index - accumulated_lines;
                 
-                const char *data = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+                const char *data = get_piece_data(pt, &curr->piece);
                 data += curr->piece.start;
                 const char *ptr = data;
                 const char *end = data + curr->piece.length;
@@ -1630,6 +1605,50 @@ piece_table_iter_init_at_line(PieceTable *pt, PieceTableIter *iter, size_t line_
     }
     iter->current_node = NULL;
 }
+
+/* Chunk Iterator API */
+const char *
+piece_table_iter_get_chunk(PieceTableIter *iter, size_t *out_len)
+{
+    if (out_len) *out_len = 0;
+    if (!iter || !iter->current_node) return NULL;
+    
+    /* Loop to skip empty nodes */
+    while (iter->current_node) {
+        size_t len = iter->current_node->piece.length;
+        if (iter->offset_in_node < len) {
+            /* Found data */
+            const char *data = get_piece_data(iter->pt, &iter->current_node->piece);
+            data += iter->current_node->piece.start + iter->offset_in_node;
+            
+            if (out_len) *out_len = len - iter->offset_in_node;
+            return data;
+        }
+        
+        /* Node exhausted, move to next */
+        iter->current_node = node_next_in_order(iter->current_node);
+        iter->offset_in_node = 0;
+    }
+    
+    return NULL;
+}
+
+void
+piece_table_iter_advance(PieceTableIter *iter, size_t len)
+{
+    if (!iter || !iter->current_node) return;
+    
+    iter->offset_in_node += len;
+    
+    /* If we exceeded or matched node length, move to next */
+    while (iter->current_node && iter->offset_in_node >= iter->current_node->piece.length) {
+        size_t excess = iter->offset_in_node - iter->current_node->piece.length;
+        
+        iter->current_node = node_next_in_order(iter->current_node);
+        iter->offset_in_node = excess; /* Should be 0 usually if we consume exactly chunk, 
+                                          but if we advanced arbitrary amount, we carry over */
+    }
+}
 char *
 piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_len, size_t max_len)
 {
@@ -1642,7 +1661,7 @@ piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_le
     }
     
     size_t relative_lf = line_index - start_lf;
-    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = get_piece_data(pt, &node->piece);
     data += node->piece.start;
     size_t len = node->piece.length;
     
@@ -1696,7 +1715,7 @@ piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_le
             if (!curr) break;
         }
         
-        data = (curr->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+        data = get_piece_data(pt, &curr->piece);
         data += curr->piece.start;
         len = curr->piece.length;
         ptr = data;
@@ -1973,6 +1992,207 @@ piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error)
     
     load_result_free(lr);
     return TRUE;
+}
+
+
+
+
+static void
+insert_piece_at_offset(PieceTable *pt, size_t offset, Piece new_piece)
+{
+    pt->change_count++;
+    
+    PieceNode *new_node = node_new(new_piece);
+    
+    if (!pt->root) {
+        pt->root = new_node;
+        update_node(pt, pt->root);
+        return;
+    }
+    
+    size_t node_start_off;
+    PieceNode *at_node = find_node_at_offset(pt, offset, &node_start_off);
+    
+    if (!at_node) {
+        PieceNode *curr = pt->root;
+        while (curr->right) curr = curr->right;
+        curr->right = new_node;
+        new_node->parent = curr;
+        splay(pt, new_node);
+        return;
+    }
+    
+    size_t split_point = offset - node_start_off;
+    
+    if (split_point == 0) {
+        new_node->left = at_node->left;
+        if (new_node->left) new_node->left->parent = new_node;
+        new_node->right = at_node;
+        at_node->parent = new_node;
+        at_node->left = NULL; 
+        pt->root = new_node;
+        update_node(pt, at_node);
+        update_node(pt, new_node);
+    } else if (split_point == at_node->piece.length) {
+        new_node->right = at_node->right;
+        if (new_node->right) new_node->right->parent = new_node;
+        new_node->left = at_node;
+        at_node->parent = new_node;
+        at_node->right = NULL;
+        pt->root = new_node;
+        update_node(pt, at_node);
+        update_node(pt, new_node);
+    } else {
+        Piece right_p = at_node->piece;
+        right_p.start += split_point;
+        right_p.length -= split_point;
+        right_p.cached_lf = count_newlines(get_piece_data(pt, &at_node->piece) + right_p.start, right_p.length);
+        
+        at_node->piece.length = split_point;
+        at_node->piece.cached_lf = count_newlines(get_piece_data(pt, &at_node->piece) + at_node->piece.start, split_point);
+        
+        PieceNode *right_node = node_new(right_p);
+        
+        right_node->right = at_node->right;
+        if (right_node->right) right_node->right->parent = right_node;
+        
+        new_node->left = at_node;
+        at_node->parent = new_node;
+        at_node->right = NULL;
+        
+        new_node->right = right_node;
+        right_node->parent = new_node;
+        
+        update_node(pt, at_node);
+        update_node(pt, right_node);
+        update_node(pt, new_node);
+        pt->root = new_node;
+    }
+}
+
+/* Insert range from FD (mmap) */
+void piece_table_insert_from_fd_range(PieceTable *pt, size_t offset, int fd, size_t file_offset, size_t len)
+{
+    if (!pt || len == 0 || fd < 0) return;
+    
+    struct stat sb;
+    if (fstat(fd, &sb) < 0) return;
+    
+    if (sb.st_size < (off_t)(file_offset + len)) {
+        if ((off_t)file_offset < sb.st_size)
+             len = sb.st_size - file_offset;
+        else
+             return;
+    }
+    
+    long page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) page_size = 4096;
+    
+    off_t aligned_offset = (file_offset / page_size) * page_size;
+    size_t alignment_diff = file_offset - aligned_offset;
+    size_t map_len = len + alignment_diff;
+    
+    void *map = mmap(NULL, map_len, PROT_READ, MAP_PRIVATE, fd, aligned_offset);
+    if (map == MAP_FAILED) {
+        g_warning("piece_table_insert_from_fd_range: mmap failed");
+        return;
+    }
+    
+    int new_fd = dup(fd);
+    
+    PieceTableSource *src = g_new0(PieceTableSource, 1);
+    src->fd = new_fd;
+    src->mmap_base = map;
+    src->size = map_len;
+    
+    if (!pt->external_sources) {
+        pt->external_sources = g_ptr_array_new_with_free_func(g_free);
+        /* dummy check to satisfy my paranoia */
+        if (pt->external_sources) g_ptr_array_unref(pt->external_sources); 
+        pt->external_sources = g_ptr_array_new();
+    }
+    g_ptr_array_add(pt->external_sources, src);
+    guint source_id = SOURCE_EXTERNAL_START + (pt->external_sources->len - 1);
+    
+    /* Chunk Insertion to avoid O(N) line traversal on huge pieces */
+    size_t chunk_size = 64 * 1024; /* 64KB pieces */
+    size_t current_processed = 0;
+    size_t current_doc_off = offset;
+    
+    while (current_processed < len) {
+        size_t chunk = chunk_size;
+        if (current_processed + chunk > len) chunk = len - current_processed;
+        
+        /* Calculate pointer to this chunk's data */
+        /* map points to aligned_offset. 
+           Data starts at aligned_offset + alignment_diff.
+           Current chunk starts at aligned_offset + alignment_diff + current_processed.
+           
+           Offset relative to map (mmap_base): alignment_diff + current_processed
+        */
+        size_t offset_in_map = alignment_diff + current_processed;
+        char *chunk_ptr = (char *)map + offset_in_map;
+
+        size_t chunk_lf = count_newlines(chunk_ptr, chunk);
+        
+        /* Piece offset is relative to the source's mmap_base */
+        Piece p = { (PieceSource)source_id, offset_in_map, chunk, chunk_lf };
+        
+        insert_piece_at_offset(pt, current_doc_off, p);
+        
+        current_processed += chunk;
+        current_doc_off += chunk;
+    }
+}
+
+void
+piece_table_insert_from_fd(PieceTable *pt, size_t offset, int fd, size_t len, size_t lf_count)
+{
+    if (len == 0 || fd < 0) return;
+    
+    struct stat sb;
+    fstat(fd, &sb);
+    if (sb.st_size < (off_t)len) len = sb.st_size;
+    
+    char *map = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (map == MAP_FAILED) {
+        g_warning("piece_table_insert_from_fd: mmap failed");
+        return;
+    }
+    
+    int new_fd = dup(fd);
+    
+    PieceTableSource *src = g_new0(PieceTableSource, 1);
+    src->fd = new_fd;
+    src->mmap_base = map;
+    src->size = len;
+    
+    if (!pt->external_sources) {
+        pt->external_sources = g_ptr_array_new_with_free_func(g_free);
+        /* dummy check to satisfy my paranoia */
+        if (pt->external_sources) g_ptr_array_unref(pt->external_sources); 
+        pt->external_sources = g_ptr_array_new();
+    }
+    g_ptr_array_add(pt->external_sources, src);
+    guint source_id = SOURCE_EXTERNAL_START + (pt->external_sources->len - 1);
+    
+    /* Chunk Insertion to avoid O(N) line traversal on huge pieces */
+    size_t chunk_size = 64 * 1024; /* 64KB pieces */
+    size_t current_file_off = 0;
+    size_t current_doc_off = offset;
+    
+    while (current_file_off < len) {
+        size_t chunk = chunk_size;
+        if (current_file_off + chunk > len) chunk = len - current_file_off;
+        
+        size_t chunk_lf = count_newlines(map + current_file_off, chunk);
+        Piece p = { (PieceSource)source_id, current_file_off, chunk, chunk_lf };
+        
+        insert_piece_at_offset(pt, current_doc_off, p);
+        
+        current_file_off += chunk;
+        current_doc_off += chunk;
+    }
 }
 
 void
