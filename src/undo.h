@@ -16,9 +16,10 @@ typedef struct _UndoCommand {
     size_t start;
     
     /* For INSERT/DELETE: Text is stored in the UndoStack's log file */
+    /* For INSERT/DELETE: Text is stored in the UndoStack's log file */
     uint64_t log_offset;
     size_t length;
-    char *cached_text; /* RAM cache for smaller edits (avoids disk I/O) */
+    /* cached_text removed - using mmap exclusively */
     
     /* For RESTORE_FROM_PATH: Paths to snapshot files */
     char *undo_path;
@@ -47,6 +48,10 @@ typedef struct {
     
     FILE *log_file; /* Append-only log for text data */
     char *log_file_path;
+    
+    /* Memory mapping of the log file for zero-RAM access */
+    char *map_base;
+    size_t map_size;
 } UndoStack;
 
 UndoStack *undo_stack_new(void);

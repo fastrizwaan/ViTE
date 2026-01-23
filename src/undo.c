@@ -9,6 +9,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/mman.h>
+
+/* Zero-RAM strategy: No RAM threshold, always disk. */
 
 /* Threshold for keeping undo data in RAM vs disk.
  * Lower than before (50MB vs 100MB) for better memory efficiency.
@@ -47,10 +50,8 @@ free_command(gpointer data)
 {
     UndoCommand *cmd = data;
     
-    if (cmd->cached_text) {
-        g_free(cmd->cached_text);
-    }
-    
+    /* cached_text is removed from struct */
+ 
     if (cmd->undo_path) {
         unlink(cmd->undo_path);
         g_free(cmd->undo_path);
@@ -83,6 +84,10 @@ undo_stack_free(UndoStack *stack)
         g_free(stack->log_file_path);
     }
     
+    if (stack->map_base && stack->map_size > 0) {
+        munmap(stack->map_base, stack->map_size);
+    }
+    
     g_free(stack);
 }
 
@@ -104,9 +109,8 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
 {
     if (stack->in_undo_redo) return;
     
-    /* Validate size is not corrupted/overflowed */
+    /* Validate size */
     if (!resource_size_valid(len)) {
-        g_warning("undo_stack_push_insert: Invalid size %zu (likely overflow)", len);
         return;
     }
     
@@ -115,31 +119,24 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
     cmd->start = start;
     cmd->length = len;
     
-    /* Use disk for large content or when RAM is low, OR if current group is too huge */
-    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || 
-                        (!resource_can_allocate(len + 1)) ||
-                        ((stack->current_group) && (stack->current_group_size + len > UNDO_RAM_THRESHOLD));
-    
     if (stack->current_group) {
         stack->current_group_size += len;
     }
     
-    if (!use_disk) {
-        cmd->cached_text = g_try_malloc(len + 1);
-        if (cmd->cached_text) {
-            memcpy(cmd->cached_text, text, len);
-            cmd->cached_text[len] = '\0';
-        } else {
-            use_disk = TRUE; /* Fallback to disk if malloc failed */
-        }
-    }
-    
-    if (use_disk && stack->log_file && len > 0) {
+    /* Zero-RAM Strategy: Always write to disk log */
+    if (stack->log_file && len > 0) {
         fseeko(stack->log_file, 0, SEEK_END);
         cmd->log_offset = ftello(stack->log_file);
-        fwrite(text, 1, len, stack->log_file);
-        fflush(stack->log_file);
-        g_debug("undo_stack_push_insert: Wrote %zu bytes to disk log", len);
+        
+        /* Check disk space before writing */
+        if (!resource_can_write_disk("/tmp", len)) {
+             g_warning("undo_stack_push_insert: Disk full, dropping undo data");
+             /* Truncate len? Or just fail? For now, we commit what we can or empty command */
+             cmd->length = 0;
+        } else {
+             fwrite(text, 1, len, stack->log_file);
+             fflush(stack->log_file);
+        }
     }
     
     undo_stack_push_command(stack, cmd);
@@ -161,46 +158,16 @@ undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t le
     cmd->start = start;
     cmd->length = len;
 
-    /* Use disk for large content or when RAM is low, OR if group is huge */
-    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || 
-                        (!resource_can_allocate(len + 1)) ||
-                        ((stack->current_group) && (stack->current_group_size + len > UNDO_RAM_THRESHOLD));
-    
-    if (stack->current_group) {
-        stack->current_group_size += len;
-    }
-    
-    if (!use_disk) {
-        /* RAM PATH - try to allocate */
-        cmd->cached_text = g_try_malloc(len + 1);
+    /* Zero-RAM Strategy: Always write to disk log */
+    if (stack->log_file && len > 0 && fd >= 0) {
+        fseeko(stack->log_file, 0, SEEK_END);
+        cmd->log_offset = ftello(stack->log_file);
         
-        if (cmd->cached_text) {
-            /* Read from FD */
-            off_t original_pos = lseek(fd, 0, SEEK_CUR);
-            lseek(fd, 0, SEEK_SET);
-            
-            char *ptr = cmd->cached_text;
-            size_t total_read = 0;
-            while (total_read < len) {
-                 size_t to_read = len - total_read;
-                 if (to_read > 1024*1024) to_read = 1024*1024;
-                 ssize_t r = read(fd, ptr + total_read, to_read);
-                 if (r <= 0) break;
-                 total_read += r;
-            }
-            cmd->cached_text[len] = '\0';
-            lseek(fd, original_pos, SEEK_SET);
+        /* Check disk space */
+        if (!resource_can_write_disk("/tmp", len)) {
+             g_warning("undo_stack_push_insert_from_fd: Disk full");
+             cmd->length = 0;
         } else {
-            use_disk = TRUE; /* Fallback to disk if malloc failed */
-        }
-    }
-    
-    if (use_disk) {
-        /* DISK PATH */
-        if (stack->log_file && len > 0 && fd >= 0) {
-            fseeko(stack->log_file, 0, SEEK_END);
-            cmd->log_offset = ftello(stack->log_file);
-            
             /* Copy data loop */
             char buf[65536]; /* 64KB buffer */
             size_t written = 0;
@@ -218,9 +185,7 @@ undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t le
                 written += r;
             }
             fflush(stack->log_file);
-            
             lseek(fd, original_pos, SEEK_SET); /* Restore FD pos */
-            g_debug("undo_stack_push_insert_from_fd: Wrote %zu bytes to disk log", written);
         }
     }
 
@@ -232,42 +197,27 @@ undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text,
 {
     if (stack->in_undo_redo) return;
     
-    /* Validate size */
-    if (!resource_size_valid(len)) {
-        g_warning("undo_stack_push_delete: Invalid size %zu (likely overflow)", len);
-        return;
-    }
-    
     UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_DELETE;
     cmd->start = start;
     cmd->length = len;
     
-    /* Use disk for large content or when RAM is low, OR if group is huge */
-    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || 
-                        (!resource_can_allocate(len + 1)) ||
-                        ((stack->current_group) && (stack->current_group_size + len > UNDO_RAM_THRESHOLD));
-
     if (stack->current_group) {
         stack->current_group_size += len;
     }
     
-    if (!use_disk) {
-        cmd->cached_text = g_try_malloc(len + 1);
-        if (cmd->cached_text) {
-            memcpy(cmd->cached_text, deleted_text, len);
-            cmd->cached_text[len] = '\0';
-        } else {
-            use_disk = TRUE; /* Fallback to disk if malloc failed */
-        }
-    }
-    
-    if (use_disk && stack->log_file && len > 0) {
+    /* Always write to disk */
+    if (stack->log_file && len > 0) {
         fseeko(stack->log_file, 0, SEEK_END);
         cmd->log_offset = ftello(stack->log_file);
-        fwrite(deleted_text, 1, len, stack->log_file);
-        fflush(stack->log_file);
-        g_debug("undo_stack_push_delete: Wrote %zu bytes to disk log", len);
+        
+        if (!resource_can_write_disk("/tmp", len)) {
+             g_warning("undo_stack_push_delete: Disk full");
+             cmd->length = 0;
+        } else {
+             fwrite(deleted_text, 1, len, stack->log_file);
+             fflush(stack->log_file);
+        }
     }
     
     undo_stack_push_command(stack, cmd);
@@ -332,6 +282,33 @@ undo_stack_set_group_selection_after(UndoStack *stack, size_t start, size_t end)
     }
 }
 
+/* Helper: Ensure memory map covers the whole log file */
+static void
+ensure_mmap(UndoStack *stack)
+{
+    if (!stack->log_file) return;
+    
+    int fd = fileno(stack->log_file);
+    struct stat st;
+    if (fstat(fd, &st) < 0) return;
+    
+    size_t file_size = st.st_size;
+    if (file_size == 0) return;
+    
+    if (stack->map_size < file_size) {
+        if (stack->map_base) {
+            munmap(stack->map_base, stack->map_size);
+        }
+        stack->map_size = file_size;
+        stack->map_base = mmap(NULL, stack->map_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        if (stack->map_base == MAP_FAILED) {
+             g_warning("ensure_mmap: mmap failed: %s", strerror(errno));
+             stack->map_base = NULL;
+             stack->map_size = 0;
+        }
+    }
+}
+
 static void
 execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean undo)
 {
@@ -340,26 +317,22 @@ execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean und
              /* Delete what was inserted */
              piece_table_delete(pt, cmd->start, cmd->length);
         } else {
-             /* Redo Insert */
-             if (cmd->cached_text) {
-                 piece_table_insert(pt, cmd->start, cmd->cached_text, cmd->length);
-             } else if (stack->log_file && cmd->length > 0) {
-                 /* Disk Fallback: Zero-RAM insert from log file */
-                 fflush(stack->log_file);
-                 int fd = fileno(stack->log_file);
-                 piece_table_insert_from_fd_range(pt, cmd->start, fd, cmd->log_offset, cmd->length);
+             /* Redo Insert: Read from mmap log */
+             ensure_mmap(stack);
+             if (stack->map_base && (cmd->log_offset + cmd->length <= stack->map_size)) {
+                 piece_table_insert(pt, cmd->start, stack->map_base + cmd->log_offset, cmd->length);
+             } else {
+                 g_warning("execute_command: Undo log unavailable or truncated");
              }
         }
     } else if (cmd->type == UNDO_OP_DELETE) {
         if (undo) {
-             /* Undo Delete -> Insert back */
-             if (cmd->cached_text) {
-                 piece_table_insert(pt, cmd->start, cmd->cached_text, cmd->length);
-             } else if (stack->log_file && cmd->length > 0) {
-                 /* Disk Fallback: Zero-RAM insert from log file */
-                 fflush(stack->log_file);
-                 int fd = fileno(stack->log_file);
-                 piece_table_insert_from_fd_range(pt, cmd->start, fd, cmd->log_offset, cmd->length);
+             /* Undo Delete -> Insert back from mmap log */
+             ensure_mmap(stack);
+             if (stack->map_base && (cmd->log_offset + cmd->length <= stack->map_size)) {
+                 piece_table_insert(pt, cmd->start, stack->map_base + cmd->log_offset, cmd->length);
+             } else {
+                 g_warning("execute_command: Undo log unavailable or truncated");
              }
         } else {
              /* Redo Delete */
