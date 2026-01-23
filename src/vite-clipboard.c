@@ -517,6 +517,13 @@ vite_clipboard_sync_to_system(ViteClipboard *clip)
     ViteClipboardEntry *entry = clip->current;
     size_t len = entry->end_offset - entry->start_offset;
     
+    /* Guard against invalid sizes (underflow/overflow) */
+    if (!resource_size_valid(len)) {
+        g_warning("vite_clipboard: Invalid content size %zu", len);
+        clip->system_sync_pending = FALSE;
+        return;
+    }
+    
     /* For huge content, use file-backed clipboard scheme */
     if (len > MAX_SYSTEM_CLIPBOARD_SIZE) {
         /* If we are already FILE backed, use that path directly? */
@@ -571,10 +578,12 @@ vite_clipboard_sync_to_system(ViteClipboard *clip)
         if (entry->type == VITE_CLIPBOARD_ENTRY_FILE) {
              int fd = open(entry->persisted_file_path, O_RDONLY);
              if (fd >= 0) {
-                 entry->cached_text = g_malloc(len + 1);
-                 read(fd, entry->cached_text, len);
-                 entry->cached_text[len] = '\0';
-                 entry->cached_len = len;
+                 entry->cached_text = resource_safe_malloc(len + 1);
+                 if (entry->cached_text) {
+                     read(fd, entry->cached_text, len);
+                     entry->cached_text[len] = '\0';
+                     entry->cached_len = len;
+                 }
                  close(fd);
              }
         } else if (entry->type == VITE_CLIPBOARD_ENTRY_REFERENCE && entry->source_doc) {
