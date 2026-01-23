@@ -43,6 +43,7 @@ typedef struct {
     
     gboolean in_undo_redo; /* Flag to prevent recording during undo/redo execution */
     UndoCommand *current_group; /* Active group if any */
+    size_t current_group_size; /* Accumulated size of commands in current group */
     
     FILE *log_file; /* Append-only log for text data */
     char *log_file_path;

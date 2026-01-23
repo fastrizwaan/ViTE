@@ -115,8 +115,14 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
     cmd->start = start;
     cmd->length = len;
     
-    /* Use disk for large content or when RAM is low */
-    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || !resource_can_allocate(len + 1);
+    /* Use disk for large content or when RAM is low, OR if current group is too huge */
+    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || 
+                        (!resource_can_allocate(len + 1)) ||
+                        ((stack->current_group) && (stack->current_group_size + len > UNDO_RAM_THRESHOLD));
+    
+    if (stack->current_group) {
+        stack->current_group_size += len;
+    }
     
     if (!use_disk) {
         cmd->cached_text = g_try_malloc(len + 1);
@@ -155,8 +161,14 @@ undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t le
     cmd->start = start;
     cmd->length = len;
 
-    /* Use disk for large content or when RAM is low */
-    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || !resource_can_allocate(len + 1);
+    /* Use disk for large content or when RAM is low, OR if group is huge */
+    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || 
+                        (!resource_can_allocate(len + 1)) ||
+                        ((stack->current_group) && (stack->current_group_size + len > UNDO_RAM_THRESHOLD));
+    
+    if (stack->current_group) {
+        stack->current_group_size += len;
+    }
     
     if (!use_disk) {
         /* RAM PATH - try to allocate */
@@ -231,8 +243,14 @@ undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text,
     cmd->start = start;
     cmd->length = len;
     
-    /* Use disk for large content or when RAM is low */
-    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || !resource_can_allocate(len + 1);
+    /* Use disk for large content or when RAM is low, OR if group is huge */
+    gboolean use_disk = (len >= UNDO_RAM_THRESHOLD) || 
+                        (!resource_can_allocate(len + 1)) ||
+                        ((stack->current_group) && (stack->current_group_size + len > UNDO_RAM_THRESHOLD));
+
+    if (stack->current_group) {
+        stack->current_group_size += len;
+    }
     
     if (!use_disk) {
         cmd->cached_text = g_try_malloc(len + 1);
@@ -276,6 +294,7 @@ undo_stack_begin_group(UndoStack *stack)
     UndoCommand *group = g_malloc0(sizeof(UndoCommand));
     group->type = UNDO_OP_GROUP;
     stack->current_group = group;
+    stack->current_group_size = 0; /* Reset accumulator */
 }
 
 void
