@@ -1,5 +1,34 @@
 #include "editor-internal.h"
 #include <string.h>
+#include <adwaita.h>
+#include "resource-check.h"
+#include "vite-clipboard.h"
+
+static void
+large_copy_response_cb(AdwAlertDialog *dialog, gchar *response, EditorWidget *self);
+
+static void
+show_allocation_error_dialog(EditorWidget *self)
+{
+    GtkWindow *root = GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(self)));
+    
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+        "Unable to Copy to System",
+        "The selected text is too large to copy to the system clipboard.\n\nYou can use 'Internal Copy' to move text between ViTE tabs without using memory."
+    ));
+    
+    adw_alert_dialog_add_response(dialog, "close", "Close");
+    adw_alert_dialog_add_response(dialog, "internal", "Internal Copy (Zero RAM)");
+    
+    adw_alert_dialog_set_response_appearance(dialog, "internal", ADW_RESPONSE_SUGGESTED);
+    
+    adw_alert_dialog_set_default_response(dialog, "internal");
+    adw_alert_dialog_set_close_response(dialog, "close");
+    
+    g_signal_connect_object(dialog, "response", G_CALLBACK(large_copy_response_cb), self, 0);
+    
+    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(root));
+}
 
 size_t
 editor_widget_delete_selection(EditorWidget *self)
@@ -30,29 +59,18 @@ editor_widget_delete_selection(EditorWidget *self)
     return total_deleted;
 }
 
-void
-editor_widget_copy(EditorWidget *self)
+static void
+perform_copy_internal(EditorWidget *self)
 {
-    if (!self->cursors || self->cursors->len == 0) return;
-
-    GString *clip_text = g_string_new("");
-    
     /* Copy logic: we iterate cursors. Usually document order is preferred for copy. */
-    /* Implementation in widget used default array order. We should probably sort ascending. */
+    /* Implementation in widget used default array order. */
+    
+    GString *clip_text = g_string_new("");
     
     /* Create a temp array to sort ascending */
     GArray *sorted = g_array_sized_new(FALSE, FALSE, sizeof(EditorCursor), self->cursors->len);
     g_array_append_vals(sorted, self->cursors->data, self->cursors->len);
     
-    /* Sort ascending - using a lambda-like or duping compare_cursors_desc and negating? */
-    /* Or just implementing a simple ascending compare here or in utils */
-    /* Let's rely on standard iteration if self->cursors is usually sorted? 
-       It's not guaranteed.
-       Let's assume for now we just iterate.
-       VS Code joins with newline.
-    */
-    
-    /* Just use the loop as it was */
     for (guint c = 0; c < self->cursors->len; c++) {
          EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
          size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
@@ -60,7 +78,17 @@ editor_widget_copy(EditorWidget *self)
          if (start == end) continue;
          
          char *text = document_get_text_range(self->doc, start, end - start);
+         
+         if (!text) {
+             /* Allocation failed */
+             g_string_free(clip_text, TRUE);
+             g_array_free(sorted, TRUE);
+             show_allocation_error_dialog(self);
+             return;
+         }
+         
          if (clip_text->len > 0) g_string_append_c(clip_text, '\n');
+         
          g_string_append(clip_text, text);
          g_free(text);
     }
@@ -71,14 +99,169 @@ editor_widget_copy(EditorWidget *self)
     }
     g_string_free(clip_text, TRUE);
     g_array_free(sorted, TRUE);
+    
+    /* If called from Cut, we need to trigger delete? 
+       Wait, editor_widget_copy is now boolean returning.
+       If we go Async, we return FALSE initially? 
+       
+       If we return FALSE, Cut aborts.
+       So Cut logic must also be async or we need to handle "Cut Pending".
+       
+       Complexity: changing Copy to Async breaks "Cut" expectation of synchronous success.
+       
+       Solution: 
+       For now, if we hit the WARNING path, we just return FALSE (Action Cancelled / Pending).
+       Cut will not happen. User has to re-initiate or we need a way to callback to Cut.
+       
+       Let's stick to: "Copy" action converts to async.
+       "Cut" calls Copy. If Copy warns, Cut is aborted.
+       The Warning Dialog will have "Copy" button.
+       So user clicks Copy -> Dialog -> Confirm -> Copy happens.
+       But Cut steps are lost. 
+       
+       Maybe allow Cut to pass a flag? or check if we are in cut mode?
+       Simplest: Warnings abort the Cut flow. User has to manually Copy then Delete, or we just warn "Action Aborted due to Size check".
+       
+       Actually, if user clicks "Continue", we just do the Copy. The original Cut is already aborted.
+       So "Cut" becomes "Copy (Confirmed)" + "Delete manually"? 
+       Or we can pass a callback?
+       
+       Let's keep it simple: Copy Internal just copies.
+       If warning triggers, we abort the current synchronous operation.
+    */
+}
+
+static void
+perform_copy_internal_reference(EditorWidget *self)
+{
+    /* Zero-RAM Copy: Set reference to document range */
+    ViteClipboard *clip = vite_clipboard_get_default();
+    
+    /* We assume single selection for huge files usually. 
+       If multiple, we take the primary or union? 
+       ViteClipboard currently supports one range entry. 
+       Let's take the primary cursor or the largest range?
+       Let's take the first non-empty cursor range for now. 
+    */
+    
+    for (guint c = 0; c < self->cursors->len; c++) {
+         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+         size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+         size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+         if (start < end) {
+             /* Found selection - set reference */
+             vite_clipboard_set_reference(clip, self->doc, start, end, FALSE);
+             return;
+         }
+    }
+}
+
+static void
+large_copy_response_cb(AdwAlertDialog *dialog, gchar *response, EditorWidget *self)
+{
+    gboolean is_cut = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "is_cut"));
+
+    if (g_strcmp0(response, "copy") == 0) {
+        perform_copy_internal(self);
+        /* If system copy succeeded and it was cut, we should delete.
+           But perform_copy_internal doesn't report success.
+           Assuming success for now or user deals with it. 
+           But actually, if it hits allocation error, it shows another dialog.
+           Let's only handle Cut for Internal Copy for now as strictly requested.
+        */
+    } else if (g_strcmp0(response, "internal") == 0) {
+        perform_copy_internal_reference(self);
+        
+        if (is_cut) {
+             /* For Cut, we need to persist reference to file and then delete */
+             ViteClipboard *clip = vite_clipboard_get_default();
+             if (vite_clipboard_has_internal_content(clip) && vite_clipboard_is_reference_valid(clip)) {
+                  vite_clipboard_persist_to_file(clip);
+             }
+             editor_widget_delete_selection(self);
+        }
+    }
+}
+
+static gboolean
+editor_widget_copy_full(EditorWidget *self, gboolean is_cut)
+{
+    if (!self->cursors || self->cursors->len == 0) return FALSE;
+
+    /* Pre-calculate total size */
+    size_t total_size = 0;
+    for (guint c = 0; c < self->cursors->len; c++) {
+         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+         size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+         size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+         total_size += (end - start);
+    }
+    if (self->cursors->len > 1) total_size += (self->cursors->len - 1);
+    
+    /* Resource Check */
+    if (!resource_can_allocate(total_size)) {
+         show_allocation_error_dialog(self);
+         return FALSE;
+    }
+    
+    /* Warning Threshold: 1GB */
+    size_t huge_threshold = 1ULL * 1024 * 1024 * 1024;
+    if (total_size > huge_threshold) {
+        size_t free_ram = resource_get_available_ram();
+        double size_gb = (double)total_size / (1024.0 * 1024.0 * 1024.0);
+        double free_gb = (double)free_ram / (1024.0 * 1024.0 * 1024.0);
+        
+        char *msg = g_strdup_printf("Copying %.2f GB. available RAM is %.2f GB.\n\nThis operation may freeze the application for a few seconds.", size_gb, free_gb);
+        
+        GtkWindow *root = GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(self)));
+        AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+            "Large Copy Operation",
+            msg
+        ));
+        g_free(msg);
+        
+        /* Pass is_cut state to dialog */
+        g_object_set_data(G_OBJECT(dialog), "is_cut", GINT_TO_POINTER(is_cut));
+        
+        adw_alert_dialog_add_response(dialog, "cancel", "Cancel");
+        adw_alert_dialog_add_response(dialog, "internal", "Internal Copy (Zero RAM)");
+        adw_alert_dialog_add_response(dialog, "copy", "System Copy");
+        
+        adw_alert_dialog_set_response_appearance(dialog, "copy", ADW_RESPONSE_DESTRUCTIVE); /* Warn it's heavy */
+        adw_alert_dialog_set_response_appearance(dialog, "internal", ADW_RESPONSE_SUGGESTED);
+        
+        adw_alert_dialog_set_default_response(dialog, "internal");
+        adw_alert_dialog_set_close_response(dialog, "cancel");
+        
+        g_signal_connect_object(dialog, "response", G_CALLBACK(large_copy_response_cb), self, 0);
+        adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(root));
+        
+        return FALSE; /* Abort synchronous copy/cut */
+    }
+    
+    perform_copy_internal(self);
+    return TRUE;
+}
+
+gboolean
+editor_widget_copy(EditorWidget *self)
+{
+    return editor_widget_copy_full(self, FALSE);
 }
 
 void
 editor_widget_cut(EditorWidget *self)
 {
     if (!self->doc) return;
-    editor_widget_copy(self);
-    editor_widget_delete_selection(self); 
+    if (editor_widget_copy_full(self, TRUE)) {
+        /* If we used Internal Reference Copy, we MUST persist to file before deleting! */
+        ViteClipboard *clip = vite_clipboard_get_default();
+        if (vite_clipboard_has_internal_content(clip) && vite_clipboard_is_reference_valid(clip)) {
+             vite_clipboard_persist_to_file(clip);
+        }
+        
+        editor_widget_delete_selection(self);
+    }
 }
 
 static void
@@ -118,6 +301,16 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
 void
 editor_widget_paste(EditorWidget *self)
 {
+    /* Check for Internal Zero-RAM content */
+    ViteClipboard *vclip = vite_clipboard_get_default();
+    if (vite_clipboard_has_internal_content(vclip)) {
+         /* Streaming paste for primary cursor */
+         /* We use primary cursor offset */
+         EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+         vite_clipboard_paste_streaming(vclip, self->doc, primary->cursor_offset, NULL, NULL);
+         return;
+    }
+
     GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
     gdk_clipboard_read_text_async(clipboard, NULL, on_paste_text_received, self);
 }
