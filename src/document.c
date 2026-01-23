@@ -9,6 +9,10 @@
 
 #include "vite-clipboard.h"
 #include "resource-check.h"
+#include <ctype.h>
+
+typedef struct _StreamingChangeCaseTask StreamingChangeCaseTask;
+typedef char (*CharTransformFunc)(char c);
 
 struct _Document {
     PieceTable *pt;
@@ -50,6 +54,15 @@ check_modification_state(Document *doc)
         ModCallbackData *cb = l->data;
         cb->func(doc, modified, cb->user_data);
     }
+}
+
+
+
+uint64_t
+document_get_version(Document *doc)
+{
+    if (!doc || !doc->pt) return 0;
+    return doc->pt->change_count;
 }
 
 Document *
@@ -147,12 +160,7 @@ document_get_length(Document *doc)
     return piece_table_get_length(doc->pt);
 }
 
-uint64_t
-document_get_version(Document *doc)
-{
-    if (!doc || !doc->pt) return 0;
-    return doc->pt->change_count;
-}
+
 
 char *
 document_get_text_range(Document *doc, size_t offset, size_t len)
@@ -188,60 +196,7 @@ document_insert(Document *doc, size_t offset, const char *text, size_t len)
     }
 }
 
-void
-document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len)
-{
-    if (len == 0 || fd < 0) return;
-    
-    /* TODO: Proper huge undo support.
-       For now, we push a "placeholder" or skipping undo for the huge content text,
-       BUT we must push the delete op for Undo to work (Delete is cheap).
-       The REDO will be broken unless we store the FD/Path.
-       
-       However, since we are pasting from a temp file that might disappear,
-       redo persistence is tricky.
-       Ideally we copy the temp file to our own undo-cache if we want robust Redo.
-       
-       For this prototype step, we might just skip undo_stack push for the text content
-       but push the "Deletion" reverse op.
-       Actually `undo_stack_push_insert` usually stores the Text to be inserted (Ref for Redo).
-       And implied Reverse Op is Delete.
-       
-       If we pass NULL to push_insert, it might crash.
-    */
-    
-    /* Push to undo stack with huge content support */
-    undo_stack_push_insert_from_fd(doc->undo_stack, offset, fd, len);
-    
-    /* REMOVED premature insert with 0 LF count to avoid double insertion */
-    
-    /* Calculate LF count (streaming read) */
-    size_t lf_count = 0;
-    off_t orig_pos = lseek(fd, 0, SEEK_CUR);
-    lseek(fd, 0, SEEK_SET);
-    
-    char buf[16384];
-    ssize_t r;
-    while ((r = read(fd, buf, sizeof(buf))) > 0) {
-        for (ssize_t i = 0; i < r; i++) {
-            if (buf[i] == '\n') lf_count++;
-        }
-    }
-    lseek(fd, orig_pos, SEEK_SET);
-    
-    /* Update Piece Table */
-    /* Re-call insert with accurate count */
-    piece_table_insert_from_fd(doc->pt, offset, fd, len, lf_count);
-    
-    check_modification_state(doc);
-    
-    if (doc->callbacks_suspended) return;
 
-    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *cb = l->data;
-        cb->func(doc, cb->user_data);
-    }
-}
 
 static void
 document_delete_streaming(Document *doc, size_t offset, size_t len)
@@ -285,6 +240,58 @@ document_delete_streaming(Document *doc, size_t offset, size_t len)
         ContentCallbackData *cb = l->data;
         cb->func(doc, cb->user_data);
     }
+}
+
+void
+document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len)
+{
+    if (!doc || len == 0) return;
+    
+    /* Record Undo */
+    if (doc->undo_stack) {
+        undo_stack_push_insert_from_fd(doc->undo_stack, offset, fd, len);
+    }
+    
+    /* Perform Insertion */
+    piece_table_insert_from_fd_range(doc->pt, offset, fd, 0, len);
+    
+    /* Update state */
+    check_modification_state(doc);
+    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        cb->func(doc, cb->user_data);
+    }
+}
+
+void
+document_transfer_range(Document *dest, Document *src, size_t src_offset, size_t len, size_t dest_offset)
+{
+    if (!dest || !src || len == 0) return;
+
+    /* Chunk size for transfer (1MB) */
+    size_t chunk_size = 1024 * 1024;
+    size_t processed = 0;
+    
+    /* We group this entire operation as one undo step */
+    document_begin_undo_group(dest);
+
+    while (processed < len) {
+        size_t current_chunk = chunk_size;
+        if (processed + current_chunk > len) current_chunk = len - processed;
+
+        /* internal low-level read (allocates chunk) */
+        char *text = document_get_text_range(src, src_offset + processed, current_chunk);
+        if (text) {
+             document_insert(dest, dest_offset + processed, text, current_chunk);
+             g_free(text);
+        } else {
+             g_warning("document_transfer_range: Failed to read chunk at %zu", src_offset + processed);
+             break; 
+        }
+        processed += current_chunk;
+    }
+
+    document_end_undo_group(dest);
 }
 
 void

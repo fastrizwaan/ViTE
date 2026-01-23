@@ -28,16 +28,30 @@ undo_stack_new(void)
     s->current_group = NULL;
     
     /* Create log file for text storage */
-    s->log_file_path = g_strdup("/tmp/vite_undo_log_XXXXXX");
-    int fd = mkstemp(s->log_file_path);
+    /* Create log file for text storage */
+#ifdef O_TMPFILE
+    int fd = open("/tmp", O_TMPFILE | O_RDWR | O_EXCL, 0600);
     if (fd != -1) {
         s->log_file = fdopen(fd, "w+");
-        if (!s->log_file) {
-            close(fd);
-            g_warning("Failed to open undo log file");
+        s->log_file_path = NULL; /* No path needed for O_TMPFILE */
+    } else
+#endif
+    {
+        s->log_file_path = g_strdup("/tmp/vite_undo_log_XXXXXX");
+        int fd = mkstemp(s->log_file_path);
+        if (fd != -1) {
+            s->log_file = fdopen(fd, "w+");
         }
-    } else {
-        g_warning("Failed to create undo log file: %s", strerror(errno));
+    }
+
+    if (!s->log_file) {
+        g_warning("Failed to open undo log file: %s", strerror(errno));
+        if (s->log_file_path) {
+             g_free(s->log_file_path);
+             s->log_file_path = NULL;
+        }
+        g_free(s);
+        return NULL;
     }
     
     return s;
@@ -134,8 +148,12 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
              /* Truncate len? Or just fail? For now, we commit what we can or empty command */
              cmd->length = 0;
         } else {
-             fwrite(text, 1, len, stack->log_file);
+             size_t written = fwrite(text, 1, len, stack->log_file);
              fflush(stack->log_file);
+             if (written != len) {
+                 g_warning("undo_stack_push_insert: Short write %zu < %zu", written, len);
+                 cmd->length = written;
+             }
         }
     }
     
@@ -186,6 +204,11 @@ undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t le
             }
             fflush(stack->log_file);
             lseek(fd, original_pos, SEEK_SET); /* Restore FD pos */
+            
+            if (written != len) {
+                g_warning("undo_stack_push_insert_from_fd: Short write %zu < %zu", written, len);
+                cmd->length = written;
+            }
         }
     }
 
@@ -215,8 +238,12 @@ undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text,
              g_warning("undo_stack_push_delete: Disk full");
              cmd->length = 0;
         } else {
-             fwrite(deleted_text, 1, len, stack->log_file);
+             size_t written = fwrite(deleted_text, 1, len, stack->log_file);
              fflush(stack->log_file);
+             if (written != len) {
+                 g_warning("undo_stack_push_delete: Short write %zu < %zu", written, len);
+                 cmd->length = written;
+             }
         }
     }
     

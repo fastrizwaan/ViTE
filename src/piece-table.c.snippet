@@ -1,0 +1,74 @@
+
+static void
+insert_piece_at_offset(PieceTable *pt, size_t offset, Piece new_piece)
+{
+    pt->change_count++;
+    
+    PieceNode *new_node = node_new(new_piece);
+    
+    if (!pt->root) {
+        pt->root = new_node;
+        update_node(pt, pt->root);
+        return;
+    }
+    
+    size_t node_start_off;
+    PieceNode *at_node = find_node_at_offset(pt, offset, &node_start_off);
+    
+    if (!at_node) {
+        PieceNode *curr = pt->root;
+        while (curr->right) curr = curr->right;
+        curr->right = new_node;
+        new_node->parent = curr;
+        splay(pt, new_node);
+        return;
+    }
+    
+    size_t split_point = offset - node_start_off;
+    
+    if (split_point == 0) {
+        new_node->left = at_node->left;
+        if (new_node->left) new_node->left->parent = new_node;
+        new_node->right = at_node;
+        at_node->parent = new_node;
+        at_node->left = NULL; 
+        pt->root = new_node;
+        update_node(pt, at_node);
+        update_node(pt, new_node);
+    } else if (split_point == at_node->piece.length) {
+        new_node->right = at_node->right;
+        if (new_node->right) new_node->right->parent = new_node;
+        new_node->left = at_node;
+        at_node->parent = new_node;
+        at_node->right = NULL;
+        pt->root = new_node;
+        update_node(pt, at_node);
+        update_node(pt, new_node);
+    } else {
+        Piece right_p = at_node->piece;
+        right_p.start += split_point;
+        right_p.length -= split_point;
+        right_p.cached_lf = count_newlines(get_piece_data(pt, &at_node->piece) + right_p.start, right_p.length);
+        
+        at_node->piece.length = split_point;
+        at_node->piece.cached_lf = count_newlines(get_piece_data(pt, &at_node->piece) + at_node->piece.start, split_point);
+        
+        PieceNode *right_node = node_new(right_p);
+        
+        right_node->right = at_node->right;
+        if (right_node->right) right_node->right->parent = right_node;
+        
+        new_node->left = at_node;
+        at_node->parent = new_node;
+        at_node->right = NULL;
+        
+        new_node->right = right_node;
+        right_node->parent = new_node;
+        
+        update_node(pt, at_node);
+        update_node(pt, right_node);
+        update_node(pt, new_node);
+        
+        pt->root = new_node;
+    }
+}

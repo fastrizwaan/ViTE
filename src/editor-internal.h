@@ -165,7 +165,7 @@ void editor_widget_backspace(EditorWidget *self);
 void editor_widget_indent_selection(EditorWidget *self);
 void editor_widget_unindent_selection(EditorWidget *self);
 /* Clipboard */
-void editor_widget_copy(EditorWidget *self);
+gboolean editor_widget_copy(EditorWidget *self);
 void editor_widget_cut(EditorWidget *self);
 void editor_widget_paste_primary(EditorWidget *self);
 void editor_widget_paste(EditorWidget *self);

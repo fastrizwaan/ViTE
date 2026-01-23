@@ -11,6 +11,13 @@
 
 /* -- LargeBuffer: 64-bit sized buffer for multi-GB content -- */
 
+typedef struct {
+    int fd;
+    char *path;
+    char *mmap_base;
+    size_t size;
+} PieceTableSource;
+
 static LargeBuffer *
 large_buffer_new(void)
 {
@@ -642,6 +649,8 @@ piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
         current_off += chunk;
     }
 }
+
+
 
 /* Optimized bulk replacement: replaces entire content with new content.
  * Creates chunked pieces like piece_table_new to maintain O(log N) line access.

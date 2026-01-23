@@ -1,3 +1,5 @@
+#include "piece-table.h"
+#include <string.h>
 
 /* -- Traversal -- */
 

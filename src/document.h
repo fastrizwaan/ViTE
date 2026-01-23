@@ -48,10 +48,15 @@ size_t document_get_line_count(Document *doc);
 size_t document_get_length(Document *doc);
 char *document_get_text_range(Document *doc, size_t offset, size_t len);
 size_t document_get_line_of_offset(Document *doc, size_t offset);
+size_t document_get_line_of_offset(Document *doc, size_t offset);
 size_t document_get_offset_of_line(Document *doc, size_t line_index);
+
+uint64_t document_get_version(Document *doc);
 
 /* Editing */
 void document_insert(Document *doc, size_t offset, const char *text, size_t len);
+void document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len);
+void document_transfer_range(Document *dest, Document *src, size_t src_offset, size_t len, size_t dest_offset);
 void document_delete(Document *doc, size_t offset, size_t len);
 
 /* Undo/Redo */

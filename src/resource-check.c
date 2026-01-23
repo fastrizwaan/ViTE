@@ -12,10 +12,11 @@
 #include <string.h>
 
 /* Maximum fraction of available RAM we'll allocate in one go (50%) */
-#define MAX_ALLOC_FRACTION 0.5
+/* Maximum fraction of available RAM we'll allocate in one go (90%) */
+#define MAX_ALLOC_FRACTION 0.9
 
-/* Absolute maximum single allocation (2GB) - sanity limit */
-#define ABSOLUTE_MAX_ALLOC (2ULL * 1024 * 1024 * 1024)
+/* Absolute maximum single allocation removed - trusting system stats */
+/* #define ABSOLUTE_MAX_ALLOC (2ULL * 1024 * 1024 * 1024) */
 
 /* Threshold for "looks like integer overflow" - anything > 2^62 is suspicious */
 #define OVERFLOW_THRESHOLD (1ULL << 62)
@@ -80,10 +81,12 @@ resource_can_allocate(size_t size)
     }
     
     /* Check against absolute maximum */
-    if (size > ABSOLUTE_MAX_ALLOC) {
+    
+    /* Check against absolute maximum - DISABLED */
+    /* if (size > ABSOLUTE_MAX_ALLOC) {
         g_debug("resource_can_allocate: Size %zu exceeds absolute max", size);
         return FALSE;
-    }
+    } */
     
     /* Check available RAM */
     size_t available = resource_get_available_ram();

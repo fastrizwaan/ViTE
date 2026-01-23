@@ -7,7 +7,8 @@
 
 typedef enum {
     SOURCE_ORIGINAL,
-    SOURCE_ADD
+    SOURCE_ADD,
+    SOURCE_EXTERNAL_START = 2
 } PieceSource;
 
 typedef struct {
@@ -63,6 +64,8 @@ typedef struct {
     size_t mmap_size;
     
     uint64_t change_count;
+    
+    GPtrArray *external_sources; /* Array of PieceTableSource* */
 } PieceTable;
 
 PieceTable *piece_table_new(const char *filename);
@@ -97,7 +100,10 @@ typedef struct {
 void piece_table_iter_init(PieceTable *pt, PieceTableIter *iter);
 void piece_table_iter_init_at_line(PieceTable *pt, PieceTableIter *iter, size_t line_index);
 size_t piece_table_iter_get_next_line(PieceTableIter *iter, char *buf, size_t buf_len);
+size_t piece_table_iter_get_next_line(PieceTableIter *iter, char *buf, size_t buf_len);
 size_t piece_table_iter_get_next_line_string(PieceTableIter *iter, GString *buf);
+const char *piece_table_iter_get_chunk(PieceTableIter *iter, size_t *len);
+void piece_table_iter_advance(PieceTableIter *iter, size_t len);
 
 
 /* Insertion/Deletion */
@@ -108,6 +114,8 @@ void piece_table_delete(PieceTable *pt, size_t offset, size_t len);
 void piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, size_t lf_count);
 /* Zero-RAM replacement from file descriptor (mmap) */
 void piece_table_replace_from_fd(PieceTable *pt, int fd, size_t len, size_t lf_count);
+/* Insert content from an external file descriptor (Zero-RAM) */
+void piece_table_insert_from_fd_range(PieceTable *pt, size_t offset, int fd, size_t file_offset, size_t len);
 char *piece_table_get_text_range(PieceTable *pt, size_t offset, size_t len);
 size_t piece_table_get_line_of_offset(PieceTable *pt, size_t offset);
 size_t piece_table_get_offset_of_line(PieceTable *pt, size_t line_index);
