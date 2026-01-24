@@ -2466,6 +2466,10 @@ gboolean document_filter_async_step(DocumentFilterTask *task, gint64 time_budget
         /* Get next line into buffer without malloc if possible */
         /* Note: piece_table_iter_get_next_line handles the traversal */
         size_t len = piece_table_iter_get_next_line(&task->iter, buf, sizeof(buf) - 1);
+        
+        /* IMPORTANT: Iter returns FULL line length, which might exceed buffer. Clamp it! */
+        if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+        
         buf[len] = '\0'; /* Null terminate for regex/strstr */
         
         /* If line was truncated (len == sizeof(buf)-1), we might miss matches at the end.
@@ -2486,8 +2490,19 @@ gboolean document_filter_async_step(DocumentFilterTask *task, gint64 time_budget
             } else {
                 /* Optimization: Avoid full lowercasing if not needed? 
                    We do need to lowercase the line to search case-insensitively. */
-                char *lower_line = g_utf8_strdown(buf, len);
-                if (task->lower_pattern) {
+                char *lower_line = NULL;
+                if (g_utf8_validate(buf, len, NULL)) {
+                    lower_line = g_utf8_strdown(buf, len);
+                } else {
+                    /* Fallback for binary/invalid data: ASCII lowercasing */
+                    lower_line = g_strdup(buf);
+                    for (size_t i = 0; i < len; ++i) {
+                        lower_line[i] = g_ascii_tolower(lower_line[i]);
+                    }
+                }
+                
+                if (task->lower_pattern && lower_line) {
+                    /* Note: strstr might not be ideal for binary, but it's safe enough if null-terminated */
                     match = (strstr(lower_line, task->lower_pattern) != NULL);
                 }
                 g_free(lower_line);

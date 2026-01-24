@@ -2725,6 +2725,12 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     if (ctx->tab) {
         vite_tab_set_loading(ctx->tab, FALSE);
         
+        GtkWidget *page = g_object_get_data(G_OBJECT(ctx->tab), "page");
+        GtkWidget *editor = get_editor_from_page(page);
+        if (EDITOR_IS_WIDGET(editor)) {
+            gtk_widget_set_sensitive(editor, TRUE);
+        }
+        
         if (success) {
              document_set_file_path(doc, ctx->filename);
              
@@ -2850,8 +2856,10 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
                  GtkWidget *editor = get_editor_from_page(page);
                  if (EDITOR_IS_WIDGET(editor)) {
                            Document *current_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
-                           /* Check if strictly untitled (no path) and unmodified */
-                           if (!document_get_file_path(current_doc) && !document_is_modified(current_doc)) {
+                           /* Check if strictly untitled (no path), unmodified, and NOT loading */
+                           if (!document_get_file_path(current_doc) && 
+                               !document_is_modified(current_doc) && 
+                               !vite_tab_is_loading(tab)) {
                                /* Reuse this tab */
                                reused = TRUE;
                                reused_tab = tab;
@@ -2906,6 +2914,9 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
 
     /* Setup Async Load */
     vite_tab_set_loading(tab_to_use, TRUE);
+    if (EDITOR_IS_WIDGET(editor)) {
+        gtk_widget_set_sensitive(editor, FALSE);
+    }
     if (target_window->header_progress) {
         GList *tabs = vite_tab_bar_get_tabs(target_window->tab_bar);
         guint n_tabs = g_list_length(tabs);
