@@ -41,18 +41,20 @@ typedef enum {
     NEWLINE_CR
 } NewlineType;
 
-/* Large buffer using size_t (64-bit) for sizes - handles multi-GB content */
+/* Disk-backed buffer using mmap for zero-RAM content storage */
 typedef struct {
-    char *data;
-    size_t len;
-    size_t capacity;
-} LargeBuffer;
+    int fd;              /* File descriptor for temp file */
+    char *path;          /* Path for cleanup (NULL if O_TMPFILE) */
+    char *mmap_base;     /* mmap base pointer */
+    size_t len;          /* Current content length */
+    size_t capacity;     /* Current mmap size (page-aligned) */
+} DiskBuffer;
 
 typedef struct {
     char *orig_data;
     size_t orig_size;
     
-    LargeBuffer *add_buffer;  /* Uses size_t for 64-bit sizes */
+    DiskBuffer *add_buffer;  /* Zero-RAM disk-backed buffer */
     
     PieceNode *root;
     

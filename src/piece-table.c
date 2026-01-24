@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <errno.h>
 
-/* -- LargeBuffer: 64-bit sized buffer for multi-GB content -- */
+/* -- DiskBuffer: Zero-RAM disk-backed buffer using mmap -- */
 
 typedef struct {
     int fd;
@@ -18,35 +18,86 @@ typedef struct {
     size_t size;
 } PieceTableSource;
 
-static LargeBuffer *
-large_buffer_new(void)
+#define DISK_BUFFER_INITIAL_SIZE 4096  /* 4KB initial, page-aligned */
+
+static DiskBuffer *
+disk_buffer_new(void)
 {
-    LargeBuffer *buf = g_new0(LargeBuffer, 1);
-    buf->capacity = 1024;
-    buf->data = malloc(buf->capacity);
+    DiskBuffer *buf = g_new0(DiskBuffer, 1);
+    buf->fd = -1;
+    buf->path = NULL;
+    buf->mmap_base = NULL;
     buf->len = 0;
+    buf->capacity = DISK_BUFFER_INITIAL_SIZE;
+    
+    /* Try O_TMPFILE first (anonymous temp file, no path needed) */
+#ifdef O_TMPFILE
+    buf->fd = open("/tmp", O_TMPFILE | O_RDWR | O_EXCL, 0600);
+    if (buf->fd != -1) {
+        buf->path = NULL;  /* No path needed for O_TMPFILE */
+    } else
+#endif
+    {
+        /* Fallback to mkstemp */
+        buf->path = g_strdup("/tmp/vite_add_buf_XXXXXX");
+        buf->fd = mkstemp(buf->path);
+        if (buf->fd == -1) {
+            g_warning("disk_buffer_new: Failed to create temp file: %s", strerror(errno));
+            g_free(buf->path);
+            g_free(buf);
+            return NULL;
+        }
+        /* Unlink immediately so file is deleted when fd closes */
+        unlink(buf->path);
+    }
+    
+    /* Pre-allocate initial capacity */
+    if (ftruncate(buf->fd, buf->capacity) == -1) {
+        g_warning("disk_buffer_new: ftruncate failed: %s", strerror(errno));
+        close(buf->fd);
+        g_free(buf->path);
+        g_free(buf);
+        return NULL;
+    }
+    
+    /* mmap the file for read/write access */
+    buf->mmap_base = mmap(NULL, buf->capacity, PROT_READ | PROT_WRITE, MAP_SHARED, buf->fd, 0);
+    if (buf->mmap_base == MAP_FAILED) {
+        g_warning("disk_buffer_new: mmap failed: %s", strerror(errno));
+        close(buf->fd);
+        g_free(buf->path);
+        g_free(buf);
+        return NULL;
+    }
+    
     return buf;
 }
 
 static void insert_piece_at_offset(PieceTable *pt, size_t offset, Piece new_piece);
 
 static void
-large_buffer_free(LargeBuffer *buf)
+disk_buffer_free(DiskBuffer *buf)
 {
-    if (buf) {
-        free(buf->data);
-        g_free(buf);
+    if (!buf) return;
+    
+    if (buf->mmap_base && buf->mmap_base != MAP_FAILED && buf->capacity > 0) {
+        munmap(buf->mmap_base, buf->capacity);
     }
+    if (buf->fd >= 0) {
+        close(buf->fd);
+    }
+    g_free(buf->path);
+    g_free(buf);
 }
 
 static void
-large_buffer_append(LargeBuffer *buf, const char *data, size_t len)
+disk_buffer_append(DiskBuffer *buf, const char *data, size_t len)
 {
-    if (len == 0) return;
+    if (!buf || len == 0) return;
     
     /* Overflow check: ensure addition won't wrap around */
     if (len > SIZE_MAX - buf->len) {
-        g_warning("large_buffer_append: Size overflow detected (len=%zu, current=%zu)", len, buf->len);
+        g_warning("disk_buffer_append: Size overflow detected (len=%zu, current=%zu)", len, buf->len);
         return;
     }
     
@@ -54,34 +105,56 @@ large_buffer_append(LargeBuffer *buf, const char *data, size_t len)
     
     /* Sanity check for obviously corrupt/overflowed values */
     if (!resource_size_valid(new_len)) {
-        g_warning("large_buffer_append: Suspiciously large size %zu (likely overflow)", new_len);
+        g_warning("disk_buffer_append: Suspiciously large size %zu (likely overflow)", new_len);
         return;
     }
     
+    /* Check disk space before growing */
     if (new_len > buf->capacity) {
-        /* Check for overflow in capacity calculation */
+        /* Calculate new capacity (double, but page-aligned) */
         size_t new_cap = buf->capacity * 2;
         if (new_cap < buf->capacity) { /* Overflow in doubling */
-            new_cap = new_len + 1024;
+            new_cap = new_len + DISK_BUFFER_INITIAL_SIZE;
         }
-        if (new_cap < new_len) new_cap = new_len + 1024;
+        if (new_cap < new_len) new_cap = new_len + DISK_BUFFER_INITIAL_SIZE;
         
-        /* Resource check before allocation */
-        if (!resource_can_allocate(new_cap)) {
-            g_warning("large_buffer_append: Cannot safely allocate %zu bytes (insufficient RAM or too large)", new_cap);
+        /* Page-align capacity */
+        new_cap = (new_cap + 4095) & ~4095;
+        
+        /* Check disk space before allocation */
+        if (!resource_can_write_disk("/tmp", new_cap - buf->capacity)) {
+            g_warning("disk_buffer_append: Insufficient disk space for %zu bytes", new_cap);
             return;
         }
         
-        char *new_data = realloc(buf->data, new_cap);
-        if (!new_data) {
-            g_warning("large_buffer_append: realloc failed for %zu bytes: %s", new_cap, strerror(errno));
+        /* Extend file */
+        if (ftruncate(buf->fd, new_cap) == -1) {
+            g_warning("disk_buffer_append: ftruncate failed: %s", strerror(errno));
             return;
         }
-        buf->data = new_data;
+        
+        /* Remap to new size using mremap (Linux-specific, very efficient) */
+#ifdef MREMAP_MAYMOVE
+        char *new_base = mremap(buf->mmap_base, buf->capacity, new_cap, MREMAP_MAYMOVE);
+        if (new_base == MAP_FAILED) {
+            g_warning("disk_buffer_append: mremap failed: %s", strerror(errno));
+            return;
+        }
+        buf->mmap_base = new_base;
+#else
+        /* Fallback: munmap + mmap (portable but slightly slower) */
+        munmap(buf->mmap_base, buf->capacity);
+        buf->mmap_base = mmap(NULL, new_cap, PROT_READ | PROT_WRITE, MAP_SHARED, buf->fd, 0);
+        if (buf->mmap_base == MAP_FAILED) {
+            g_warning("disk_buffer_append: mmap failed after resize: %s", strerror(errno));
+            return;
+        }
+#endif
         buf->capacity = new_cap;
     }
     
-    memcpy(buf->data + buf->len, data, len);
+    /* Copy data to mmap'd region (kernel will flush to disk) */
+    memcpy(buf->mmap_base + buf->len, data, len);
     buf->len = new_len;
 }
 
@@ -92,7 +165,7 @@ static const char *
 get_piece_data(PieceTable *pt, const Piece *p)
 {
     if (p->source == SOURCE_ORIGINAL) return pt->orig_data;
-    if (p->source == SOURCE_ADD) return (const char *)pt->add_buffer->data;
+    if (p->source == SOURCE_ADD) return (const char *)pt->add_buffer->mmap_base;
     if (p->source >= SOURCE_EXTERNAL_START) {
         guint idx = p->source - SOURCE_EXTERNAL_START;
         if (pt->external_sources && idx < pt->external_sources->len) {
@@ -128,10 +201,11 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
     }
 
     /* Heuristic: Check for UTF-16 without BOM */
+    size_t check_len = (size > 65536) ? 65536 : size;
+    
     if (size >= 4) {
-        /* Check if it's valid UTF-8 first */
-        if (!g_utf8_validate(data, size, NULL)) {
-            size_t check_len = (size > 1024) ? 1024 : size;
+        /* Check if it's valid UTF-8 first (optimization: check only first 64KB) */
+        if (!g_utf8_validate(data, check_len, NULL)) {
             size_t le_count = 0;
             size_t be_count = 0;
             
@@ -154,7 +228,8 @@ detect_newline_style(const char *data, size_t size, NewlineType *style)
 {
     *style = NEWLINE_LF; // Default
     const char *ptr = data;
-    const char *end = data + size;
+    size_t check_len = (size > 4096) ? 4096 : size;
+    const char *end = data + check_len;
     while (ptr < end) {
         if (*ptr == '\n') {
             *style = NEWLINE_LF;
@@ -525,7 +600,7 @@ piece_table_new(const char *filename)
         detect_newline_style(pt->orig_data, pt->orig_size, &pt->newline_style);
     }
 
-    pt->add_buffer = large_buffer_new();
+    pt->add_buffer = disk_buffer_new();
     pt->external_sources = g_ptr_array_new_full(0, g_free); /* We need custom free func, see piece_table_free */
     
     if (pt->orig_size > 0) {
@@ -571,7 +646,7 @@ piece_table_free(PieceTable *pt)
     } else {
         g_free(pt->orig_data);
     }
-    large_buffer_free(pt->add_buffer);
+    disk_buffer_free(pt->add_buffer);
     
     /* Clean up external sources */
     if (pt->external_sources) {
@@ -623,7 +698,7 @@ piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
     
     /* Add text to buffer */
     size_t start_in_add = pt->add_buffer->len;
-    large_buffer_append(pt->add_buffer, text, len);
+    disk_buffer_append(pt->add_buffer, text, len);
     
     /* Chunking strategy */
     size_t chunk_size = 64 * 1024;
@@ -670,7 +745,7 @@ piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, siz
     
     /* Add text to buffer */
     size_t start_in_add = pt->add_buffer->len;
-    large_buffer_append(pt->add_buffer, new_content, len);
+    disk_buffer_append(pt->add_buffer, new_content, len);
     
     /* Chunking strategy like piece_table_new - 16KB chunks for O(log N) line access */
     size_t chunk_size = 16 * 1024;
@@ -805,7 +880,7 @@ ensure_split_at(PieceTable *pt, size_t offset)
     right_piece.start += local_off;
     right_piece.length -= local_off;
     /* Calculate and cache LF for right piece */
-    const char *src_data = (right_piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *src_data = (right_piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->mmap_base;
     right_piece.cached_lf = count_newlines(src_data + right_piece.start, right_piece.length);
     PieceNode *right_node = node_new(right_piece);
     
@@ -1896,6 +1971,12 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
         res->temp_nodes = calloc(count, sizeof(PieceNode*));
         res->node_count = count;
         
+        /* Optimization: Hint OS that we are scanning sequentially.
+           This allows the kernel to discard pages aggressively after we read them, keeps RSS low. */
+#ifdef MADV_SEQUENTIAL
+        madvise(res->mmap_base, res->mmap_size, MADV_SEQUENTIAL);
+#endif
+        
         /* 1. Create nodes */
         for (size_t i = 0; i < count; i++) {
             if ((i % 128) == 0) {
@@ -1924,6 +2005,12 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
             Piece p = { SOURCE_ORIGINAL, start, len, lf };
             res->temp_nodes[i] = node_new(p);
         }
+
+#ifdef MADV_NORMAL
+        /* Restore normal access pattern for interactive use */
+        madvise(res->mmap_base, res->mmap_size, MADV_NORMAL);
+#endif
+         
         
         /* 2. Build Tree */
         res->root = build_balanced_tree_recursive(res->temp_nodes, 0, (int)count - 1, NULL);
@@ -1941,7 +2028,7 @@ PieceTable *
 piece_table_new_empty(void)
 {
     PieceTable *pt = g_new0(PieceTable, 1);
-    pt->add_buffer = large_buffer_new();
+    pt->add_buffer = disk_buffer_new();
     pt->root = NULL;
     return pt;
 }
@@ -1995,8 +2082,8 @@ piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error)
     lr->root = NULL;
     
     /* Reset add buffer */
-    large_buffer_free(pt->add_buffer);
-    pt->add_buffer = large_buffer_new();
+    disk_buffer_free(pt->add_buffer);
+    pt->add_buffer = disk_buffer_new();
     pt->change_count = 0;
     
     load_result_free(lr);

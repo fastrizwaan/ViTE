@@ -21,9 +21,6 @@
 /* Chunk size for streaming paste (1MB) */
 #define PASTE_CHUNK_SIZE (1024 * 1024)
 
-/* Threshold for streaming vs sync paste (10MB) */
-#define STREAMING_THRESHOLD (10 * 1024 * 1024)
-
 /* Maximum size to sync to system clipboard (100MB) */
 #define MAX_SYSTEM_CLIPBOARD_SIZE (100 * 1024 * 1024)
 
@@ -455,46 +452,33 @@ vite_clipboard_paste_sync(ViteClipboard *clip, Document *target,
         return FALSE;
     }
     
-    /* Resource check before allocation */
-    if (!resource_can_allocate(len + 1)) {
-        g_warning("vite_clipboard: Content too large for sync paste (%zu bytes), use streaming", len);
-        return FALSE;
+    /* Zero-RAM Strategy: Always persist to file first, then use mmap insert */
+    
+    /* Ensure content is file-backed */
+    if (entry->type == VITE_CLIPBOARD_ENTRY_REFERENCE) {
+        vite_clipboard_persist_to_file(clip);
+        /* Re-check after persist */
+        if (entry->type != VITE_CLIPBOARD_ENTRY_FILE || !entry->persisted_file_path) {
+            g_warning("vite_clipboard: Failed to persist for zero-RAM paste");
+            return FALSE;
+        }
     }
     
-    /* For large content, warn but still try */
-    if (len > STREAMING_THRESHOLD) {
-        g_warning("vite_clipboard: Large sync paste (%zu MB), consider streaming",
-                  len / (1024 * 1024));
-    }
-    
-    char *text = NULL;
-    
-    if (entry->type == VITE_CLIPBOARD_ENTRY_FILE) {
+    /* Now we have file-backed content - use Zero-RAM insert */
+    if (entry->type == VITE_CLIPBOARD_ENTRY_FILE && entry->persisted_file_path) {
         int fd = open(entry->persisted_file_path, O_RDONLY);
         if (fd >= 0) {
-            text = g_try_malloc(len + 1);
-            if (!text) {
-                g_warning("vite_clipboard: Failed to allocate %zu bytes for paste", len + 1);
-                close(fd);
-                return FALSE;
-            }
-            /* This is risky for huge files, but it's sync paste path */
-            /* If it's too huge, malloc might fail */
-            /* We should really only use this for small-ish files */
-            ssize_t r = read(fd, text, len);
-            if (r == (ssize_t)len) {
-                text[len] = '\0';
-            } else {
-                g_free(text);
-                text = NULL;
-            }
+            document_insert_from_fd(target, offset, fd, len);
             close(fd);
+            if (out_pasted_len) *out_pasted_len = len;
+            return TRUE;
         }
-    } else if (entry->type == VITE_CLIPBOARD_ENTRY_REFERENCE) {
-        text = document_get_text_range(entry->source_doc, 
-                                        entry->start_offset, len);
+        g_warning("vite_clipboard: Failed to open persisted file: %s", entry->persisted_file_path);
     }
     
+    /* Fallback for edge cases (should not normally reach here) */
+    g_warning("vite_clipboard: Falling back to RAM-based paste");
+    char *text = document_get_text_range(entry->source_doc, entry->start_offset, len);
     if (!text) return FALSE;
     
     document_insert(target, offset, text, len);

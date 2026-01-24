@@ -4,8 +4,65 @@
 #include "resource-check.h"
 #include "vite-clipboard.h"
 
+/* For Zero-RAM system clipboard paste */
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+
+/* Threshold for Zero-RAM system clipboard paste (1MB) 
+ * Below this, RAM-based paste is fine for responsiveness */
+#define SYSTEM_PASTE_ZERO_RAM_THRESHOLD (1024 * 1024)
+
 static void
 large_copy_response_cb(AdwAlertDialog *dialog, gchar *response, EditorWidget *self);
+
+/**
+ * Write content to a temp file for Zero-RAM paste.
+ * Returns fd on success (caller must close), or -1 on failure.
+ */
+static int
+write_to_temp_file(const char *data, size_t len)
+{
+    int fd = -1;
+    char *path = NULL;
+    
+#ifdef O_TMPFILE
+    fd = open("/tmp", O_TMPFILE | O_RDWR | O_EXCL, 0600);
+    if (fd != -1) {
+        /* O_TMPFILE succeeded - write directly */
+    } else
+#endif
+    {
+        /* Fallback to mkstemp */
+        path = g_strdup("/tmp/vite_syspaste_XXXXXX");
+        fd = mkstemp(path);
+        if (fd == -1) {
+            g_warning("write_to_temp_file: mkstemp failed: %s", strerror(errno));
+            g_free(path);
+            return -1;
+        }
+        /* Unlink immediately so file is deleted when fd closes */
+        unlink(path);
+        g_free(path);
+    }
+    
+    /* Write content to temp file */
+    size_t written = 0;
+    while (written < len) {
+        ssize_t w = write(fd, data + written, len - written);
+        if (w <= 0) {
+            g_warning("write_to_temp_file: write failed: %s", strerror(errno));
+            close(fd);
+            return -1;
+        }
+        written += w;
+    }
+    
+    /* Seek back to start for reading */
+    lseek(fd, 0, SEEK_SET);
+    
+    return fd;
+}
 
 static void
 show_allocation_error_dialog(EditorWidget *self)
@@ -277,11 +334,33 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
         /* If we have a selection, delete it first */
         editor_widget_delete_selection(self);
         
-        for (guint c = 0; c < self->cursors->len; c++) {
-             EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
-             document_insert(self->doc, cur->cursor_offset, text, len);
-             cur->cursor_offset += len;
-             cur->selection_anchor = cur->cursor_offset;
+        /* Zero-RAM strategy for large system clipboard content */
+        if (len >= SYSTEM_PASTE_ZERO_RAM_THRESHOLD) {
+            /* Write to temp file and use document_insert_from_fd */
+            int fd = write_to_temp_file(text, len);
+            g_free(text);
+            text = NULL; /* Already freed */
+            
+            if (fd >= 0) {
+                for (guint c = 0; c < self->cursors->len; c++) {
+                    EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                    document_insert_from_fd(self->doc, cur->cursor_offset, fd, len);
+                    cur->cursor_offset += len;
+                    cur->selection_anchor = cur->cursor_offset;
+                    /* Reset fd position for next cursor */
+                    lseek(fd, 0, SEEK_SET);
+                }
+                close(fd);
+            }
+        } else {
+            /* Small content - use regular RAM-based insert for speed */
+            for (guint c = 0; c < self->cursors->len; c++) {
+                EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+                document_insert(self->doc, cur->cursor_offset, text, len);
+                cur->cursor_offset += len;
+                cur->selection_anchor = cur->cursor_offset;
+            }
+            g_free(text);
         }
         
         document_end_undo_group(self->doc);
@@ -294,8 +373,9 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
         size_t line, col;
         editor_widget_get_cursor_position(self, &line, &col);
         g_signal_emit(self, editor_signals[CURSOR_MOVED], 0, (guint)line, (guint)col);
+    } else {
+        g_free(text);
     }
-    g_free(text);
 }
 
 void
@@ -328,10 +408,28 @@ on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer us
             EditorCursor *primary = editor_widget_get_primary_cursor(self);
             if (primary) {
                 document_begin_undo_group(self->doc);
-                document_insert(self->doc, primary->cursor_offset, text, len);
                 
-                primary->cursor_offset += len;
-                primary->selection_anchor = primary->cursor_offset;
+                /* Zero-RAM strategy for large system clipboard content */
+                if (len >= SYSTEM_PASTE_ZERO_RAM_THRESHOLD) {
+                    /* Write to temp file and use document_insert_from_fd */
+                    int fd = write_to_temp_file(text, len);
+                    g_free(text);
+                    text = NULL; /* Already freed */
+                    
+                    if (fd >= 0) {
+                         document_insert_from_fd(self->doc, primary->cursor_offset, fd, len);
+                         primary->cursor_offset += len;
+                         primary->selection_anchor = primary->cursor_offset;
+                         close(fd);
+                    }
+                } else {
+                     /* Small content - use regular RAM-based insert */
+                     document_insert(self->doc, primary->cursor_offset, text, len);
+                     primary->cursor_offset += len;
+                     primary->selection_anchor = primary->cursor_offset;
+                     
+                     g_free(text);
+                }
                 
                 document_end_undo_group(self->doc);
                 
@@ -343,9 +441,12 @@ on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer us
                 size_t line, col;
                 editor_widget_get_cursor_position(self, &line, &col);
                 g_signal_emit(self, editor_signals[CURSOR_MOVED], 0, (guint)line, (guint)col);
+            } else {
+                g_free(text);
             }
+        } else {
+            g_free(text);
         }
-        g_free(text);
     }
 }
 

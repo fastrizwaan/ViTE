@@ -13,10 +13,7 @@
 
 /* Zero-RAM strategy: No RAM threshold, always disk. */
 
-/* Threshold for keeping undo data in RAM vs disk.
- * Lower than before (50MB vs 100MB) for better memory efficiency.
- * Also dynamically checked against available RAM. */
-#define UNDO_RAM_THRESHOLD (50 * 1024 * 1024)
+/* Zero-RAM strategy: No RAM threshold, always disk. */
 
 UndoStack *
 undo_stack_new(void)
