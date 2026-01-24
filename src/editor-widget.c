@@ -627,7 +627,14 @@ on_doc_content_changed(Document *doc, void *user_data)
     gtk_widget_queue_draw(GTK_WIDGET(self));
     
     /* Restart background scanner if needed (e.g. after edits invalidate state) */
-    if (self->syntax_ctx && !self->syntax_scan_idle_id) {
+    if (self->syntax_ctx) {
+         /* CRITICAL: Must invalidate previous state chain so scanner restarts from 0.
+            Otherwise, inserting text at start won't propagate state changes to end. */
+         syntax_context_invalidate_all(self->syntax_ctx);
+         
+         if (self->syntax_scan_idle_id) {
+             g_source_remove(self->syntax_scan_idle_id);
+         }
          self->syntax_scan_idle_id = g_idle_add((GSourceFunc)syntax_scan_step, self);
     }
 }
