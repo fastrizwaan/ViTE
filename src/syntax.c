@@ -209,32 +209,10 @@ syntax_context_new(void)
     ctx->sh_string = g_regex_new("\"(\\\\.|[^\"])*\"", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->sh_string_sq = g_regex_new("'[^']*'", G_REGEX_OPTIMIZE, 0, NULL);
 
-    /* JavaScript */
-    ctx->js_keywords = g_regex_new("\\b(async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|finally|for|from|function|get|if|import|in|instanceof|let|new|of|return|set|static|super|switch|this|throw|try|typeof|var|void|while|with|yield|true|false|null|undefined|NaN)\\b", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_builtins = g_regex_new("\\b(Array|Boolean|Date|Error|Function|JSON|Map|Math|Number|Object|Promise|Proxy|RegExp|Set|String|Symbol|WeakMap|WeakSet|console|document|window|global|module|exports|require|process)\\b", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_func_def = g_regex_new("\\b(function)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_comment_sl = g_regex_new("//.*$", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_comment_ml_start = g_regex_new("/\\*", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_comment_ml_end = g_regex_new("\\*/", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_string_dq = g_regex_new("\"", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_string_sq = g_regex_new("'", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_template = g_regex_new("`", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->js_number = g_regex_new("\\b\\d+\\.?\\d*\\b", G_REGEX_OPTIMIZE, 0, NULL);
+    /* JS Keywords (Migrated to Linear Tokenizer) */
+    /* JSON Regexes (Migrated to Linear Tokenizer) */
+    /* YAML Regexes (Migrated to Linear Tokenizer) */
 
-    /* JSON */
-    ctx->json_keywords = g_regex_new("\\b(true|false|null)\\b", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->json_string = g_regex_new("\"(\\\\.|[^\"])*\"", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->json_key = g_regex_new("\"(\\\\.|[^\"])*\"\\s*:", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->json_number = g_regex_new("-?(0|[1-9]\\d*)(\\.\\d+)?([eE][+-]?\\d+)?", G_REGEX_OPTIMIZE, 0, NULL);
-
-    /* YAML */
-    /* Capture key part (group 1) and optional value part (group 2, if matches colon) */
-    /* Keys can be: plain text, "quoted", 'quoted'. Preceded by spaces or '- '. */
-    /* Regex: ^(\s*(- )?)?((?:"[^"]*"|'[^']*'|[\w-]+))\s*:(\s+.*)? */
-    /* Simplification: Just match line structure in loop. Match Key. Match Value. */
-    ctx->yaml_keys = g_regex_new("^(\\s*(?:-\\s+)?)([\"']?[\\w.-]+[\"']?|[\"'].*[\"'])\\s*:", G_REGEX_OPTIMIZE, 0, NULL); 
-    ctx->yaml_comment = g_regex_new("#.*$", G_REGEX_OPTIMIZE, 0, NULL);
-    ctx->yaml_scalars = g_regex_new("\\b(true|false|null|yes|no)\\b", G_REGEX_OPTIMIZE, 0, NULL);
 
     /* XML */
     ctx->xml_tag_open = g_regex_new("</?([-\\w.:]+)", G_REGEX_OPTIMIZE, 0, NULL);
@@ -275,25 +253,10 @@ syntax_context_free(SyntaxContext *ctx)
     if (ctx->sh_string) g_regex_unref(ctx->sh_string);
     if (ctx->sh_string_sq) g_regex_unref(ctx->sh_string_sq);
 
-    if (ctx->js_keywords) g_regex_unref(ctx->js_keywords);
-    if (ctx->js_builtins) g_regex_unref(ctx->js_builtins);
-    if (ctx->js_func_def) g_regex_unref(ctx->js_func_def);
-    if (ctx->js_comment_sl) g_regex_unref(ctx->js_comment_sl);
-    if (ctx->js_comment_ml_start) g_regex_unref(ctx->js_comment_ml_start);
-    if (ctx->js_comment_ml_end) g_regex_unref(ctx->js_comment_ml_end);
-    if (ctx->js_string_dq) g_regex_unref(ctx->js_string_dq);
-    if (ctx->js_string_sq) g_regex_unref(ctx->js_string_sq);
-    if (ctx->js_template) g_regex_unref(ctx->js_template);
-    if (ctx->js_number) g_regex_unref(ctx->js_number);
+    /* JS Regexes freed - None used */
+    /* JSON Regexes freed - None used */
+    /* YAML Regexes freed - None used */
 
-    if (ctx->json_keywords) g_regex_unref(ctx->json_keywords);
-    if (ctx->json_string) g_regex_unref(ctx->json_string);
-    if (ctx->json_number) g_regex_unref(ctx->json_number);
-    if (ctx->json_key) g_regex_unref(ctx->json_key);
-
-    if (ctx->yaml_keys) g_regex_unref(ctx->yaml_keys);
-    if (ctx->yaml_comment) g_regex_unref(ctx->yaml_comment);
-    if (ctx->yaml_scalars) g_regex_unref(ctx->yaml_scalars);
 
     if (ctx->xml_tag_open) g_regex_unref(ctx->xml_tag_open);
     if (ctx->xml_tag_close) g_regex_unref(ctx->xml_tag_close);
@@ -478,6 +441,22 @@ static const char *c_keywords[] = {
     "throw", "true", "try", "typedef", "typename", "union", "unsigned", "using", 
     "virtual", "void", "volatile", "while", "NULL", "_Bool", "_Complex", "_Imaginary", 
     NULL
+};
+
+/* JS Keywords */
+static const char *js_keywords[] = {
+    "async", "await", "break", "case", "catch", "class", "const", "continue", "debugger",
+    "default", "delete", "do", "else", "export", "extends", "finally", "for", "from",
+    "function", "get", "if", "import", "in", "instanceof", "let", "new", "of", "return",
+    "set", "static", "super", "switch", "this", "throw", "try", "typeof", "var", "void",
+    "while", "with", "yield", "true", "false", "null", "undefined", "NaN", NULL
+};
+
+static const char *js_builtins[] = {
+    "Array", "Boolean", "Date", "Error", "Function", "JSON", "Map", "Math", "Number",
+    "Object", "Promise", "Proxy", "RegExp", "Set", "String", "Symbol", "WeakMap",
+    "WeakSet", "console", "document", "window", "global", "module", "exports", "require",
+    "process", NULL
 };
 
 /* Python Keyword Lists */
@@ -1042,136 +1021,12 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
          
 
     } else if (ctx->lang == LANG_JAVASCRIPT) {
-        /* JS Keywords */
-        GMatchInfo *mi;
-        if (g_regex_match(ctx->js_keywords, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_keyword);
-                g_match_info_next(mi, NULL);
-            }
-        }
-        g_match_info_free(mi);
-        
-        if (g_regex_match(ctx->js_builtins, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_builtin);
-                g_match_info_next(mi, NULL);
-            }
-        }
-        g_match_info_free(mi);
-        
-        /* Func defs: function name */
-        if (g_regex_match(ctx->js_func_def, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int ks, ke, ns, ne;
-                if (g_match_info_fetch_pos(mi, 1, &ks, &ke)) add_attr(attrs, ks, ke, &d_keyword);
-                if (g_match_info_fetch_pos(mi, 2, &ns, &ne)) add_attr(attrs, ns, ne, &d_function);
-                g_match_info_next(mi, NULL);
-            }
-        }
-        g_match_info_free(mi);
-        
-        /* Numbers */
-        if (g_regex_match(ctx->js_number, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_number);
-                g_match_info_next(mi, NULL);
-            }
-        }
-        g_match_info_free(mi);
-        
-        /* Strings/Comments state machine */
+        gboolean prev_is_value = FALSE; /* Heuristic for Regex vs Div */
+        gboolean expect_func = FALSE;
+
         while (cur < len) {
-            if (state == STATE_ROOT) {
-                if (text[cur] == '"') {
-                    state = STATE_IN_DOUBLE_QUOTE;
-                    size_t start_pos = cur;
-                    cur++;
-                    while (cur < len) {
-                        if (text[cur] == '"' && text[cur-1] != '\\') {
-                            cur++;
-                            state = STATE_ROOT;
-                            break;
-                        }
-                        cur++;
-                    }
-                    add_attr(attrs, start_pos, cur, &d_string);
-                } else if (text[cur] == '\'') {
-                    state = STATE_IN_SINGLE_QUOTE;
-                    size_t start_pos = cur;
-                    cur++;
-                    while (cur < len) {
-                        if (text[cur] == '\'' && text[cur-1] != '\\') {
-                            cur++;
-                            state = STATE_ROOT;
-                            break;
-                        }
-                        cur++;
-                    }
-                    add_attr(attrs, start_pos, cur, &d_string);
-                } else if (text[cur] == '`') {
-                    /* Template literal - simplify as single line for now or simple multiline */
-                    /* Note: multiline templates needs state. Re-use TRIPLE_DQ state slot for Template? */
-                    state = STATE_IN_TRIPLE_DQ_STRING; /* reusing state 5 */
-                    size_t start_pos = cur;
-                    cur++;
-                    while (cur < len) {
-                        if (text[cur] == '`' && text[cur-1] != '\\') {
-                            cur++;
-                            state = STATE_ROOT;
-                            break;
-                        }
-                        cur++;
-                    }
-                    add_attr(attrs, start_pos, cur, &d_string);
-                } else if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
-                    add_attr(attrs, cur, len, &d_comment);
-                    cur = len;
-                } else if (text[cur] == '/' && cur+1 < len && text[cur+1] == '*') {
-                    state = STATE_IN_ML_COMMENT;
-                    size_t start_pos = cur;
-                    cur += 2;
-                    while (cur + 1 < len) {
-                        if (text[cur] == '*' && text[cur+1] == '/') {
-                            cur += 2;
-                            state = STATE_ROOT;
-                            break;
-                        }
-                        cur++;
-                    }
-                    add_attr(attrs, start_pos, cur, &d_comment);
-                } else {
-                    cur++;
-                }
-            } else if (state == STATE_IN_DOUBLE_QUOTE) {
-                size_t start_pos = cur;
-                while (cur < len) {
-                    if (text[cur] == '"' && (cur==0 || text[cur-1] != '\\')) {
-                        cur++;
-                        state = STATE_ROOT;
-                        break;
-                    }
-                    cur++;
-                }
-                add_attr(attrs, start_pos, cur, &d_string);
-            } else if (state == STATE_IN_SINGLE_QUOTE) {
-                size_t start_pos = cur;
-                while (cur < len) {
-                    if (text[cur] == '\'' && (cur==0 || text[cur-1] != '\\')) {
-                        cur++;
-                        state = STATE_ROOT;
-                        break;
-                    }
-                    cur++;
-                }
-                add_attr(attrs, start_pos, cur, &d_string);
-            } else if (state == STATE_IN_ML_COMMENT) {
+            /* State: Comments & Strings */
+            if (state == STATE_IN_ML_COMMENT) {
                 size_t start_pos = cur;
                 while (cur + 1 < len) {
                     if (text[cur] == '*' && text[cur+1] == '/') {
@@ -1181,115 +1036,382 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
                     }
                     cur++;
                 }
+                if (state == STATE_IN_ML_COMMENT) cur = len;
                 add_attr(attrs, start_pos, cur, &d_comment);
-            } else if (state == STATE_IN_TRIPLE_DQ_STRING) { /* Template literal continuation */
+                continue;
+            }
+            if (state == STATE_IN_TRIPLE_DQ_STRING) { /* Reused for Template ` */
                 size_t start_pos = cur;
                 while (cur < len) {
-                    if (text[cur] == '`' && (cur==0 || text[cur-1] != '\\')) {
+                    if (text[cur] == '`' && (cur == 0 || text[cur-1] != '\\')) {
                         cur++;
                         state = STATE_ROOT;
+                        prev_is_value = TRUE;
                         break;
                     }
                     cur++;
                 }
                 add_attr(attrs, start_pos, cur, &d_string);
-            } else {
-                state = STATE_ROOT;
+                continue;
+            }
+
+            if (state == STATE_ROOT) {
+                /* Whitespace usually ignores, but newlines reset heuristic? 
+                   Actually we are defined per line. prev_is_value starts FALSE.
+                   If line starts with operator, it might be continuation. 
+                   But we can't look back. Default FALSE (Regex) is safer for "/regex/".
+                */
+
+                /* Comments */
+                if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
+                    add_attr(attrs, cur, len, &d_comment);
+                    cur = len;
+                    break;
+                }
+                if (text[cur] == '/' && cur+1 < len && text[cur+1] == '*') {
+                    state = STATE_IN_ML_COMMENT;
+                    size_t start_pos = cur;
+                    cur += 2;
+                     while (cur + 1 < len) {
+                        if (text[cur] == '*' && text[cur+1] == '/') {
+                            cur += 2;
+                            state = STATE_ROOT;
+                            break;
+                        }
+                        cur++;
+                    }
+                    if (state == STATE_IN_ML_COMMENT) cur = len;
+                    add_attr(attrs, start_pos, cur, &d_comment);
+                    continue; /* Don't set prev_is_value for comment? */
+                }
+
+                /* Regex vs Division */
+                if (text[cur] == '/') {
+                    if (prev_is_value) {
+                        /* Division */
+                        /* Just an operator, usually plain color or operator color (skipped) */
+                        cur++;
+                        prev_is_value = FALSE; /* Op consumes value */
+                    } else {
+                        /* Regex Literal */
+                        size_t start_pos = cur;
+                        cur++; /* Skip opening / */
+                        while (cur < len) {
+                            if (text[cur] == '/' && text[cur-1] != '\\') {
+                                cur++;
+                                /* Skip flags */
+                                while (cur < len && g_ascii_isalpha(text[cur])) cur++;
+                                prev_is_value = TRUE; /* Regex literal is a value */
+                                break;
+                            }
+                            cur++;
+                        }
+                        add_attr(attrs, start_pos, cur, &d_string); /* Regex colored as string */
+                    }
+                    continue;
+                }
+
+                /* Strings */
+                if (text[cur] == '"') {
+                    size_t start_pos = cur;
+                    cur++;
+                    while (cur < len) {
+                        if (text[cur] == '"' && text[cur-1] != '\\') {
+                            cur++;
+                            break;
+                        }
+                        cur++;
+                    }
+                    add_attr(attrs, start_pos, cur, &d_string);
+                     prev_is_value = TRUE;
+                    continue;
+                }
+                if (text[cur] == '\'') {
+                    size_t start_pos = cur;
+                    cur++;
+                    while (cur < len) {
+                        if (text[cur] == '\'' && text[cur-1] != '\\') {
+                            cur++;
+                            break;
+                        }
+                        cur++;
+                    }
+                    add_attr(attrs, start_pos, cur, &d_string);
+                     prev_is_value = TRUE;
+                    continue;
+                }
+                /* Template Literal */
+                if (text[cur] == '`') {
+                    state = STATE_IN_TRIPLE_DQ_STRING; /* reused for template */
+                    size_t start_pos = cur;
+                    cur++;
+                    while (cur < len) {
+                        if (text[cur] == '`' && text[cur-1] != '\\') {
+                            cur++;
+                            state = STATE_ROOT;
+                            prev_is_value = TRUE;
+                            break;
+                        }
+                        cur++;
+                    }
+                    add_attr(attrs, start_pos, cur, &d_string);
+                    continue;
+                }
+
+                /* Numbers */
+                if (g_ascii_isdigit(text[cur])) {
+                    size_t start_pos = cur;
+                    while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '.')) {
+                        cur++;
+                    }
+                    add_attr(attrs, start_pos, cur, &d_number);
+                    prev_is_value = TRUE;
+                    continue;
+                }
+
+                /* Identifiers */
+                if (g_ascii_isalpha(text[cur]) || text[cur] == '_' || text[cur] == '$') {
+                    size_t start_pos = cur;
+                    while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_' || text[cur] == '$')) {
+                        cur++;
+                    }
+                    size_t word_len = cur - start_pos;
+                    const char *word_start = text + start_pos;
+                    
+                    if (expect_func) {
+                        add_attr(attrs, start_pos, cur, &d_function);
+                        expect_func = FALSE;
+                        prev_is_value = TRUE; /* Function Name is a value-ish */
+                    } 
+                    else if (is_word_in_list(word_start, word_len, js_keywords)) {
+                        add_attr(attrs, start_pos, cur, &d_keyword);
+                        prev_is_value = FALSE; /* Keywords usually start statements/clauses */
+                         /* Special case: 'this', 'true', 'false', 'null', 'undefined', 'NaN' are values */
+                        if (strncmp(word_start, "this", word_len) == 0 ||
+                            strncmp(word_start, "true", word_len) == 0 ||
+                            strncmp(word_start, "false", word_len) == 0 ||
+                            strncmp(word_start, "null", word_len) == 0 ||
+                            strncmp(word_start, "undefined", word_len) == 0 ||
+                            strncmp(word_start, "NaN", word_len) == 0) {
+                            prev_is_value = TRUE;
+                        }
+                        else if (strncmp(word_start, "function", word_len) == 0 && word_len == 8) {
+                             expect_func = TRUE;
+                        }
+                    } 
+                    else if (is_word_in_list(word_start, word_len, js_builtins)) {
+                        add_attr(attrs, start_pos, cur, &d_builtin);
+                        prev_is_value = TRUE;
+                    } 
+                    else {
+                        /* Check for function call */
+                        size_t peek = cur;
+                        while (peek < len && g_ascii_isspace(text[peek])) peek++;
+                        if (peek < len && text[peek] == '(') add_attr(attrs, start_pos, cur, &d_function);
+                        
+                        prev_is_value = TRUE; /* Identifier is a value */
+                    }
+                    continue;
+                }
+                
+                /* Punctuation */
+                if (strchr("()[]{};,", text[cur])) {
+                    if (text[cur] == ')' || text[cur] == ']') prev_is_value = TRUE;
+                    else prev_is_value = FALSE;
+                    cur++;
+                    continue;
+                }
+                /* Operators */
+                if (strchr("=+-*&|!<>?:", text[cur])) {
+                     prev_is_value = FALSE;
+                     cur++;
+                     continue;
+                }
+
                 cur++;
             }
         }
     } else if (ctx->lang == LANG_JSON) {
-        GMatchInfo *mi;
-        if (g_regex_match(ctx->json_key, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                /* Key is like "foo": - highlight "foo" as type/key, : as punctuation */
-                add_attr(attrs, s, e-1, &d_variable); /* JSON Key -> Red (Variable) like Svite */
-                g_match_info_next(mi, NULL);
+        while (cur < len) {
+            /* Whitespace */
+            if (g_ascii_isspace(text[cur])) {
+                cur++;
+                continue;
             }
-        }
-        g_match_info_free(mi);
-        
-        if (g_regex_match(ctx->json_string, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_string);
-                g_match_info_next(mi, NULL);
-            }
-        }
-        g_match_info_free(mi);
-        
-        if (g_regex_match(ctx->json_keywords, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_number); /* true/false -> Orange (Number) in Svite JSON */
-                g_match_info_next(mi, NULL);
-            }
-        }
-        g_match_info_free(mi);
-        
-        if (g_regex_match(ctx->json_number, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_number);
-                g_match_info_next(mi, NULL);
-            }
-        }
-        g_match_info_free(mi);
-        
-    } else if (ctx->lang == LANG_YAML) {
-        GMatchInfo *mi;
-        
-        /* Keys (Red) and Values (Green) */
-        if (g_regex_match(ctx->yaml_keys, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int pre_s, pre_e;
-                int key_s, key_e;
-                int full_s, full_e;
-                
-                /* Group 1: Prefix (- )?, Group 2: Key. Full Match: Prefix+Key+Colon */
-                g_match_info_fetch_pos(mi, 0, &full_s, &full_e);
-                
-                /* Default everything after the key match to Green (String) */
-                /* This handles "key: value" where value is unquoted text */
-                add_attr(attrs, full_e, len, &d_string);
-                
-                /* Highlight the Key itself (Group 2) in Red */
-                if (g_match_info_fetch_pos(mi, 2, &key_s, &key_e)) {
-                    add_attr(attrs, key_s, key_e, &d_variable); /* YAML Key -> Red */
+            
+            /* Strings */
+            if (text[cur] == '"') {
+                size_t start_pos = cur;
+                cur++;
+                while (cur < len) {
+                    if (text[cur] == '"' && text[cur-1] != '\\') {
+                        cur++;
+                        break;
+                    }
+                    cur++;
                 }
                 
-                g_match_info_next(mi, NULL);
+                /* Check if Key (followed by :) */
+                size_t peek = cur;
+                while (peek < len && g_ascii_isspace(text[peek])) peek++;
+                if (peek < len && text[peek] == ':') {
+                    add_attr(attrs, start_pos, cur, &d_variable); /* Key -> Red */
+                } else {
+                    add_attr(attrs, start_pos, cur, &d_string); /* Value -> Green */
+                }
+                continue;
             }
-        }
-        g_match_info_free(mi);
-        
-        /* Scalars (True/False/Null) - Orange */
-        if (g_regex_match(ctx->yaml_scalars, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_number);
-                g_match_info_next(mi, NULL);
+            
+            /* Numbers */
+            if (g_ascii_isdigit(text[cur]) || text[cur] == '-') {
+                size_t start_pos = cur;
+                cur++;
+                while (cur < len && (g_ascii_isdigit(text[cur]) || text[cur] == '.' || text[cur] == 'e' || text[cur] == 'E' || text[cur] == '+' || text[cur] == '-')) {
+                    cur++;
+                }
+                add_attr(attrs, start_pos, cur, &d_number);
+                continue;
             }
-        }
-        g_match_info_free(mi);
-        
-        /* Comments - Grey (Last to override others) */
-        if (g_regex_match(ctx->yaml_comment, text, 0, &mi)) {
-            while (g_match_info_matches(mi)) {
-                int s, e;
-                g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_comment);
-                g_match_info_next(mi, NULL);
+            
+            /* Keywords (true, false, null) */
+            if (g_ascii_isalpha(text[cur])) {
+                size_t start_pos = cur;
+                while (cur < len && g_ascii_isalpha(text[cur])) cur++;
+                size_t len = cur - start_pos;
+                if ((len == 4 && strncmp(text+start_pos, "true", 4) == 0) ||
+                    (len == 5 && strncmp(text+start_pos, "false", 5) == 0) ||
+                    (len == 4 && strncmp(text+start_pos, "null", 4) == 0)) {
+                    add_attr(attrs, start_pos, cur, &d_number);
+                }
+                continue;
             }
+            
+            cur++;
         }
-        g_match_info_free(mi);
+    } else if (ctx->lang == LANG_YAML) {
+        gboolean key_scanned = FALSE;
         
+        while (cur < len) {
+            /* Whitespace */
+            if (g_ascii_isspace(text[cur])) {
+                cur++;
+                continue;
+            }
+            
+            /* Comment (Anywhere) */
+            if (text[cur] == '#') {
+                add_attr(attrs, cur, len, &d_comment);
+                cur = len;
+                continue;
+            }
+            
+            /* Key Scan (Find first colon not in quotes) */
+            if (!key_scanned) {
+                /* Look ahead for colon */
+                size_t probe = cur;
+                gboolean in_dq = FALSE;
+                gboolean in_sq = FALSE;
+                gboolean found_colon = FALSE;
+                
+                while (probe < len) {
+                    if (text[probe] == '\\') {
+                        probe += 2; continue;
+                    }
+                    if (text[probe] == '"' && !in_sq) in_dq = !in_dq;
+                    if (text[probe] == '\'' && !in_dq) in_sq = !in_sq;
+                    if (text[probe] == '#' && !in_dq && !in_sq) break; /* Comment start, stop scanning */
+                    if (text[probe] == ':' && !in_dq && !in_sq) {
+                        found_colon = TRUE;
+                        break;
+                    }
+                    probe++;
+                }
+                
+                if (found_colon) {
+                    /* Highlight everything up to colon as Key (Red) */
+                    /* Note: this includes leading "- " if present.
+                       Ideally we should color "- " as punctuation? 
+                       For now, red like GitHub/VSCode is acceptable for whole key.
+                    */
+                    add_attr(attrs, cur, probe, &d_variable);
+                    cur = probe + 1; /* Skip colon */
+                    key_scanned = TRUE;
+                    continue;
+                } else {
+                    /* No colon found, treated as value item (e.g. list item) */
+                    key_scanned = TRUE;
+                    /* Fall through to value parsing */
+                }
+            }
+            
+            /* Value Parsing */
+            /* Strings */
+            if (text[cur] == '"') {
+                size_t start_pos = cur;
+                cur++;
+                while (cur < len) {
+                    if (text[cur] == '"' && text[cur-1] != '\\') {
+                        cur++;
+                        break;
+                    }
+                    cur++;
+                }
+                add_attr(attrs, start_pos, cur, &d_string);
+                continue;
+            }
+            if (text[cur] == '\'') {
+                size_t start_pos = cur;
+                cur++;
+                while (cur < len) {
+                    if (text[cur] == '\'' && text[cur-1] != '\\') {
+                        cur++;
+                        break;
+                    }
+                    cur++;
+                }
+                add_attr(attrs, start_pos, cur, &d_string);
+                continue;
+            }
+            
+            /* Numbers */
+            if (g_ascii_isdigit(text[cur]) || text[cur] == '-') {
+                size_t start_pos = cur;
+                /* Check if it's a number */
+                size_t probe = cur;
+                if (text[probe] == '-') probe++;
+                gboolean is_num = FALSE;
+                if (probe < len && g_ascii_isdigit(text[probe])) {
+                    while (probe < len && (g_ascii_isalnum(text[probe]) || text[probe] == '.')) probe++;
+                    /* If followed by space or end or comment */
+                    if (probe == len || g_ascii_isspace(text[probe]) || text[probe] == '#' || text[probe] == ',' || text[probe] == ']' || text[probe] == '}') {
+                        is_num = TRUE;
+                        add_attr(attrs, start_pos, probe, &d_number);
+                        cur = probe;
+                        continue;
+                    }
+                }
+            }
+            
+            /* Keywords (Scalars) */
+            if (g_ascii_isalpha(text[cur])) {
+                size_t start_pos = cur;
+                while (cur < len && g_ascii_isalpha(text[cur])) cur++;
+                size_t word_len = cur - start_pos;
+                if ((word_len == 4 && strncmp(text+start_pos, "true", 4) == 0) ||
+                    (word_len == 5 && strncmp(text+start_pos, "false", 5) == 0) ||
+                    (word_len == 4 && strncmp(text+start_pos, "null", 4) == 0) ||
+                    (word_len == 3 && strncmp(text+start_pos, "yes", 3) == 0) ||
+                    (word_len == 2 && strncmp(text+start_pos, "no", 2) == 0)) {
+                    add_attr(attrs, start_pos, cur, &d_number);
+                } else {
+                     /* Plain value text - could be green (string) */
+                     add_attr(attrs, start_pos, cur, &d_string);
+                }
+                continue;
+            }
+            
+            cur++;
+        }
     } else if (ctx->lang == LANG_XML) {
         GMatchInfo *mi;
         /* Comments */
