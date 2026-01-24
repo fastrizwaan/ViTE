@@ -163,7 +163,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     if (self->syntax_ctx) {
         size_t processed = syntax_get_processed_line_count(self->syntax_ctx);
         if (processed < start_line) {
-            size_t limit = 5000; /* Max lines to catch up synchronously to avoid freeze */
+            size_t limit = 20000; /* Increased limit for synchronous catch-up */
             size_t start_process = processed;
             
             if (start_line > processed + limit) {

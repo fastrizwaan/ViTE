@@ -120,8 +120,10 @@ struct _EditorWidget {
     int autoscroll_direction;
     double autoscroll_speed;
     
+    
     guint autoscroll_tick_count;
     guint idle_resize_id;
+    guint syntax_scan_idle_id; /* For background full-document scanning */
     
     gboolean last_theme_dark_mode; /* Tracking for syntax cache invalidation */
 };

@@ -128,6 +128,44 @@ typedef struct {
 
 
 
+
+static gboolean
+syntax_scan_step(gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    if (!self->doc || !self->syntax_ctx) {
+        self->syntax_scan_idle_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    
+    size_t processed = syntax_get_processed_line_count(self->syntax_ctx);
+    size_t total = document_get_line_count(self->doc);
+    
+    if (processed >= total) {
+        /* Done */
+        self->syntax_scan_idle_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    
+    size_t batch = 5000;
+    size_t limit = MIN(total, processed + batch);
+    
+    for (size_t i = processed; i < limit; i++) {
+        size_t len;
+        char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN);
+        if (text) {
+             size_t tlen = len;
+             while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;
+             text[tlen] = '\0';
+             syntax_process_line(self->syntax_ctx, i, text, FALSE);
+             g_free(text);
+        }
+    }
+    
+    /* Continue idle loop */
+    return G_SOURCE_CONTINUE;
+}
+
 static void
 on_system_font_changed(GSettings *settings, const char *key, gpointer user_data)
 {
@@ -228,6 +266,10 @@ editor_widget_dispose(GObject *object)
         g_source_remove(self->autoscroll_timer_id);
         self->autoscroll_timer_id = 0;
     }
+    if (self->syntax_scan_idle_id) {
+        g_source_remove(self->syntax_scan_idle_id);
+        self->syntax_scan_idle_id = 0;
+    }
 
     G_OBJECT_CLASS(editor_widget_parent_class)->dispose(object);
 }
@@ -295,10 +337,11 @@ editor_widget_init(EditorWidget *self)
     self->drag_copy_mode = FALSE;
     self->drag_ghost_layout = NULL;
     
-    /* Autoscroll timer initialization */
     self->autoscroll_timer_id = 0;
     self->autoscroll_direction = 0;
     self->autoscroll_speed = 0;
+    
+    self->syntax_scan_idle_id = 0;
     
     /* Viewport padding */
     self->padding_left = 4;
@@ -582,6 +625,11 @@ on_doc_content_changed(Document *doc, void *user_data)
     /* Update adjustments (size might have changed) */
     editor_widget_update_adjustments(self, -1, -1);
     gtk_widget_queue_draw(GTK_WIDGET(self));
+    
+    /* Restart background scanner if needed (e.g. after edits invalidate state) */
+    if (self->syntax_ctx && !self->syntax_scan_idle_id) {
+         self->syntax_scan_idle_id = g_idle_add((GSourceFunc)syntax_scan_step, self);
+    }
 }
 
 void
