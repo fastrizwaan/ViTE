@@ -31,7 +31,9 @@ typedef enum {
 typedef struct _SyntaxContext SyntaxContext;
 
 SyntaxContext *syntax_context_new(void);
-void syntax_context_free(SyntaxContext *ctx);
+SyntaxContext *syntax_context_ref(SyntaxContext *ctx);
+void syntax_context_unref(SyntaxContext *ctx);
+void syntax_context_free(SyntaxContext *ctx); /* deprecated in favor of unref */
 
 void syntax_context_set_language(SyntaxContext *ctx, const char *lang_name);
 void syntax_context_invalidate(SyntaxContext *ctx, size_t start_line);

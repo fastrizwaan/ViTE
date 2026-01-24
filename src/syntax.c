@@ -1,6 +1,7 @@
 #include "syntax.h"
 
 struct _SyntaxContext {
+    int ref_count;
     SyntaxLanguage lang;
     
     /* State tracking: index i = state AFTER line i */
@@ -190,8 +191,8 @@ syntax_context_new(void)
     /* Initialize color cache on first context creation */
     init_syntax_colors();
     
-    SyntaxContext *ctx = malloc(sizeof(SyntaxContext));
-    memset(ctx, 0, sizeof(SyntaxContext)); /* Clear all regex pointers */
+    SyntaxContext *ctx = g_new0(SyntaxContext, 1);
+    ctx->ref_count = 1;
     ctx->lang = LANG_NONE;
     ctx->state_chain = g_byte_array_new();
     
@@ -240,23 +241,30 @@ syntax_context_new(void)
 void
 syntax_context_free(SyntaxContext *ctx)
 {
-    g_byte_array_unref(ctx->state_chain);
+    syntax_context_unref(ctx);
+}
+
+SyntaxContext *
+syntax_context_ref(SyntaxContext *ctx)
+{
+    if (ctx) g_atomic_int_inc(&ctx->ref_count);
+    return ctx;
+}
+
+void
+syntax_context_unref(SyntaxContext *ctx)
+{
+    if (!ctx) return;
+    if (!g_atomic_int_dec_and_test(&ctx->ref_count)) return;
+
+    if (ctx->state_chain) g_byte_array_unref(ctx->state_chain);
     
-    /* C Regexes freed - None used */
-    /* Py Regexes freed - None used */
-
-
     if (ctx->sh_keywords) g_regex_unref(ctx->sh_keywords);
     if (ctx->sh_builtins) g_regex_unref(ctx->sh_builtins);
     if (ctx->sh_comment) g_regex_unref(ctx->sh_comment);
     if (ctx->sh_variable) g_regex_unref(ctx->sh_variable);
     if (ctx->sh_string) g_regex_unref(ctx->sh_string);
     if (ctx->sh_string_sq) g_regex_unref(ctx->sh_string_sq);
-
-    /* JS Regexes freed - None used */
-    /* JSON Regexes freed - None used */
-    /* YAML Regexes freed - None used */
-
 
     if (ctx->xml_tag_open) g_regex_unref(ctx->xml_tag_open);
     if (ctx->xml_tag_close) g_regex_unref(ctx->xml_tag_close);
@@ -272,14 +280,12 @@ syntax_context_free(SyntaxContext *ctx)
     if (ctx->desktop_arg) g_regex_unref(ctx->desktop_arg);
     if (ctx->desktop_string_dq) g_regex_unref(ctx->desktop_string_dq);
     if (ctx->desktop_string_sq) g_regex_unref(ctx->desktop_string_sq);
-    
-    /* Free cache - g_hash_table_destroy triggers the destroy callback (syntax_cache_entry_free)
-     * for each entry, which handles cleanup - do NOT unref manually to avoid double-free. */
+
     if (ctx->line_cache) {
         g_hash_table_destroy(ctx->line_cache);
     }
     
-    free(ctx);
+    g_free(ctx);
 }
 
 void

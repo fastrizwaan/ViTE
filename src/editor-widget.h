@@ -3,6 +3,7 @@
 
 #include <gtk/gtk.h>
 #include "document.h"
+#include "syntax.h"
 
 #define EDITOR_TYPE_WIDGET (editor_widget_get_type())
 G_DECLARE_FINAL_TYPE(EditorWidget, editor_widget, EDITOR, WIDGET, GtkWidget)
@@ -12,6 +13,8 @@ void editor_widget_set_document(EditorWidget *self, Document *doc);
 void editor_widget_set_language(EditorWidget *self, const char *lang);
 
 Document *editor_widget_get_document(EditorWidget *self);
+SyntaxContext *editor_widget_get_syntax_context(EditorWidget *self);
+void editor_widget_set_syntax_context(EditorWidget *self, SyntaxContext *ctx);
 const char *editor_widget_get_language_name(EditorWidget *self);
 
 /* Search Integration */

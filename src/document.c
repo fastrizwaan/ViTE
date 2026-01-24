@@ -26,6 +26,7 @@ struct _Document {
 
     /* Content Observation Listeners */
     GList *content_callbacks; /* List of struct { func, user_data } */
+    GList *update_callbacks;
     gboolean callbacks_suspended;
 
     /* Async Loading */
@@ -88,6 +89,8 @@ document_new_empty(void)
     doc->saved_command = NULL;
     doc->mod_callbacks = NULL;
     doc->content_callbacks = NULL;
+    doc->update_callbacks = NULL;
+    doc->callbacks_suspended = FALSE;
     doc->progress_cb = NULL;
     doc->progress_user_data = NULL;
     return doc;
@@ -106,6 +109,7 @@ document_free(Document *doc)
     /* Free callback lists */
     g_list_free_full(doc->mod_callbacks, g_free);
     g_list_free_full(doc->content_callbacks, g_free);
+    g_list_free_full(doc->update_callbacks, g_free);
     free(doc);
 }
 
@@ -159,7 +163,27 @@ document_get_length(Document *doc)
 {
     return piece_table_get_length(doc->pt);
 }
+void
+document_add_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data)
+{
+    ContentCallbackData *data = g_new(ContentCallbackData, 1);
+    data->func = (void (*)(Document*, void*))callback; /* Hacky cast but we know how to call it */
+    data->user_data = user_data;
+    doc->update_callbacks = g_list_append(doc->update_callbacks, data);
+}
 
+void
+document_remove_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data)
+{
+    for (GList *l = doc->update_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *data = l->data;
+        if (data->func == (void (*)(Document*, void*))callback && data->user_data == user_data) {
+            doc->update_callbacks = g_list_delete_link(doc->update_callbacks, l);
+            g_free(data);
+            return;
+        }
+    }
+}
 
 
 char *
@@ -180,31 +204,54 @@ document_get_offset_of_line(Document *doc, size_t line_index)
     return piece_table_get_offset_of_line(doc->pt, line_index);
 }
 
-void
-document_insert(Document *doc, size_t offset, const char *text, size_t len)
+
+static void
+document_emit_update(Document *doc, size_t start_line, int line_delta)
 {
-    if (len == 0) return;
-    undo_stack_push_insert(doc->undo_stack, offset, text, len);
-    piece_table_insert(doc->pt, offset, text, len);
-    check_modification_state(doc);
-    
     if (doc->callbacks_suspended) return;
 
     for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
         ContentCallbackData *cb = l->data;
         cb->func(doc, cb->user_data);
     }
+    
+    for (GList *l = doc->update_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        DocumentUpdateCallback func = (DocumentUpdateCallback)cb->func;
+        func(doc, start_line, line_delta, cb->user_data);
+    }
 }
+
+void
+document_insert(Document *doc, size_t offset, const char *text, size_t len)
+{
+    if (len == 0) return;
+    size_t start_line = piece_table_get_line_of_offset(doc->pt, offset);
+    size_t old_lines = piece_table_get_line_count(doc->pt);
+    
+    undo_stack_push_insert(doc->undo_stack, offset, text, len);
+    piece_table_insert(doc->pt, offset, text, len);
+    
+    size_t new_lines = piece_table_get_line_count(doc->pt);
+    int line_delta = (int)new_lines - (int)old_lines;
+
+    check_modification_state(doc);
+    document_emit_update(doc, start_line, line_delta);
+}
+
 
 
 
 static void
 document_delete_streaming(Document *doc, size_t offset, size_t len)
 {
+    size_t start_line = piece_table_get_line_of_offset(doc->pt, offset);
+    size_t old_lines = piece_table_get_line_count(doc->pt);
+
     UndoStack *stack = doc->undo_stack;
     
     if (!stack->in_undo_redo && stack->log_file) {
-        /* Write content directly to undo log in chunks */
+        /* ... existing log logic ... */
         UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
         cmd->type = UNDO_OP_DELETE;
         cmd->start = offset;
@@ -232,14 +279,12 @@ document_delete_streaming(Document *doc, size_t offset, size_t len)
     }
     
     piece_table_delete(doc->pt, offset, len);
+    
+    size_t new_lines = piece_table_get_line_count(doc->pt);
+    int line_delta = (int)new_lines - (int)old_lines;
+
     check_modification_state(doc);
-    
-    if (doc->callbacks_suspended) return;
-    
-    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *cb = l->data;
-        cb->func(doc, cb->user_data);
-    }
+    document_emit_update(doc, start_line, line_delta);
 }
 
 void
@@ -308,27 +353,20 @@ document_delete(Document *doc, size_t offset, size_t len)
         return;
     }
 
+    size_t start_line = piece_table_get_line_of_offset(doc->pt, offset);
+    size_t old_lines = piece_table_get_line_count(doc->pt);
+
     char *deleted = piece_table_get_text_range(doc->pt, offset, len);
-    
-    if (!deleted) {
-        /* If allocation failed, fallback to streaming */
-        g_warning("document_delete: Failed to allocate erase buffer, falling back to streaming");
-        document_delete_streaming(doc, offset, len);
-        return;
-    }
-    
     undo_stack_push_delete(doc->undo_stack, offset, deleted, len);
     g_free(deleted);
     
     piece_table_delete(doc->pt, offset, len);
+    
+    size_t new_lines = piece_table_get_line_count(doc->pt);
+    int line_delta = (int)new_lines - (int)old_lines;
+
     check_modification_state(doc);
-    
-    if (doc->callbacks_suspended) return;
-    
-    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *cb = l->data;
-        cb->func(doc, cb->user_data);
-    }
+    document_emit_update(doc, start_line, line_delta);
 }
 
 void
@@ -359,26 +397,30 @@ document_resume_callbacks(Document *doc)
 UndoInfo
 document_undo(Document *doc)
 {
+    size_t old_lines = piece_table_get_line_count(doc->pt);
     UndoInfo info = undo_stack_undo(doc->undo_stack, doc->pt);
+    size_t new_lines = piece_table_get_line_count(doc->pt);
+    int line_delta = (int)new_lines - (int)old_lines;
+
+    size_t start_line = piece_table_get_line_of_offset(doc->pt, info.start);
+
     check_modification_state(doc);
-    check_modification_state(doc);
-    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *cb = l->data;
-        cb->func(doc, cb->user_data);
-    }
+    document_emit_update(doc, start_line, line_delta);
     return info;
 }
 
 UndoInfo
 document_redo(Document *doc)
 {
+    size_t old_lines = piece_table_get_line_count(doc->pt);
     UndoInfo info = undo_stack_redo(doc->undo_stack, doc->pt);
+    size_t new_lines = piece_table_get_line_count(doc->pt);
+    int line_delta = (int)new_lines - (int)old_lines;
+
+    size_t start_line = piece_table_get_line_of_offset(doc->pt, info.start);
+
     check_modification_state(doc);
-    check_modification_state(doc);
-    for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *cb = l->data;
-        cb->func(doc, cb->user_data);
-    }
+    document_emit_update(doc, start_line, line_delta);
     return info;
 }
 

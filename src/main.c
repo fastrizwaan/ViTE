@@ -922,13 +922,23 @@ do_split(ViteWindow *win, GtkOrientation orientation)
     GtkWidget *new_scrolled = gtk_scrolled_window_new();
     GtkWidget *new_editor = editor_widget_new();
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(new_scrolled), new_editor);
+    
+    /* SYNC: Set same document and syntax context */
     editor_widget_set_document(EDITOR_WIDGET(new_editor), doc);
     
-    const char *path = document_get_file_path(doc);
-    if (path) {
-         const char *dot = strrchr(path, '.');
-         if (dot) editor_widget_set_language(EDITOR_WIDGET(new_editor), dot + 1);
+    SyntaxContext *ctx = editor_widget_get_syntax_context(EDITOR_WIDGET(old_editor));
+    if (ctx) {
+        editor_widget_set_syntax_context(EDITOR_WIDGET(new_editor), ctx);
     }
+    
+    /* SYNC: Settings */
+    editor_widget_set_show_line_numbers(EDITOR_WIDGET(new_editor), editor_widget_get_show_line_numbers(EDITOR_WIDGET(old_editor)));
+    editor_widget_set_word_wrap(EDITOR_WIDGET(new_editor), editor_widget_get_word_wrap(EDITOR_WIDGET(old_editor)));
+    editor_widget_set_insert_mode(EDITOR_WIDGET(new_editor), editor_widget_get_insert_mode(EDITOR_WIDGET(old_editor)));
+    
+    /* SYNC: Scroll and Zoom (Optional, but good for split)
+       For now, just copy the language if it was manually overridden (redundant if shared but safe)
+    */
     
     GtkWidget *new_view_container = create_view_container(win, new_scrolled);
     gtk_paned_set_end_child(GTK_PANED(paned), new_view_container);

@@ -167,6 +167,22 @@ syntax_scan_step(gpointer user_data)
 }
 
 static void
+on_document_update(Document *doc, size_t start_line, int line_delta, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    if (!self->syntax_ctx) return;
+
+    /* Partial invalidation: only from start_line onwards */
+    syntax_context_invalidate(self->syntax_ctx, start_line);
+    
+    /* Restart background scanner for global consistency */
+    if (self->syntax_scan_idle_id) {
+        g_source_remove(self->syntax_scan_idle_id);
+    }
+    self->syntax_scan_idle_id = g_idle_add((GSourceFunc)syntax_scan_step, self);
+}
+
+static void
 on_system_font_changed(GSettings *settings, const char *key, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -262,13 +278,13 @@ editor_widget_dispose(GObject *object)
         gtk_widget_remove_tick_callback(GTK_WIDGET(self), self->cursor_blink_tick_id);
         self->cursor_blink_tick_id = 0;
     }
-    if (self->autoscroll_timer_id) {
-        g_source_remove(self->autoscroll_timer_id);
-        self->autoscroll_timer_id = 0;
-    }
     if (self->syntax_scan_idle_id) {
         g_source_remove(self->syntax_scan_idle_id);
         self->syntax_scan_idle_id = 0;
+    }
+    if (self->syntax_ctx) {
+        syntax_context_unref(self->syntax_ctx);
+        self->syntax_ctx = NULL;
     }
 
     G_OBJECT_CLASS(editor_widget_parent_class)->dispose(object);
@@ -626,17 +642,7 @@ on_doc_content_changed(Document *doc, void *user_data)
     editor_widget_update_adjustments(self, -1, -1);
     gtk_widget_queue_draw(GTK_WIDGET(self));
     
-    /* Restart background scanner if needed (e.g. after edits invalidate state) */
-    if (self->syntax_ctx) {
-         /* CRITICAL: Must invalidate previous state chain so scanner restarts from 0.
-            Otherwise, inserting text at start won't propagate state changes to end. */
-         syntax_context_invalidate_all(self->syntax_ctx);
-         
-         if (self->syntax_scan_idle_id) {
-             g_source_remove(self->syntax_scan_idle_id);
-         }
-         self->syntax_scan_idle_id = g_idle_add((GSourceFunc)syntax_scan_step, self);
-    }
+    /* Syntax invalidation is handled by on_document_update now for efficiency */
 }
 
 void
@@ -644,10 +650,12 @@ editor_widget_set_document(EditorWidget *self, Document *doc)
 {
     if (self->doc) {
         document_remove_content_callback(self->doc, on_doc_content_changed, self);
+        document_remove_update_callback(self->doc, on_document_update, self);
     }
     self->doc = doc;
     if (self->doc) {
         document_add_content_callback(self->doc, on_doc_content_changed, self);
+        document_add_update_callback(self->doc, on_document_update, self);
     }
     /* Force clear all cursors including the default one from init */
     if (self->cursors) g_array_set_size(self->cursors, 0);
@@ -703,10 +711,37 @@ editor_widget_set_language(EditorWidget *self, const char *lang)
                      g_free(text);
                  }
             }
+            
+            /* Ensure background scanner picks up after warm-up finishes */
+            if (self->syntax_scan_idle_id) g_source_remove(self->syntax_scan_idle_id);
+            self->syntax_scan_idle_id = g_idle_add((GSourceFunc)syntax_scan_step, self);
         }
         
         gtk_widget_queue_draw(GTK_WIDGET(self));
     }
+}
+
+SyntaxContext *
+editor_widget_get_syntax_context(EditorWidget *self)
+{
+    return self->syntax_ctx;
+}
+
+void
+editor_widget_set_syntax_context(EditorWidget *self, SyntaxContext *ctx)
+{
+    if (self->syntax_ctx == ctx) return;
+    
+    if (self->syntax_ctx) syntax_context_unref(self->syntax_ctx);
+    self->syntax_ctx = ctx ? syntax_context_ref(ctx) : NULL;
+    
+    /* If we have a document, restart background scanning for this context in THIS view */
+    if (self->syntax_ctx && self->doc) {
+         if (self->syntax_scan_idle_id) g_source_remove(self->syntax_scan_idle_id);
+         self->syntax_scan_idle_id = g_idle_add((GSourceFunc)syntax_scan_step, self);
+    }
+    
+    gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
 void

@@ -33,10 +33,16 @@ FileEncoding document_get_encoding(Document *doc);
 void document_add_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data);
 void document_remove_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data);
 
-/* Content Observation */
+/* Content Observation & Partial Invalidation */
 typedef void (*DocumentContentCallback)(Document *doc, void *user_data);
+/* start_line: where change began. line_delta: change in total lines (can be negative). */
+typedef void (*DocumentUpdateCallback)(Document *doc, size_t start_line, int line_delta, void *user_data);
+
 void document_add_content_callback(Document *doc, DocumentContentCallback callback, void *user_data);
 void document_remove_content_callback(Document *doc, DocumentContentCallback callback, void *user_data);
+
+void document_add_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data);
+void document_remove_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data);
 
 /* Content Access */
 char *document_get_line(Document *doc, size_t line_index, size_t *len);
