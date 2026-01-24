@@ -155,6 +155,49 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     double current_y_pos = -partial_y; /* Start with calculated offset */
     double text_start_x = gutter_w + self->padding_left;
 
+    /* Syntax State Catch-up Strategy:
+       Ensure that we have processed syntax state up to 'start_line'.
+       If we jumped/scrolled, we might have a gap.
+       Process intermediate lines (state-only, no attributes) to propagate matching (e.g. multiline strings).
+    */
+    if (self->syntax_ctx) {
+        size_t processed = syntax_get_processed_line_count(self->syntax_ctx);
+        if (processed < start_line) {
+            size_t limit = 5000; /* Max lines to catch up synchronously to avoid freeze */
+            size_t start_process = processed;
+            
+            if (start_line > processed + limit) {
+                /* Gap is too large. Skip ahead and assume ROOT state at start_line - limit.
+                   This is a heuristic trade-off. */
+                start_process = start_line - limit;
+                /* Note: We don't explicitly reset state[start_process-1] because gaps return ROOT by default in get_line_start_state */
+            }
+            
+            for (size_t i = start_process; i < start_line; i++) {
+                size_t len;
+                char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN + 1024);
+                if (text) {
+                     /* Validate UTF-8 just in case, though doc usually is valid-ish or checked elsewhere. 
+                        Optimization: if we trust doc, skip validate? 
+                        Safe side: validate. */
+                     if (!g_utf8_validate(text, len, NULL)) {
+                          char *safe = g_utf8_make_valid(text, len);
+                          g_free(text);
+                          text = safe;
+                     }
+                     
+                     /* Reduce length if trailing newline */
+                     size_t tlen = strlen(text);
+                     while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;
+                     text[tlen] = '\0';
+                     
+                     syntax_process_line(self->syntax_ctx, i, text, FALSE); /* Compute State Only */
+                     g_free(text);
+                }
+            }
+        }
+    }
+
     for (size_t i = 0; i < count_lines; ++i) {
         size_t visual_line_idx = start_line + i;
         if (visual_line_idx >= max_lines) break;

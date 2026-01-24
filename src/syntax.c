@@ -367,6 +367,7 @@ static void
 add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref)
 {
     if (start >= end) return;
+    if (!attrs) return; /* Skip attribute creation if only computing state */
     
     /* Map reference pointer to actual color based on mode */
     const PangoColor *effective_color = color_ref;
@@ -492,16 +493,22 @@ is_word_in_list(const char *word, size_t len, const char **list)
     return FALSE;
 }
 
-PangoAttrList *
-syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
+size_t
+syntax_get_processed_line_count(SyntaxContext *ctx)
 {
-    if (ctx->lang == LANG_NONE) return pango_attr_list_new();
+    return ctx->state_chain->len;
+}
+
+PangoAttrList *
+syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gboolean compute_attributes)
+{
+    if (ctx->lang == LANG_NONE) return compute_attributes ? pango_attr_list_new() : NULL;
     
     SyntaxState start_state = get_line_start_state(ctx, line_index);
     guint content_hash = g_str_hash(text);
     
-    /* Cache lookup */
-    if (ctx->line_cache) {
+    /* Cache lookup - Only if we need attributes */
+    if (compute_attributes && ctx->line_cache) {
         SyntaxCacheEntry *cached = g_hash_table_lookup(ctx->line_cache, GSIZE_TO_POINTER(line_index));
         if (cached && cached->content_hash == content_hash && cached->start_state == start_state) {
             /* Cache hit - return a copy of the cached attrs */
@@ -509,7 +516,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
         }
     }
     
-    PangoAttrList *attrs = pango_attr_list_new();
+    PangoAttrList *attrs = compute_attributes ? pango_attr_list_new() : NULL;
     SyntaxState state = start_state;
     size_t len = strlen(text);
     size_t cur = 0;
@@ -1548,7 +1555,7 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
     set_line_end_state(ctx, line_index, state);
     
     /* Store in cache - hash table's destroy function handles cleanup */
-    if (ctx->line_cache) {
+    if (ctx->line_cache && attrs) {
         SyntaxCacheEntry *entry = g_new(SyntaxCacheEntry, 1);
         entry->content_hash = content_hash;
         entry->start_state = start_state;
@@ -1557,4 +1564,10 @@ syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
     }
     
     return attrs;
+}
+
+PangoAttrList *
+syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
+{
+    return syntax_process_line(ctx, line_index, text, TRUE);
 }

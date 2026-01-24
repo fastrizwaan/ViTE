@@ -42,6 +42,12 @@ const char *syntax_context_get_language_name(SyntaxContext *ctx);
    'text' should be the content of the line.
    Returns a PangoAttrList to apply.
 */
+/* Process a line to update state, optionally computing attributes. 
+   If compute_attributes is FALSE, returns NULL. */
 PangoAttrList *syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text);
+PangoAttrList *syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gboolean compute_attributes);
+
+/* Get the number of lines that have been processed for state so far */
+size_t syntax_get_processed_line_count(SyntaxContext *ctx);
 
 #endif
