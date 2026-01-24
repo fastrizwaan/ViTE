@@ -7,8 +7,15 @@ typedef enum {
     LANG_NONE,
     LANG_C,
     LANG_PYTHON,
-    LANG_BASH
+    LANG_BASH,
+    LANG_JAVASCRIPT,
+    LANG_JSON,
+    LANG_YAML,
+    LANG_XML,
+    LANG_DESKTOP
 } SyntaxLanguage;
+
+void syntax_set_theme_mode(gboolean is_dark);
 
 /* States match Python logic roughly but simplified for C port first */
 typedef enum {

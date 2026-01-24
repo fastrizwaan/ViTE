@@ -122,6 +122,8 @@ struct _EditorWidget {
     
     guint autoscroll_tick_count;
     guint idle_resize_id;
+    
+    gboolean last_theme_dark_mode; /* Tracking for syntax cache invalidation */
 };
 
 /* Helper Functions */

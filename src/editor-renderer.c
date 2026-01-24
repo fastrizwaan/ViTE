@@ -39,10 +39,24 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     
     /* Ensure background is cleared/drawn to prevent drag artifacts */
     GdkRGBA bg_color = {1, 1, 1, 1}; /* Default white */
+    gboolean dark_mode_needed = FALSE;
+    
     if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
          /* Text is light -> Background should be dark */
          bg_color = (GdkRGBA){0.11, 0.11, 0.11, 1.0}; /* #1e1e1e approx */
+         dark_mode_needed = TRUE;
     }
+    
+    /* Update global syntax theme if changed or if local tracking differs */
+    /* Note: syntax_set_theme_mode updates global static. */
+    if (self->last_theme_dark_mode != dark_mode_needed) {
+        syntax_set_theme_mode(dark_mode_needed);
+        if (self->syntax_ctx) {
+            syntax_context_invalidate_all(self->syntax_ctx);
+        }
+        self->last_theme_dark_mode = dark_mode_needed;
+    }
+    
     gtk_snapshot_append_color(snapshot, &bg_color, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)height));
     
     /* Draw Gutter Background */
