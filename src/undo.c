@@ -37,6 +37,8 @@ undo_stack_new(void)
         s->log_file_path = g_strdup("/tmp/vite_undo_log_XXXXXX");
         int fd = mkstemp(s->log_file_path);
         if (fd != -1) {
+            /* Unlink immediately so file is deleted when fd closes (crash safety) */
+            unlink(s->log_file_path);
             s->log_file = fdopen(fd, "w+");
         }
     }

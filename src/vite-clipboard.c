@@ -135,6 +135,14 @@ vite_clipboard_persist_to_file(ViteClipboard *clip)
     
     g_debug("vite_clipboard: Persisting %zu bytes to %s", len, fname);
     
+    if (!resource_can_write_disk("/tmp", len)) {
+        g_warning("vite_clipboard: Insufficient disk space to persist clipboard");
+        close(fd);
+        unlink(fname);
+        g_free(fname);
+        return;
+    }
+    
     size_t written = 0;
     size_t chunk_size = 1024 * 1024;
     gboolean success = TRUE;

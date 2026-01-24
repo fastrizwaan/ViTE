@@ -13,6 +13,7 @@
 #include "document.h"
 #include <string.h>
 #include <stdio.h>
+#include "resource-check.h"
 #include <unistd.h>
 #include <sys/mman.h>
 #include <fcntl.h>
@@ -31,23 +32,33 @@ CompactMatches *compact_matches_new(size_t match_length) {
     cm->filepath = NULL;
     
     /* Create temporary file */
-    cm->filepath = g_strdup("/tmp/vite_matches_XXXXXX");
-    cm->fd = mkstemp(cm->filepath);
+    char *path = g_strdup("/tmp/vite_matches_XXXXXX");
+    cm->fd = mkstemp(path);
     if (cm->fd < 0) {
         g_warning("Failed to create temp file for matches: %s", strerror(errno));
-        g_free(cm->filepath);
-        cm->filepath = NULL;
+        g_free(path);
         g_free(cm);
         return NULL;
     }
     
+    /* Unlink immediately for auto-cleanup */
+    unlink(path);
+    g_free(path);
+    cm->filepath = NULL; /* No longer needed */
+    
     /* Pre-allocate file size */
     size_t file_size = cm->capacity * sizeof(size_t);
+    
+    if (!resource_can_write_disk("/tmp", file_size)) {
+        g_warning("compact_matches_new: Insufficient disk space for matches");
+        close(cm->fd);
+        g_free(cm);
+        return NULL;
+    }
+    
     if (ftruncate(cm->fd, file_size) < 0) {
         g_warning("Failed to resize temp file: %s", strerror(errno));
         close(cm->fd);
-        unlink(cm->filepath);
-        g_free(cm->filepath);
         g_free(cm);
         return NULL;
     }
@@ -58,8 +69,6 @@ CompactMatches *compact_matches_new(size_t match_length) {
         g_warning("Failed to mmap temp file: %s", strerror(errno));
         cm->data = NULL;
         close(cm->fd);
-        unlink(cm->filepath);
-        g_free(cm->filepath);
         g_free(cm);
         return NULL;
     }
@@ -83,8 +92,8 @@ void compact_matches_free(CompactMatches *cm) {
         cm->fd = -1;
     }
     
+    /* File already unlinked */
     if (cm->filepath) {
-        unlink(cm->filepath);  /* Delete temp file */
         g_free(cm->filepath);
         cm->filepath = NULL;
     }
@@ -107,6 +116,12 @@ static gboolean compact_matches_grow(CompactMatches *cm) {
     }
     cm->data = NULL;  /* Mark as unmapped during resize */
     
+    /* Check disk space before growing */
+    if (!resource_can_write_disk("/tmp", new_size - old_size)) {
+        g_warning("compact_matches_grow: Insufficient disk space");
+        return FALSE;
+    }
+
     /* Resize file */
     if (ftruncate(cm->fd, new_size) < 0) {
         g_warning("ftruncate failed: %s", strerror(errno));

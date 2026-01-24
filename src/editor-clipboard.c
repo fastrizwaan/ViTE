@@ -46,6 +46,18 @@ write_to_temp_file(const char *data, size_t len)
         g_free(path);
     }
     
+    /* Check disk space */
+    if (!resource_can_write_disk("/tmp", len)) {
+        g_warning("write_to_temp_file: Insufficient disk space for %zu bytes", len);
+        close(fd);
+        /* If named file, unlink it */
+        if (path) {
+            unlink(path);
+            g_free(path);
+        }
+        return -1;
+    }
+    
     /* Write content to temp file */
     size_t written = 0;
     while (written < len) {
