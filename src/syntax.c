@@ -635,7 +635,7 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     continue;
                 }
                 if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                    add_attr(attrs, cur, cur + 2, &d_operator);
+                    add_attr(attrs, cur, cur + 2, &d_variable_c);
                     cur += 2;
                     /* Highlight member after -> in red */
                     while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -728,7 +728,7 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                 if (strchr(".;{}()[]", text[cur])) {
                     add_attr(attrs, cur, cur + 1, &d_punctuation);
                 } else if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                    add_attr(attrs, cur, cur + 2, &d_operator);
+                    add_attr(attrs, cur, cur + 2, &d_variable_c);
                     cur += 2;
                     /* Highlight member after -> */
                     while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -1005,7 +1005,7 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     continue;
                 }
                 if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                    add_attr(attrs, cur, cur + 2, &d_operator);
+                    add_attr(attrs, cur, cur + 2, &d_variable_c);
                     cur += 2;
                     /* Highlight member after -> in red */
                     while (cur < len && g_ascii_isspace(text[cur])) cur++;
