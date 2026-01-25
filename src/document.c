@@ -69,30 +69,19 @@ document_get_version(Document *doc)
 Document *
 document_new(const char *filename)
 {
-    Document *doc = malloc(sizeof(Document));
+    Document *doc = g_new0(Document, 1);
     doc->pt = piece_table_new(filename);
     doc->undo_stack = undo_stack_new();
     doc->file_path = filename ? g_strdup(filename) : NULL;
-    doc->saved_command = NULL;
-    doc->mod_callbacks = NULL;
-    doc->content_callbacks = NULL;
     return doc;
 }
 
 Document *
 document_new_empty(void)
 {
-    Document *doc = malloc(sizeof(Document));
+    Document *doc = g_new0(Document, 1);
     doc->pt = piece_table_new_empty();
     doc->undo_stack = undo_stack_new();
-    doc->file_path = NULL;
-    doc->saved_command = NULL;
-    doc->mod_callbacks = NULL;
-    doc->content_callbacks = NULL;
-    doc->update_callbacks = NULL;
-    doc->callbacks_suspended = FALSE;
-    doc->progress_cb = NULL;
-    doc->progress_user_data = NULL;
     return doc;
 }
 
