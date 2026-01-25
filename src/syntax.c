@@ -114,6 +114,7 @@ static PangoColor d_attribute; /* #d19a66 Orange */
 static PangoColor d_param;     /* #d19a66 Orange (Argument) */
 static PangoColor d_property;  /* #56b6c2 Cyan */
 static PangoColor d_preproc;   /* #c678dd Purple */
+static PangoColor d_logical;   /* #56b6c2 Cyan */
 
 /* Light Theme (One Light) */
 static PangoColor l_keyword;   /* #a626a4 Purple */
@@ -134,6 +135,7 @@ static PangoColor l_attribute; /* #986801 Orange */
 static PangoColor l_param;     /* #986801 Orange */
 static PangoColor l_property;  /* #0184bc Cyan */
 static PangoColor l_preproc;   /* #a626a4 Purple */
+static PangoColor l_logical;   /* #0184bc Cyan */
 
 static gboolean colors_initialized = FALSE;
 
@@ -164,6 +166,7 @@ init_syntax_colors(void)
     pango_color_parse(&d_constant, "#e06c75");
     pango_color_parse(&d_tag, "#e06c75");
     pango_color_parse(&d_operator, "#d19a66");
+    pango_color_parse(&d_logical, "#56b6c2");
     pango_color_parse(&d_punctuation, "#d19a66");
     pango_color_parse(&d_attribute, "#d19a66");
     pango_color_parse(&d_param, "#e06c75");
@@ -177,6 +180,7 @@ init_syntax_colors(void)
     pango_color_parse(&l_comment, "#a0a1a7");
     pango_color_parse(&l_number, "#986801");
     pango_color_parse(&l_operator, "#986801");
+    pango_color_parse(&l_logical, "#0184bc");
     pango_color_parse(&l_punctuation, "#986801");
     pango_color_parse(&l_function, "#4078f2");
     pango_color_parse(&l_type, "#c18401");
@@ -189,6 +193,7 @@ init_syntax_colors(void)
     pango_color_parse(&l_param, "#e45649");
     pango_color_parse(&l_property, "#0184bc");
     pango_color_parse(&l_preproc, "#a626a4");
+
 
     colors_initialized = TRUE;
 }
@@ -434,6 +439,7 @@ add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref)
         else if (color_ref == &l_variable) effective_color = &l_variable;
         else if (color_ref == &d_constant) effective_color = &l_constant;
         else if (color_ref == &l_constant) effective_color = &l_constant;
+        else if (color_ref == &d_logical) effective_color = &l_logical;
         
         /* Refine: Constants/Numbers are Orange in One Light, not Purple */
         if (color_ref == &d_number || color_ref == &d_type) effective_color = &l_number; 
@@ -602,10 +608,42 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     cur++;
                     continue;
                 }
+                if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
+                    add_attr(attrs, cur, len, &d_comment);
+                    cur = len;
+                    continue;
+                }
                 if (text[cur] == ')') {
                     state = STATE_ROOT;
                     add_attr(attrs, cur, cur + 1, &d_punctuation);
                     cur++;
+                    continue;
+                }
+                if (text[cur] == '!' && (cur + 1 >= len || text[cur+1] != '=')) {
+                    add_attr(attrs, cur, cur + 1, &d_logical);
+                    cur++;
+                    continue;
+                }
+                if (text[cur] == '&' && cur + 1 < len && text[cur+1] == '&') {
+                    add_attr(attrs, cur, cur + 2, &d_logical);
+                    cur += 2;
+                    continue;
+                }
+                if (text[cur] == '|' && cur + 1 < len && text[cur+1] == '|') {
+                    add_attr(attrs, cur, cur + 2, &d_logical);
+                    cur += 2;
+                    continue;
+                }
+                if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
+                    add_attr(attrs, cur, cur + 2, &d_operator);
+                    cur += 2;
+                    /* Highlight member after -> in red */
+                    while (cur < len && g_ascii_isspace(text[cur])) cur++;
+                    if (cur < len && (g_ascii_isalpha(text[cur]) || text[cur] == '_')) {
+                        size_t m_start = cur;
+                        while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
+                        add_attr(attrs, m_start, cur, &d_variable);
+                    }
                     continue;
                 }
                 if (text[cur] == '*' || text[cur] == '&') {
@@ -618,9 +656,41 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     cur++;
                     continue;
                 }
-                if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
-                    add_attr(attrs, cur, len, &d_comment);
-                    cur = len;
+                if (g_ascii_isdigit(text[cur])) {
+                    size_t start_pos = cur;
+                    gboolean is_hex = FALSE;
+                    gboolean has_dot = FALSE;
+                    gboolean has_exp = FALSE;
+                    
+                    if (text[cur] == '0' && cur+1 < len && (text[cur+1] == 'x' || text[cur+1] == 'X')) {
+                        is_hex = TRUE;
+                        cur += 2;
+                        while (cur < len && (g_ascii_isxdigit(text[cur]) || text[cur] == '.' || text[cur] == 'p' || text[cur] == 'P')) {
+                            if (text[cur] == '.') has_dot = TRUE;
+                            if (text[cur] == 'p' || text[cur] == 'P') has_exp = TRUE;
+                            cur++;
+                        }
+                    } else {
+                        while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '.')) {
+                            if (text[cur] == '.') has_dot = TRUE;
+                            if (text[cur] == 'e' || text[cur] == 'E') has_exp = TRUE;
+                            cur++;
+                        }
+                    }
+                    
+                    size_t num_end = cur;
+                    while (num_end > start_pos) {
+                        char c = text[num_end-1];
+                        if (c == 'f' || c == 'F') {
+                            if (!is_hex || has_dot || has_exp) { num_end--; continue; }
+                        } else if (c == 'l' || c == 'L' || c == 'u' || c == 'U') {
+                            num_end--;
+                            continue;
+                        }
+                        break;
+                    }
+                    if (num_end > start_pos) add_attr(attrs, start_pos, num_end, &d_number);
+                    if (num_end < cur) add_attr(attrs, num_end, cur, &d_variable);
                     continue;
                 }
                 
@@ -632,12 +702,21 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     size_t word_len = cur - start_pos;
                     const char *word_start = text + start_pos;
                     
-                    if (is_word_in_list(word_start, word_len, c_keywords)) {
+                    gboolean is_keyword = is_word_in_list(word_start, word_len, c_keywords);
+                    gboolean is_type_list = is_word_in_list(word_start, word_len, glib_types) || 
+                                          is_word_in_list(word_start, word_len, std_types);
+                    gboolean is_pointer_access = FALSE;
+                    
+                    /* Peek for -> */
+                    size_t p = cur;
+                    while (p < len && g_ascii_isspace(text[p])) p++;
+                    if (p + 1 < len && text[p] == '-' && text[p+1] == '>') is_pointer_access = TRUE;
+
+                    if (is_keyword) {
                         add_attr(attrs, start_pos, cur, &d_keyword);
-                    } else if (is_word_in_list(word_start, word_len, glib_types) || 
-                               is_word_in_list(word_start, word_len, std_types)) {
-                        add_attr(attrs, start_pos, cur, &d_type);
-                    } else if (g_ascii_isupper(word_start[0]) || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
+                    } else if (is_pointer_access || is_type_list || 
+                               g_ascii_isupper(word_start[0]) || 
+                               (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
                         add_attr(attrs, start_pos, cur, &d_type);
                     } else {
                         /* Parameter Name */
@@ -648,8 +727,59 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                 /* Default fallback for punctuation in params */
                 if (strchr(".;{}()[]", text[cur])) {
                     add_attr(attrs, cur, cur + 1, &d_punctuation);
-                } else if (strchr("+-/%|^!=<>?:~", text[cur])) {
-                    add_attr(attrs, cur, cur + 1, &d_operator);
+                } else if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
+                    add_attr(attrs, cur, cur + 2, &d_operator);
+                    cur += 2;
+                    /* Highlight member after -> */
+                    while (cur < len && g_ascii_isspace(text[cur])) cur++;
+                    if (cur < len && (g_ascii_isalpha(text[cur]) || text[cur] == '_')) {
+                        size_t m_start = cur;
+                        while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
+                        size_t m_end = cur;
+                        
+                        /* Peek for another -> to see if this is intermediate */
+                        size_t p = m_end;
+                        while (p < len && g_ascii_isspace(text[p])) p++;
+                        if (p + 1 < len && text[p] == '-' && text[p+1] == '>') {
+                            add_attr(attrs, m_start, m_end, &d_type);
+                        } else {
+                            add_attr(attrs, m_start, m_end, &d_variable);
+                        }
+                        /* We don't continue here; the loop will continue from cur (m_end) */
+                    }
+                    continue;
+                } else if (text[cur] == '!' && (cur + 1 >= len || text[cur+1] != '=')) {
+                    add_attr(attrs, cur, cur + 1, &d_logical);
+                } else if (text[cur] == '&' && cur + 1 < len && text[cur+1] == '&') {
+                    add_attr(attrs, cur, cur + 2, &d_logical);
+                    cur++;
+                } else if (text[cur] == '|' && cur + 1 < len && text[cur+1] == '|') {
+                    add_attr(attrs, cur, cur + 2, &d_logical);
+                    cur++;
+                } else {
+                    /* Arithmetic and Assignment Operators in params */
+                    gboolean handled = FALSE;
+                    if (cur + 1 < len) {
+                        if ((text[cur] == '+' || text[cur] == '-' || text[cur] == '*' || 
+                             text[cur] == '/' || text[cur] == '%' || text[cur] == '=' ||
+                             text[cur] == '<' || text[cur] == '>' || text[cur] == '!' ||
+                             text[cur] == '&' || text[cur] == '|' || text[cur] == '^') && text[cur+1] == '=') {
+                            add_attr(attrs, cur, cur + 2, &d_keyword);
+                            cur++;
+                            handled = TRUE;
+                        } else if (text[cur] == '<' && text[cur+1] == '<') {
+                            add_attr(attrs, cur, cur + 2, &d_keyword);
+                            cur++;
+                            handled = TRUE;
+                        } else if (text[cur] == '>' && text[cur+1] == '>') {
+                            add_attr(attrs, cur, cur + 2, &d_keyword);
+                            cur++;
+                            handled = TRUE;
+                        }
+                    }
+                    if (!handled && strchr("+-*/%=<>^|&?:", text[cur])) {
+                        add_attr(attrs, cur, cur + 1, &d_keyword);
+                    }
                 }
                 cur++;
                 continue;
@@ -773,13 +903,39 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                 /* Numbers */
                 if (g_ascii_isdigit(text[cur])) {
                     size_t start_pos = cur;
+                    gboolean is_hex = FALSE;
+                    gboolean has_dot = FALSE;
+                    gboolean has_exp = FALSE;
+                    
                     if (text[cur] == '0' && cur+1 < len && (text[cur+1] == 'x' || text[cur+1] == 'X')) {
+                        is_hex = TRUE;
                         cur += 2;
-                        while (cur < len && g_ascii_isxdigit(text[cur])) cur++;
+                        while (cur < len && (g_ascii_isxdigit(text[cur]) || text[cur] == '.' || text[cur] == 'p' || text[cur] == 'P')) {
+                            if (text[cur] == '.') has_dot = TRUE;
+                            if (text[cur] == 'p' || text[cur] == 'P') has_exp = TRUE;
+                            cur++;
+                        }
                     } else {
-                        while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '.')) cur++;
+                        while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '.')) {
+                            if (text[cur] == '.') has_dot = TRUE;
+                            if (text[cur] == 'e' || text[cur] == 'E') has_exp = TRUE;
+                            cur++;
+                        }
                     }
-                    add_attr(attrs, start_pos, cur, &d_number);
+                    
+                    size_t num_end = cur;
+                    while (num_end > start_pos) {
+                        char c = text[num_end-1];
+                        if (c == 'f' || c == 'F') {
+                            if (!is_hex || has_dot || has_exp) { num_end--; continue; }
+                        } else if (c == 'l' || c == 'L' || c == 'u' || c == 'U') {
+                            num_end--;
+                            continue;
+                        }
+                        break;
+                    }
+                    if (num_end > start_pos) add_attr(attrs, start_pos, num_end, &d_number);
+                    if (num_end < cur) add_attr(attrs, num_end, cur, &d_variable);
                     continue;
                 }
 
@@ -798,44 +954,37 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     while (peek < len && g_ascii_isspace(text[peek])) peek++;
                     if (peek < len && text[peek] == '(') is_func_call = TRUE;
 
-                    if (is_word_in_list(word_start, word_len, c_keywords)) {
+                    gboolean is_keyword = is_word_in_list(word_start, word_len, c_keywords);
+                    gboolean is_type_list = is_word_in_list(word_start, word_len, glib_types) || 
+                                          is_word_in_list(word_start, word_len, std_types);
+                    gboolean is_pointer_access = FALSE;
+                    
+                    /* Peek for -> */
+                    size_t p = cur;
+                    while (p < len && g_ascii_isspace(text[p])) p++;
+                    if (p + 1 < len && text[p] == '-' && text[p+1] == '>') is_pointer_access = TRUE;
+
+                    if (is_keyword) {
                         add_attr(attrs, start_pos, cur, &d_keyword);
                     } else if (is_func_call) {
                          add_attr(attrs, start_pos, cur, &d_function);
-                         /* Heuristic for declaration: starts with type or is preceded by one.
-                            To keep it simple and robust across lines, if we see a func call
-                            after possible type indicators, we'll enter STATE_C_PARAMS on the next '('.
-                            Wait, I can just peek for '(' and change state now. */
+                         /* ... function declaration heuristic ... */
                          size_t peek = cur;
                          while (peek < len && g_ascii_isspace(text[peek])) peek++;
                          if (peek < len && text[peek] == '(') {
-                             /* Enter params state after the '(' */
-                             /* But only if it looks like a declaration. 
-                                For now, let's check if there's an identifier before this one on the same line. */
                              gboolean preceded_by_id = FALSE;
                              int p = start_pos - 1;
                              while (p >= 0 && g_ascii_isspace(text[p])) p--;
                              if (p >= 0 && (g_ascii_isalnum(text[p]) || text[p] == '_' || text[p] == '*')) preceded_by_id = TRUE;
-                             
-                             if (preceded_by_id || start_pos == 0) {
-                                 /* Likely a declaration at start of line or after type */
-                                 /* We'll handle state change when we hit '(' */
-                             }
-                             
-                             /* Actually, let's just use a simpler marker: if we are in ROOT and see ID (,
-                                and there was ANY text before it on the line that wasn't a keyword like if/while,
-                                it's often a declaration. */
+                             if (preceded_by_id || start_pos == 0) { }
                              state = STATE_C_PARAMS;
-                             /* Wait, this will change state for the '(' which we haven't reached yet.
-                                Let's just highlight the identifier and then the loop will hit '(' next. */
                          }
-                    } else if (is_word_in_list(word_start, word_len, glib_types) || 
-                               is_word_in_list(word_start, word_len, std_types)) {
+                    } else if (is_pointer_access || is_type_list ||
+                               g_ascii_isupper(word_start[0]) || 
+                               (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
                         add_attr(attrs, start_pos, cur, &d_type);
                     } else if (is_all_caps(word_start, word_len)) {
                         add_attr(attrs, start_pos, cur, &d_constant);
-                    } else if (g_ascii_isupper(word_start[0]) || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
-                        add_attr(attrs, start_pos, cur, &d_type);
                     } else {
                         add_attr(attrs, start_pos, cur, &d_variable_c);
                     }
@@ -855,16 +1004,71 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     cur++;
                     continue;
                 }
-                if (text[cur] == '*' || text[cur] == '&') {
+                if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
+                    add_attr(attrs, cur, cur + 2, &d_operator);
+                    cur += 2;
+                    /* Highlight member after -> in red */
+                    while (cur < len && g_ascii_isspace(text[cur])) cur++;
+                    if (cur < len && (g_ascii_isalpha(text[cur]) || text[cur] == '_')) {
+                        size_t m_start = cur;
+                        while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
+                        size_t m_end = cur;
+
+                        /* Peek for another -> to see if this is intermediate */
+                        size_t p = m_end;
+                        while (p < len && g_ascii_isspace(text[p])) p++;
+                        if (p + 1 < len && text[p] == '-' && text[p+1] == '>') {
+                            add_attr(attrs, m_start, m_end, &d_type);
+                        } else {
+                            add_attr(attrs, m_start, m_end, &d_variable);
+                        }
+                    }
+                    continue;
+                }
+                if (text[cur] == '!' && (cur + 1 >= len || text[cur+1] != '=')) {
+                    add_attr(attrs, cur, cur + 1, &d_logical);
+                    cur++;
+                    continue;
+                }
+                if (text[cur] == '&' && cur + 1 < len && text[cur+1] == '&') {
+                    add_attr(attrs, cur, cur + 2, &d_logical);
+                    cur += 2;
+                    continue;
+                }
+                if (text[cur] == '|' && cur + 1 < len && text[cur+1] == '|') {
+                    add_attr(attrs, cur, cur + 2, &d_logical);
+                    cur += 2;
+                    continue;
+                }
+                
+                /* Compound Operators */
+                if (cur + 1 < len) {
+                    if ((text[cur] == '+' || text[cur] == '-' || text[cur] == '*' || 
+                         text[cur] == '/' || text[cur] == '%' || text[cur] == '=' ||
+                         text[cur] == '<' || text[cur] == '>' || text[cur] == '!' ||
+                         text[cur] == '&' || text[cur] == '|' || text[cur] == '^') && text[cur+1] == '=') {
+                        add_attr(attrs, cur, cur + 2, &d_keyword);
+                        cur += 2;
+                        continue;
+                    }
+                    if (text[cur] == '<' && text[cur+1] == '<') {
+                        add_attr(attrs, cur, cur + 2, &d_keyword);
+                        cur += 2;
+                        continue;
+                    }
+                    if (text[cur] == '>' && text[cur+1] == '>') {
+                        add_attr(attrs, cur, cur + 2, &d_keyword);
+                        cur += 2;
+                        continue;
+                    }
+                }
+
+                if (strchr("+-*/%=<>^|&?:", text[cur])) {
                     add_attr(attrs, cur, cur + 1, &d_keyword);
                     cur++;
                     continue;
                 }
-                if (strchr("+-/%|^!=<>?:~", text[cur])) {
-                    add_attr(attrs, cur, cur + 1, &d_operator);
-                    cur++;
-                    continue;
-                }
+
                 if (strchr(".;{}()[]", text[cur])) {
                     add_attr(attrs, cur, cur + 1, &d_punctuation);
                     cur++;
