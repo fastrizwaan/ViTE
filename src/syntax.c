@@ -105,6 +105,7 @@ static PangoColor d_function;  /* #61afef Blue */
 static PangoColor d_type;      /* #e5c07b Yellow/Gold (Class) */
 static PangoColor d_decorator; /* #56b6c2 Cyan */
 static PangoColor d_variable;  /* #e06c75 Red */
+static PangoColor d_variable_c; /* #d1d1d1 Light Grey */
 static PangoColor d_constant;  /* #e06c75 Red (Macros, Enums) */
 static PangoColor d_tag;       /* #e06c75 Red */
 static PangoColor d_operator;     /* #d19a66 Orange */
@@ -126,6 +127,7 @@ static PangoColor l_function;  /* #4078f2 Blue */
 static PangoColor l_type;      /* #c18401 Orange/Gold */
 static PangoColor l_decorator; /* #a626a4 Purple */
 static PangoColor l_variable;  /* #e45649 Red */
+static PangoColor l_variable_c; /* #383a42 Dark Grey */
 static PangoColor l_constant;  /* #e45649 Red */
 static PangoColor l_tag;       /* #e45649 Red */
 static PangoColor l_attribute; /* #986801 Orange */
@@ -158,12 +160,13 @@ init_syntax_colors(void)
     pango_color_parse(&d_type, "#e5c07b");
     pango_color_parse(&d_decorator, "#56b6c2");
     pango_color_parse(&d_variable, "#e06c75");
+    pango_color_parse(&d_variable_c, "#d1d1d1");
     pango_color_parse(&d_constant, "#e06c75");
     pango_color_parse(&d_tag, "#e06c75");
     pango_color_parse(&d_operator, "#d19a66");
     pango_color_parse(&d_punctuation, "#d19a66");
     pango_color_parse(&d_attribute, "#d19a66");
-    pango_color_parse(&d_param, "#d19a66");
+    pango_color_parse(&d_param, "#e06c75");
     pango_color_parse(&d_property, "#56b6c2");
     pango_color_parse(&d_preproc, "#c678dd");
 
@@ -179,10 +182,11 @@ init_syntax_colors(void)
     pango_color_parse(&l_type, "#c18401");
     pango_color_parse(&l_decorator, "#a626a4");
     pango_color_parse(&l_variable, "#e45649");
+    pango_color_parse(&l_variable_c, "#383a42");
     pango_color_parse(&l_constant, "#e45649");
     pango_color_parse(&l_tag, "#e45649");
     pango_color_parse(&l_attribute, "#986801");
-    pango_color_parse(&l_param, "#986801");
+    pango_color_parse(&l_param, "#e45649");
     pango_color_parse(&l_property, "#0184bc");
     pango_color_parse(&l_preproc, "#a626a4");
 
@@ -412,6 +416,7 @@ add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref)
         else if (color_ref == &l_punctuation) effective_color = &d_punctuation;
         else if (color_ref == &l_function) effective_color = &d_function;
         else if (color_ref == &l_variable) effective_color = &d_variable;
+        else if (color_ref == &l_variable_c) effective_color = &d_variable_c;
         else if (color_ref == &l_constant) effective_color = &d_constant;
     } else {
         /* If pointers are to dark (default statics), map to light */
@@ -425,6 +430,7 @@ add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref)
         else if (color_ref == &d_punctuation) effective_color = &l_punctuation;
         else if (color_ref == &d_function) effective_color = &l_function;
         else if (color_ref == &d_variable) effective_color = &l_variable;
+        else if (color_ref == &d_variable_c) effective_color = &l_variable_c;
         else if (color_ref == &l_variable) effective_color = &l_variable;
         else if (color_ref == &d_constant) effective_color = &l_constant;
         else if (color_ref == &l_constant) effective_color = &l_constant;
@@ -590,6 +596,65 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
     
     if (ctx->lang == LANG_C) {
         while (cur < len) {
+            if (state == STATE_C_PARAMS) {
+                /* Skip spaces */
+                if (g_ascii_isspace(text[cur])) {
+                    cur++;
+                    continue;
+                }
+                if (text[cur] == ')') {
+                    state = STATE_ROOT;
+                    add_attr(attrs, cur, cur + 1, &d_punctuation);
+                    cur++;
+                    continue;
+                }
+                if (text[cur] == '*' || text[cur] == '&') {
+                    add_attr(attrs, cur, cur + 1, &d_keyword);
+                    cur++;
+                    continue;
+                }
+                if (text[cur] == ',') {
+                    /* Default color for comma */
+                    cur++;
+                    continue;
+                }
+                if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
+                    add_attr(attrs, cur, len, &d_comment);
+                    cur = len;
+                    continue;
+                }
+                
+                if (g_ascii_isalpha(text[cur]) || text[cur] == '_') {
+                    size_t start_pos = cur;
+                    while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) {
+                        cur++;
+                    }
+                    size_t word_len = cur - start_pos;
+                    const char *word_start = text + start_pos;
+                    
+                    if (is_word_in_list(word_start, word_len, c_keywords)) {
+                        add_attr(attrs, start_pos, cur, &d_keyword);
+                    } else if (is_word_in_list(word_start, word_len, glib_types) || 
+                               is_word_in_list(word_start, word_len, std_types)) {
+                        add_attr(attrs, start_pos, cur, &d_type);
+                    } else if (g_ascii_isupper(word_start[0]) || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
+                        add_attr(attrs, start_pos, cur, &d_type);
+                    } else {
+                        /* Parameter Name */
+                        add_attr(attrs, start_pos, cur, &d_param);
+                    }
+                    continue;
+                }
+                /* Default fallback for punctuation in params */
+                if (strchr(".;{}()[]", text[cur])) {
+                    add_attr(attrs, cur, cur + 1, &d_punctuation);
+                } else if (strchr("+-/%|^!=<>?:~", text[cur])) {
+                    add_attr(attrs, cur, cur + 1, &d_operator);
+                }
+                cur++;
+                continue;
+            }
+
             if (state == STATE_IN_ML_COMMENT) {
                 size_t start_pos = cur;
                 while (cur + 1 < len) {
@@ -737,6 +802,33 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                         add_attr(attrs, start_pos, cur, &d_keyword);
                     } else if (is_func_call) {
                          add_attr(attrs, start_pos, cur, &d_function);
+                         /* Heuristic for declaration: starts with type or is preceded by one.
+                            To keep it simple and robust across lines, if we see a func call
+                            after possible type indicators, we'll enter STATE_C_PARAMS on the next '('.
+                            Wait, I can just peek for '(' and change state now. */
+                         size_t peek = cur;
+                         while (peek < len && g_ascii_isspace(text[peek])) peek++;
+                         if (peek < len && text[peek] == '(') {
+                             /* Enter params state after the '(' */
+                             /* But only if it looks like a declaration. 
+                                For now, let's check if there's an identifier before this one on the same line. */
+                             gboolean preceded_by_id = FALSE;
+                             int p = start_pos - 1;
+                             while (p >= 0 && g_ascii_isspace(text[p])) p--;
+                             if (p >= 0 && (g_ascii_isalnum(text[p]) || text[p] == '_' || text[p] == '*')) preceded_by_id = TRUE;
+                             
+                             if (preceded_by_id || start_pos == 0) {
+                                 /* Likely a declaration at start of line or after type */
+                                 /* We'll handle state change when we hit '(' */
+                             }
+                             
+                             /* Actually, let's just use a simpler marker: if we are in ROOT and see ID (,
+                                and there was ANY text before it on the line that wasn't a keyword like if/while,
+                                it's often a declaration. */
+                             state = STATE_C_PARAMS;
+                             /* Wait, this will change state for the '(' which we haven't reached yet.
+                                Let's just highlight the identifier and then the loop will hit '(' next. */
+                         }
                     } else if (is_word_in_list(word_start, word_len, glib_types) || 
                                is_word_in_list(word_start, word_len, std_types)) {
                         add_attr(attrs, start_pos, cur, &d_type);
@@ -745,7 +837,7 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     } else if (g_ascii_isupper(word_start[0]) || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
                         add_attr(attrs, start_pos, cur, &d_type);
                     } else {
-                        add_attr(attrs, start_pos, cur, &d_variable);
+                        add_attr(attrs, start_pos, cur, &d_variable_c);
                     }
                     /* Else Plain */
                     
@@ -753,6 +845,16 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                 }
 
                 /* Operators and Punctuation */
+                if (text[cur] == '(') {
+                    /* Heuristic: if we saw a type before the identifier that preceded this '(', 
+                       it's likely a function declaration. */
+                    /* For now, let's keep it simple: any ( after a function name in ROOT
+                       could be a declaration if we have state. 
+                       But we use start_state==STATE_ROOT as a proxy for "not nested". */
+                    add_attr(attrs, cur, cur + 1, &d_punctuation);
+                    cur++;
+                    continue;
+                }
                 if (text[cur] == '*' || text[cur] == '&') {
                     add_attr(attrs, cur, cur + 1, &d_keyword);
                     cur++;

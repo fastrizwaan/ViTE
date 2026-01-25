@@ -25,7 +25,8 @@ typedef enum {
     STATE_IN_ML_COMMENT = 3,        /* / * ... * / */
     /* Python specifics */
     STATE_IN_TRIPLE_SQ_STRING = 4,  /* '''...''' */
-    STATE_IN_TRIPLE_DQ_STRING = 5   /* """...""" */
+    STATE_IN_TRIPLE_DQ_STRING = 5,  /* """...""" */
+    STATE_C_PARAMS = 6              /* Inside C function parameter list ( ... ) */
 } SyntaxState;
 
 typedef struct _SyntaxContext SyntaxContext;
