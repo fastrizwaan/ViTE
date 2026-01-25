@@ -105,7 +105,10 @@ static PangoColor d_function;  /* #61afef Blue */
 static PangoColor d_type;      /* #e5c07b Yellow/Gold (Class) */
 static PangoColor d_decorator; /* #56b6c2 Cyan */
 static PangoColor d_variable;  /* #e06c75 Red */
+static PangoColor d_constant;  /* #e06c75 Red (Macros, Enums) */
 static PangoColor d_tag;       /* #e06c75 Red */
+static PangoColor d_operator;     /* #d19a66 Orange */
+static PangoColor d_punctuation;  /* #d19a66 Orange */
 static PangoColor d_attribute; /* #d19a66 Orange */
 static PangoColor d_param;     /* #d19a66 Orange (Argument) */
 static PangoColor d_property;  /* #56b6c2 Cyan */
@@ -117,10 +120,13 @@ static PangoColor l_builtin;   /* #0184bc Cyan/Blue */
 static PangoColor l_string;    /* #50a14f Green */
 static PangoColor l_comment;   /* #a0a1a7 Grey */
 static PangoColor l_number;    /* #986801 Orange */
+static PangoColor l_operator;     /* #986801 Orange */
+static PangoColor l_punctuation;  /* #986801 Orange */
 static PangoColor l_function;  /* #4078f2 Blue */
 static PangoColor l_type;      /* #c18401 Orange/Gold */
 static PangoColor l_decorator; /* #a626a4 Purple */
 static PangoColor l_variable;  /* #e45649 Red */
+static PangoColor l_constant;  /* #e45649 Red */
 static PangoColor l_tag;       /* #e45649 Red */
 static PangoColor l_attribute; /* #986801 Orange */
 static PangoColor l_param;     /* #986801 Orange */
@@ -152,7 +158,10 @@ init_syntax_colors(void)
     pango_color_parse(&d_type, "#e5c07b");
     pango_color_parse(&d_decorator, "#56b6c2");
     pango_color_parse(&d_variable, "#e06c75");
+    pango_color_parse(&d_constant, "#e06c75");
     pango_color_parse(&d_tag, "#e06c75");
+    pango_color_parse(&d_operator, "#d19a66");
+    pango_color_parse(&d_punctuation, "#d19a66");
     pango_color_parse(&d_attribute, "#d19a66");
     pango_color_parse(&d_param, "#d19a66");
     pango_color_parse(&d_property, "#56b6c2");
@@ -164,10 +173,13 @@ init_syntax_colors(void)
     pango_color_parse(&l_string, "#50a14f");
     pango_color_parse(&l_comment, "#a0a1a7");
     pango_color_parse(&l_number, "#986801");
+    pango_color_parse(&l_operator, "#986801");
+    pango_color_parse(&l_punctuation, "#986801");
     pango_color_parse(&l_function, "#4078f2");
     pango_color_parse(&l_type, "#c18401");
     pango_color_parse(&l_decorator, "#a626a4");
     pango_color_parse(&l_variable, "#e45649");
+    pango_color_parse(&l_constant, "#e45649");
     pango_color_parse(&l_tag, "#e45649");
     pango_color_parse(&l_attribute, "#986801");
     pango_color_parse(&l_param, "#986801");
@@ -396,25 +408,29 @@ add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref)
         else if (color_ref == &l_comment) effective_color = &d_comment;
         else if (color_ref == &l_preproc) effective_color = &d_preproc;
         else if (color_ref == &l_number) effective_color = &d_number;
+        else if (color_ref == &l_operator) effective_color = &d_operator;
+        else if (color_ref == &l_punctuation) effective_color = &d_punctuation;
         else if (color_ref == &l_function) effective_color = &d_function;
         else if (color_ref == &l_variable) effective_color = &d_variable;
+        else if (color_ref == &l_constant) effective_color = &d_constant;
     } else {
         /* If pointers are to dark (default statics), map to light */
-        if (color_ref == &d_keyword || color_ref == &d_number || color_ref == &d_variable) effective_color = &l_keyword; /* Bool/Self map to Keyword/Preproc in light simplified */
+        if (color_ref == &d_keyword) effective_color = &l_keyword;
         else if (color_ref == &d_type) effective_color = &l_type;
         else if (color_ref == &d_string) effective_color = &l_string;
         else if (color_ref == &d_comment) effective_color = &l_comment;
         else if (color_ref == &d_preproc) effective_color = &l_preproc;
         else if (color_ref == &d_number) effective_color = &l_number;
+        else if (color_ref == &d_operator) effective_color = &l_operator;
+        else if (color_ref == &d_punctuation) effective_color = &l_punctuation;
         else if (color_ref == &d_function) effective_color = &l_function;
         else if (color_ref == &d_variable) effective_color = &l_variable;
+        else if (color_ref == &l_variable) effective_color = &l_variable;
+        else if (color_ref == &d_constant) effective_color = &l_constant;
+        else if (color_ref == &l_constant) effective_color = &l_constant;
         
-        /* Refine: color_bool (Orange) -> l_number (Orange) or l_keyword (Purple)? SVite uses numeric color? 
-           One Light: Constants are Orange. 
-        */
-        if (color_ref == &d_number || color_ref == &d_type || color_ref == &d_number) effective_color = &l_number; 
-        if (color_ref == &d_variable) effective_color = &l_variable;
-        if (color_ref == &d_preproc) effective_color = &l_preproc;
+        /* Refine: Constants/Numbers are Orange in One Light, not Purple */
+        if (color_ref == &d_number || color_ref == &d_type) effective_color = &l_number; 
     }
     
     PangoAttribute *attr = pango_attr_foreground_new(effective_color->red, effective_color->green, effective_color->blue);
@@ -454,9 +470,21 @@ static const char *c_keywords[] = {
     "for", "friend", "goto", "if", "inline", "int", "long", "namespace", "new", 
     "operator", "private", "protected", "public", "register", "restrict", "return", 
     "short", "signed", "sizeof", "static", "struct", "switch", "template", "this", 
-    "throw", "true", "try", "typedef", "typename", "union", "unsigned", "using", 
-    "virtual", "void", "volatile", "while", "NULL", "_Bool", "_Complex", "_Imaginary", 
-    NULL
+    "throw", "true", "try", "typedef", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "while", "NULL", 
+    "_Bool", "_Complex", "_Imaginary", NULL
+};
+
+static const char *glib_types[] = {
+    "gboolean", "gpointer", "gconstpointer", "gchar", "guchar", "gint", "guint",
+    "gshort", "gushort", "glong", "gulong", "gint8", "guint8", "gint16", "guint16",
+    "gint32", "guint32", "gint64", "guint64", "gsize", "gssize", "goffset",
+    "gfloat", "gdouble", "gunichar", "GObject", "GType", "GError", "GList", "GSList", "GHashTable",
+    "GPtrArray", "GBytes", "GString", NULL
+};
+
+static const char *std_types[] = {
+    "size_t", "ssize_t", "ptrdiff_t", "int8_t", "uint8_t", "int16_t", "uint16_t",
+    "int32_t", "uint32_t", "int64_t", "uint64_t", "intptr_t", "uintptr_t", NULL
 };
 
 /* JS Keywords */
@@ -497,6 +525,18 @@ static const char *py_builtins[] = {
     "repr", "reversed", "round", "set", "setattr", "slice", "sorted", "staticmethod",
     "str", "sum", "super", "tuple", "type", "vars", "zip", "__import__", "__init__", NULL
 };
+
+static inline gboolean
+is_all_caps(const char *s, size_t len)
+{
+    if (len == 0 || !g_ascii_isupper(s[0])) return FALSE;
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] == '_') continue;
+        if (g_ascii_isdigit(s[i])) continue;
+        if (!g_ascii_isupper(s[i])) return FALSE;
+    }
+    return TRUE;
+}
 
 static gboolean 
 is_word_in_list(const char *word, size_t len, const char **list) 
@@ -646,6 +686,21 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                             if (cur < len) cur++; /* include closer */
                             add_attr(attrs, path_start, cur, &d_string);
                         }
+                    } else if ((directive_len == 6 && strncmp(directive, "define", 6) == 0) ||
+                               (directive_len == 5 && strncmp(directive, "ifdef", 5) == 0) ||
+                               (directive_len == 6 && strncmp(directive, "ifndef", 6) == 0) ||
+                               (directive_len == 2 && strncmp(directive, "if", 2) == 0) ||
+                               (directive_len == 4 && strncmp(directive, "elif", 4) == 0) ||
+                               (directive_len == 5 && strncmp(directive, "undef", 5) == 0)) {
+                        /* First identifier after these directives is a macro name -> blue */
+                        while (cur < len && g_ascii_isspace(text[cur])) cur++;
+                        if (cur < len && (g_ascii_isalpha(text[cur]) || text[cur] == '_')) {
+                            size_t macro_start = cur;
+                            while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) {
+                                cur++;
+                            }
+                            add_attr(attrs, macro_start, cur, &d_function);
+                        }
                     }
                     continue;
                 }
@@ -682,11 +737,35 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                         add_attr(attrs, start_pos, cur, &d_keyword);
                     } else if (is_func_call) {
                          add_attr(attrs, start_pos, cur, &d_function);
+                    } else if (is_word_in_list(word_start, word_len, glib_types) || 
+                               is_word_in_list(word_start, word_len, std_types)) {
+                        add_attr(attrs, start_pos, cur, &d_type);
+                    } else if (is_all_caps(word_start, word_len)) {
+                        add_attr(attrs, start_pos, cur, &d_constant);
                     } else if (g_ascii_isupper(word_start[0]) || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
                         add_attr(attrs, start_pos, cur, &d_type);
+                    } else {
+                        add_attr(attrs, start_pos, cur, &d_variable);
                     }
                     /* Else Plain */
                     
+                    continue;
+                }
+
+                /* Operators and Punctuation */
+                if (text[cur] == '*' || text[cur] == '&') {
+                    add_attr(attrs, cur, cur + 1, &d_keyword);
+                    cur++;
+                    continue;
+                }
+                if (strchr("+-/%|^!=<>?:~", text[cur])) {
+                    add_attr(attrs, cur, cur + 1, &d_operator);
+                    cur++;
+                    continue;
+                }
+                if (strchr(".;{}()[]", text[cur])) {
+                    add_attr(attrs, cur, cur + 1, &d_punctuation);
+                    cur++;
                     continue;
                 }
 
