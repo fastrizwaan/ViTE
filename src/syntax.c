@@ -621,10 +621,32 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                 if (text[cur] == '#') {
                     size_t start_pos = cur;
                     cur++;
+                    /* Allow space between # and directive */
+                    while (cur < len && g_ascii_isspace(text[cur])) cur++;
+                    
+                    size_t directive_start = cur;
                     while (cur < len && g_ascii_isalpha(text[cur])) {
                         cur++;
                     }
+                    size_t directive_len = cur - directive_start;
+                    const char *directive = text + directive_start;
+
                     add_attr(attrs, start_pos, cur, &d_preproc);
+
+                    if (directive_len == 7 && strncmp(directive, "include", 7) == 0) {
+                        /* Skip whitespace */
+                        while (cur < len && g_ascii_isspace(text[cur])) cur++;
+                        
+                        if (cur < len && (text[cur] == '"' || text[cur] == '<' || text[cur] == '\'')) {
+                            char open = text[cur];
+                            char close = (open == '<') ? '>' : open;
+                            size_t path_start = cur;
+                            cur++;
+                            while (cur < len && text[cur] != close) cur++;
+                            if (cur < len) cur++; /* include closer */
+                            add_attr(attrs, path_start, cur, &d_string);
+                        }
+                    }
                     continue;
                 }
 
@@ -835,7 +857,6 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     add_attr(attrs, start_pos, cur, &d_decorator);
                     continue;
                 }
-
                 /* Skip other chars */
                 cur++;
             } 
