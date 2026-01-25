@@ -309,12 +309,21 @@ syntax_context_set_language(SyntaxContext *ctx, const char *lang_name)
         ctx->lang = LANG_XML;
     } else if (strcmp(lang_name, "desktop") == 0) {
         ctx->lang = LANG_DESKTOP;
+    } else if (strcmp(lang_name, "rst") == 0) {
+        ctx->lang = LANG_NONE; /* Acknowledged requested highlightable type */
     } else {
         ctx->lang = LANG_NONE;
     }
     
     /* Clear states */
     g_byte_array_set_size(ctx->state_chain, 0);
+}
+
+SyntaxLanguage
+syntax_context_get_language(SyntaxContext *ctx)
+{
+    if (!ctx) return LANG_NONE;
+    return ctx->lang;
 }
 
 const char *

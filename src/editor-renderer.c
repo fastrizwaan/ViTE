@@ -160,7 +160,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
        If we jumped/scrolled, we might have a gap.
        Process intermediate lines (state-only, no attributes) to propagate matching (e.g. multiline strings).
     */
-    if (self->syntax_ctx) {
+    if (self->syntax_ctx && syntax_context_get_language(self->syntax_ctx) != LANG_NONE) {
         size_t processed = syntax_get_processed_line_count(self->syntax_ctx);
         if (processed < start_line) {
             size_t limit = 20000; /* Increased limit for synchronous catch-up */

@@ -1882,7 +1882,17 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     const char *doc_path = document_get_file_path(doc);
     if (doc_path) {
         const char *dot = strrchr(doc_path, '.');
-        if (dot) editor_widget_set_language(EDITOR_WIDGET(editor), dot + 1);
+        if (dot) {
+            const char *ext = dot + 1;
+            /* Restricted list as requested by user */
+            if (g_ascii_strcasecmp(ext, "c") == 0 || g_ascii_strcasecmp(ext, "py") == 0 || 
+                g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "json") == 0 || 
+                g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "rst") == 0 ||
+                g_ascii_strcasecmp(ext, "h") == 0 || g_ascii_strcasecmp(ext, "js") == 0 ||
+                g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) {
+                editor_widget_set_language(EDITOR_WIDGET(editor), ext);
+            }
+        }
     }
     
     /* Create Container (Overlay) */
@@ -2915,10 +2925,17 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
     GtkWidget *editor = get_editor_from_page(page);
     const char *dot = strrchr(path, '.');
     if (dot && EDITOR_IS_WIDGET(editor)) {
-        editor_widget_set_language(EDITOR_WIDGET(editor), dot + 1);
-        /* Refresh status bar now that language is set */
-        if (vite_tab_is_active(tab_to_use)) {
-            on_tab_clicked(tab_to_use, NULL);
+        const char *ext = dot + 1;
+        if (g_ascii_strcasecmp(ext, "c") == 0 || g_ascii_strcasecmp(ext, "py") == 0 || 
+            g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "json") == 0 || 
+            g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "rst") == 0 ||
+            g_ascii_strcasecmp(ext, "h") == 0 || g_ascii_strcasecmp(ext, "js") == 0 ||
+            g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) {
+            editor_widget_set_language(EDITOR_WIDGET(editor), ext);
+            /* Refresh status bar now that language is set */
+            if (vite_tab_is_active(tab_to_use)) {
+                on_tab_clicked(tab_to_use, NULL);
+            }
         }
     }
 

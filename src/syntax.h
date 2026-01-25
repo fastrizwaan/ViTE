@@ -39,6 +39,7 @@ void syntax_context_set_language(SyntaxContext *ctx, const char *lang_name);
 void syntax_context_invalidate(SyntaxContext *ctx, size_t start_line);
 void syntax_context_invalidate_all(SyntaxContext *ctx);  /* Clear all cached highlights */
 const char *syntax_context_get_language_name(SyntaxContext *ctx);
+SyntaxLanguage syntax_context_get_language(SyntaxContext *ctx);
 
 /* Highlight a line given its index. Updates the internal state chain for the NEXT line. 
    'text' should be the content of the line.

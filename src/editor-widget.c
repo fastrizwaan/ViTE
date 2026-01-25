@@ -671,9 +671,9 @@ editor_widget_set_document(EditorWidget *self, Document *doc)
        Scan up to 20,000 lines to ensure multi-line constructs are valid immediately.
        State-only scan (compute_attributes=FALSE) is extremely fast (O(N)).
     */
-    if (self->syntax_ctx && self->doc) {
+    if (self->syntax_ctx && self->doc && syntax_context_get_language(self->syntax_ctx) != LANG_NONE) {
         size_t total = document_get_line_count(self->doc);
-        size_t limit = MIN(total, 20000);
+        size_t limit = MIN(total, 50000);
         for (size_t i = 0; i < limit; i++) {
              size_t len;
              char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN);
@@ -696,10 +696,10 @@ editor_widget_set_language(EditorWidget *self, const char *lang)
         syntax_context_set_language(self->syntax_ctx, lang);
         
         /* Re-scan on language change too */
-        if (self->doc) {
+        if (self->doc && syntax_context_get_language(self->syntax_ctx) != LANG_NONE) {
             syntax_context_invalidate_all(self->syntax_ctx);
             size_t total = document_get_line_count(self->doc);
-            size_t limit = MIN(total, 20000);
+            size_t limit = MIN(total, 50000);
             for (size_t i = 0; i < limit; i++) {
                  size_t len;
                  char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN);
