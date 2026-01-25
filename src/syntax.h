@@ -26,7 +26,11 @@ typedef enum {
     /* Python specifics */
     STATE_IN_TRIPLE_SQ_STRING = 4,  /* '''...''' */
     STATE_IN_TRIPLE_DQ_STRING = 5,  /* """...""" */
-    STATE_C_PARAMS = 6              /* Inside C function parameter list ( ... ) */
+    STATE_C_PARAMS = 6,             /* Inside C function parameter list ( ... ) */
+    STATE_C_ENUM_WAIT_LBRACE = 7,   /* Saw 'enum', waiting for '{' */
+    STATE_C_ENUM = 8,               /* Inside enum { ... } */
+    STATE_C_ENUM_ML_COMMENT = 9,    /* multi-line comment inside enum */
+    STATE_C_PARAMS_ML_COMMENT = 10  /* multi-line comment inside params */
 } SyntaxState;
 
 typedef struct _SyntaxContext SyntaxContext;

@@ -478,12 +478,16 @@ set_line_end_state(SyntaxContext *ctx, size_t line_index, SyntaxState state)
 
 static const char *c_keywords[] = {
     "auto", "bool", "break", "case", "catch", "char", "class", "const", "continue", 
-    "default", "delete", "do", "double", "else", "enum", "extern", "false", "float", 
+    "default", "delete", "do", "double", "else", "enum", "extern", "float", 
     "for", "friend", "goto", "if", "inline", "int", "long", "namespace", "new", 
     "operator", "private", "protected", "public", "register", "restrict", "return", 
     "short", "signed", "sizeof", "static", "struct", "switch", "template", "this", 
-    "throw", "true", "try", "typedef", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "while", "NULL", 
+    "throw", "try", "typedef", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "while", 
     "_Bool", "_Complex", "_Imaginary", NULL
+};
+
+static const char *c_special_constants[] = {
+    "NULL", "TRUE", "FALSE", "true", "false", NULL
 };
 
 static const char *glib_types[] = {
@@ -602,6 +606,108 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
     
     if (ctx->lang == LANG_C) {
         while (cur < len) {
+            if (state == STATE_C_ENUM_ML_COMMENT) {
+                size_t start_pos = cur;
+                while (cur + 1 < len) {
+                     if (text[cur] == '*' && text[cur+1] == '/') {
+                          cur += 2;
+                          state = STATE_C_ENUM;
+                          break;
+                     }
+                     cur++;
+                }
+                if (state == STATE_C_ENUM_ML_COMMENT) cur = len;
+                add_attr(attrs, start_pos, cur, &d_comment);
+                continue;
+            }
+            if (state == STATE_C_PARAMS_ML_COMMENT) {
+                size_t start_pos = cur;
+                while (cur + 1 < len) {
+                     if (text[cur] == '*' && text[cur+1] == '/') {
+                          cur += 2;
+                          state = STATE_C_PARAMS;
+                          break;
+                     }
+                     cur++;
+                }
+                if (state == STATE_C_PARAMS_ML_COMMENT) cur = len;
+                add_attr(attrs, start_pos, cur, &d_comment);
+                continue;
+            }
+            if (state == STATE_C_ENUM_WAIT_LBRACE) {
+                if (g_ascii_isspace(text[cur])) { cur++; continue; }
+                if (text[cur] == '{') {
+                    state = STATE_C_ENUM;
+                    add_attr(attrs, cur, cur + 1, &d_punctuation);
+                    cur++;
+                    continue;
+                }
+                if (text[cur] == ';') {
+                    state = STATE_ROOT;
+                    add_attr(attrs, cur, cur + 1, &d_punctuation);
+                    cur++;
+                    continue;
+                }
+                if (g_ascii_isalpha(text[cur]) || text[cur] == '_') {
+                    size_t s_pos = cur;
+                    while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
+                    add_attr(attrs, s_pos, cur, &d_type);
+                    continue;
+                }
+                cur++;
+                continue;
+            }
+            if (state == STATE_C_ENUM) {
+                if (g_ascii_isspace(text[cur])) { cur++; continue; }
+                if (text[cur] == '/') {
+                    if (cur + 1 < len && text[cur+1] == '/') {
+                        add_attr(attrs, cur, len, &d_comment);
+                        cur = len;
+                        continue;
+                    }
+                    if (cur + 1 < len && text[cur+1] == '*') {
+                        state = STATE_C_ENUM_ML_COMMENT;
+                        size_t start_pos = cur;
+                        cur += 2;
+                        while (cur + 1 < len) {
+                             if (text[cur] == '*' && text[cur+1] == '/') {
+                                  cur += 2;
+                                  state = STATE_C_ENUM;
+                                  break;
+                             }
+                             cur++;
+                        }
+                        if (state == STATE_C_ENUM_ML_COMMENT) cur = len;
+                        add_attr(attrs, start_pos, cur, &d_comment);
+                        continue;
+                    }
+                }
+                if (text[cur] == '}') {
+                    state = STATE_ROOT;
+                    add_attr(attrs, cur, cur + 1, &d_punctuation);
+                    cur++;
+                    continue;
+                }
+                if (g_ascii_isalpha(text[cur]) || text[cur] == '_') {
+                    size_t s_pos = cur;
+                    while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
+                    add_attr(attrs, s_pos, cur, &d_constant);
+                    continue;
+                }
+                if (g_ascii_isdigit(text[cur])) {
+                     size_t s_pos = cur;
+                     while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '.')) cur++;
+                     add_attr(attrs, s_pos, cur, &d_number);
+                     continue;
+                }
+                if (strchr("=,+-*/%&|^<>!?:", text[cur])) {
+                    add_attr(attrs, cur, cur + 1, &d_keyword);
+                    cur++;
+                    continue;
+                }
+                cur++;
+                continue;
+            }
             if (state == STATE_C_PARAMS) {
                 /* Skip spaces */
                 if (g_ascii_isspace(text[cur])) {
@@ -611,6 +717,22 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                 if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
                     add_attr(attrs, cur, len, &d_comment);
                     cur = len;
+                    continue;
+                }
+                if (text[cur] == '/' && cur+1 < len && text[cur+1] == '*') {
+                    state = STATE_C_PARAMS_ML_COMMENT;
+                    size_t start_pos = cur;
+                    cur += 2;
+                    while (cur + 1 < len) {
+                         if (text[cur] == '*' && text[cur+1] == '/') {
+                              cur += 2;
+                              state = STATE_C_PARAMS;
+                              break;
+                         }
+                         cur++;
+                    }
+                    if (state == STATE_C_PARAMS_ML_COMMENT) cur = len;
+                    add_attr(attrs, start_pos, cur, &d_comment);
                     continue;
                 }
                 if (text[cur] == ')') {
@@ -714,7 +836,8 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
 
                     if (is_keyword) {
                         add_attr(attrs, start_pos, cur, &d_keyword);
-                    } else if (is_pointer_access || is_type_list || 
+                    } else if (is_word_in_list(word_start, word_len, c_special_constants) || 
+                               is_pointer_access || is_type_list || 
                                g_ascii_isupper(word_start[0]) || 
                                (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
                         add_attr(attrs, start_pos, cur, &d_type);
@@ -966,6 +1089,9 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
 
                     if (is_keyword) {
                         add_attr(attrs, start_pos, cur, &d_keyword);
+                        if (word_len == 4 && strncmp(word_start, "enum", 4) == 0) {
+                            state = STATE_C_ENUM_WAIT_LBRACE;
+                        }
                     } else if (is_func_call) {
                          add_attr(attrs, start_pos, cur, &d_function);
                          /* ... function declaration heuristic ... */
@@ -979,7 +1105,8 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                              if (preceded_by_id || start_pos == 0) { }
                              state = STATE_C_PARAMS;
                          }
-                    } else if (is_pointer_access || is_type_list ||
+                    } else if (is_word_in_list(word_start, word_len, c_special_constants) ||
+                               is_pointer_access || is_type_list ||
                                g_ascii_isupper(word_start[0]) || 
                                (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
                         add_attr(attrs, start_pos, cur, &d_type);
