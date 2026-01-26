@@ -745,6 +745,28 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                              cur++;
                              break;
                          }
+                         /* Escape Sequences */
+                         if (text[cur] == '\\') {
+                             if (cur > start_pos) add_attr(attrs, start_pos, cur, &d_string);
+                             size_t esc_start = cur;
+                             cur++;
+                             if (cur < len) {
+                                 /* Simple escapes */
+                                 if (strchr("ntr0\\\"\'abfv?", text[cur])) {
+                                     cur++;
+                                 } else if (text[cur] == 'x') {
+                                     cur++;
+                                     while (cur < len && g_ascii_isxdigit(text[cur])) cur++;
+                                 } else if (g_ascii_isdigit(text[cur])) { /* Octal-ish */
+                                     while (cur < len && g_ascii_isdigit(text[cur])) cur++;
+                                 } else {
+                                     cur++;
+                                 }
+                             }
+                             add_attr(attrs, esc_start, cur, &d_builtin); /* Cyan */
+                             start_pos = cur;
+                             continue;
+                         }
                          /* Format Specifiers: %... */
                          if (text[cur] == '%') {
                              /* Add attribute for string part before % */
@@ -798,6 +820,21 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                          if (text[cur] == '\'' && text[cur-1] != '\\') {
                              cur++;
                              break;
+                         }
+                         /* Escape Sequences */
+                         if (text[cur] == '\\') {
+                             if (cur > start_pos) add_attr(attrs, start_pos, cur, &d_string);
+                             size_t esc_start = cur;
+                             cur++;
+                             if (cur < len) {
+                                 if (strchr("ntr0\\\"\'abfv?", text[cur])) cur++;
+                                 else if (text[cur] == 'x') { cur++; while (cur < len && g_ascii_isxdigit(text[cur])) cur++; }
+                                 else if (g_ascii_isdigit(text[cur])) { while (cur < len && g_ascii_isdigit(text[cur])) cur++; }
+                                 else cur++;
+                             }
+                             add_attr(attrs, esc_start, cur, &d_builtin);
+                             start_pos = cur;
+                             continue;
                          }
                          cur++;
                     }
@@ -1091,6 +1128,21 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                          if (text[cur] == '\'' && text[cur-1] != '\\') {
                              cur++;
                              break;
+                         }
+                         /* Escape Sequences */
+                         if (text[cur] == '\\') {
+                             if (cur > start_pos) add_attr(attrs, start_pos, cur, &d_string);
+                             size_t esc_start = cur;
+                             cur++;
+                             if (cur < len) {
+                                 if (strchr("ntr0\\\"\'abfv?", text[cur])) cur++;
+                                 else if (text[cur] == 'x') { cur++; while (cur < len && g_ascii_isxdigit(text[cur])) cur++; }
+                                 else if (g_ascii_isdigit(text[cur])) { while (cur < len && g_ascii_isdigit(text[cur])) cur++; }
+                                 else cur++;
+                             }
+                             add_attr(attrs, esc_start, cur, &d_builtin);
+                             start_pos = cur;
+                             continue;
                          }
                          cur++;
                     }
