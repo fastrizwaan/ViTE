@@ -735,6 +735,75 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     add_attr(attrs, start_pos, cur, &d_comment);
                     continue;
                 }
+                
+                /* Handle Strings in Params (copied from ROOT) */
+                if (text[cur] == '"') {
+                    size_t start_pos = cur;
+                    cur++;
+                    while (cur < len) {
+                         if (text[cur] == '"' && text[cur-1] != '\\') {
+                             cur++;
+                             break;
+                         }
+                         /* Format Specifiers: %... */
+                         if (text[cur] == '%') {
+                             /* Add attribute for string part before % */
+                             if (cur > start_pos) {
+                                 add_attr(attrs, start_pos, cur, &d_string);
+                             }
+                             
+                             size_t fmt_start = cur;
+                             cur++;
+                             /* Parse flags */
+                             while (cur < len && strchr("-+ #0", text[cur])) cur++;
+                             /* Parse width */
+                             if (cur < len && text[cur] == '*') cur++;
+                             else while (cur < len && g_ascii_isdigit(text[cur])) cur++;
+                             /* Parse precision */
+                             if (cur < len && text[cur] == '.') {
+                                 cur++;
+                                 if (cur < len && text[cur] == '*') cur++;
+                                 else while (cur < len && g_ascii_isdigit(text[cur])) cur++;
+                             }
+                             /* Parse length modifiers */
+                             if (cur < len) {
+                                 if (strchr("hljztL", text[cur])) {
+                                     cur++;
+                                     if (cur < len && text[cur-1] == 'l' && text[cur] == 'l') cur++;
+                                     else if (cur < len && text[cur-1] == 'h' && text[cur] == 'h') cur++;
+                                 }
+                             }
+                             /* Parse specifier */
+                             if (cur < len && strchr("diuoxXfFeEgGaAcspn%", text[cur])) {
+                                 cur++;
+                                 add_attr(attrs, fmt_start, cur, &d_number);
+                             } else {
+                                 add_attr(attrs, fmt_start, cur, &d_string); 
+                             }
+                             start_pos = cur; /* Reset start for next string chunk */
+                             continue;
+                         }
+                         cur++;
+                    }
+                    /* Add remaining string part */
+                    if (cur > start_pos) {
+                        add_attr(attrs, start_pos, cur, &d_string);
+                    }
+                    continue;
+                }
+                if (text[cur] == '\'') {
+                    size_t start_pos = cur;
+                    cur++;
+                    while (cur < len) {
+                         if (text[cur] == '\'' && text[cur-1] != '\\') {
+                             cur++;
+                             break;
+                         }
+                         cur++;
+                    }
+                    add_attr(attrs, start_pos, cur, &d_string);
+                    continue;
+                }
                 if (text[cur] == ')') {
                     state = STATE_ROOT;
                     add_attr(attrs, cur, cur + 1, &d_punctuation);
@@ -834,8 +903,17 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     while (p < len && g_ascii_isspace(text[p])) p++;
                     if (p + 1 < len && text[p] == '-' && text[p+1] == '>') is_pointer_access = TRUE;
 
+                    /* Check for nested function call */
+                    gboolean is_func_call = FALSE;
+                    size_t peek = cur;
+                    while (peek < len && g_ascii_isspace(text[peek])) peek++;
+                    /* Comment awareness in peek? Simplified for now */
+                    if (peek < len && text[peek] == '(') is_func_call = TRUE;
+
                     if (is_keyword) {
                         add_attr(attrs, start_pos, cur, &d_keyword);
+                    } else if (is_func_call) {
+                        add_attr(attrs, start_pos, cur, &d_function);
                     } else if (is_word_in_list(word_start, word_len, c_special_constants) || 
                                is_pointer_access || is_type_list || 
                                g_ascii_isupper(word_start[0]) || 
@@ -956,9 +1034,54 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                              cur++;
                              break;
                          }
+                         /* Format Specifiers: %... */
+                         if (text[cur] == '%') {
+                             /* Add attribute for string part before % */
+                             if (cur > start_pos) {
+                                 add_attr(attrs, start_pos, cur, &d_string);
+                             }
+                             
+                             size_t fmt_start = cur;
+                             cur++;
+                             /* Parse flags */
+                             while (cur < len && strchr("-+ #0", text[cur])) cur++;
+                             /* Parse width */
+                             if (cur < len && text[cur] == '*') cur++;
+                             else while (cur < len && g_ascii_isdigit(text[cur])) cur++;
+                             /* Parse precision */
+                             if (cur < len && text[cur] == '.') {
+                                 cur++;
+                                 if (cur < len && text[cur] == '*') cur++;
+                                 else while (cur < len && g_ascii_isdigit(text[cur])) cur++;
+                             }
+                             /* Parse length modifiers */
+                             if (cur < len) {
+                                 if (strchr("hljztL", text[cur])) {
+                                     cur++;
+                                     if (cur < len && text[cur-1] == 'l' && text[cur] == 'l') cur++;
+                                     else if (cur < len && text[cur-1] == 'h' && text[cur] == 'h') cur++;
+                                 }
+                             }
+                             /* Parse specifier */
+                             if (cur < len && strchr("diuoxXfFeEgGaAcspn%", text[cur])) {
+                                 cur++;
+                                 /* Highlight format specifier (using number color for orange/contrast) */
+                                 /* Actually user asked: "%s, %d, %f etc. inside string should use orange color" */
+                                 /* d_number is Orange in Dark mode (#d19a66). d_punctuation is also Orange (#d19a66). */
+                                 add_attr(attrs, fmt_start, cur, &d_number);
+                             } else {
+                                 /* Not a valid specifier, just continue as string */
+                                 add_attr(attrs, fmt_start, cur, &d_string); 
+                             }
+                             start_pos = cur; /* Reset start for next string chunk */
+                             continue;
+                         }
                          cur++;
                     }
-                    add_attr(attrs, start_pos, cur, &d_string);
+                    /* Add remaining string part */
+                    if (cur > start_pos) {
+                        add_attr(attrs, start_pos, cur, &d_string);
+                    }
                     continue;
                 }
                 if (text[cur] == '\'') {
@@ -1075,6 +1198,7 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                     gboolean is_func_call = FALSE;
                     size_t peek = cur;
                     while (peek < len && g_ascii_isspace(text[peek])) peek++;
+                    /* Comment awareness in peek? Simplified for now */
                     if (peek < len && text[peek] == '(') is_func_call = TRUE;
 
                     gboolean is_keyword = is_word_in_list(word_start, word_len, c_keywords);
@@ -1094,17 +1218,9 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
                         }
                     } else if (is_func_call) {
                          add_attr(attrs, start_pos, cur, &d_function);
-                         /* ... function declaration heuristic ... */
-                         size_t peek = cur;
-                         while (peek < len && g_ascii_isspace(text[peek])) peek++;
-                         if (peek < len && text[peek] == '(') {
-                             gboolean preceded_by_id = FALSE;
-                             int p = start_pos - 1;
-                             while (p >= 0 && g_ascii_isspace(text[p])) p--;
-                             if (p >= 0 && (g_ascii_isalnum(text[p]) || text[p] == '_' || text[p] == '*')) preceded_by_id = TRUE;
-                             if (preceded_by_id || start_pos == 0) { }
-                             state = STATE_C_PARAMS;
-                         }
+                         /* Assuming valid transition to parameter state for both declarations and calls,
+                            relying on STATE_C_PARAMS to handle nested calls correctly. */
+                         state = STATE_C_PARAMS;
                     } else if (is_word_in_list(word_start, word_len, c_special_constants) ||
                                is_pointer_access || is_type_list ||
                                g_ascii_isupper(word_start[0]) || 
