@@ -99,7 +99,7 @@ static gboolean is_dark_mode = TRUE;
 static PangoColor d_keyword;   /* #c678dd Purple */
 static PangoColor d_builtin;   /* #56b6c2 Cyan */
 static PangoColor d_string;    /* #98c379 Green */
-static PangoColor d_comment;   /* #5c6370 Grey */
+static PangoColor d_comment;   /* #7f848e Grey */
 static PangoColor d_number;    /* #d19a66 Orange */
 static PangoColor d_function;  /* #61afef Blue */
 static PangoColor d_type;      /* #e5c07b Yellow/Gold (Class) */
@@ -120,7 +120,7 @@ static PangoColor d_logical;   /* #56b6c2 Cyan */
 static PangoColor l_keyword;   /* #a626a4 Purple */
 static PangoColor l_builtin;   /* #0184bc Cyan/Blue */
 static PangoColor l_string;    /* #50a14f Green */
-static PangoColor l_comment;   /* #a0a1a7 Grey */
+static PangoColor l_comment;   /* #5c6370 Grey */
 static PangoColor l_number;    /* #986801 Orange */
 static PangoColor l_operator;     /* #986801 Orange */
 static PangoColor l_punctuation;  /* #986801 Orange */
@@ -156,7 +156,7 @@ init_syntax_colors(void)
     pango_color_parse(&d_keyword, "#c678dd");
     pango_color_parse(&d_builtin, "#56b6c2");
     pango_color_parse(&d_string, "#98c379");
-    pango_color_parse(&d_comment, "#5c6370");
+    pango_color_parse(&d_comment, "#7f848e");
     pango_color_parse(&d_number, "#d19a66");
     pango_color_parse(&d_function, "#61afef");
     pango_color_parse(&d_type, "#e5c07b");
@@ -177,7 +177,7 @@ init_syntax_colors(void)
     pango_color_parse(&l_keyword, "#a626a4");
     pango_color_parse(&l_builtin, "#0184bc");
     pango_color_parse(&l_string, "#50a14f");
-    pango_color_parse(&l_comment, "#a0a1a7");
+    pango_color_parse(&l_comment, "#5c6370");
     pango_color_parse(&l_number, "#986801");
     pango_color_parse(&l_operator, "#986801");
     pango_color_parse(&l_logical, "#0184bc");
