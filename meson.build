@@ -34,7 +34,14 @@ sources = files(
   'src/tab.c',
   'src/tab-bar.c',
   'src/fading-label.c',
-  'src/compact-matches.c'
+  'src/compact-matches.c',
+  'src/syntax-c.c',
+  'src/syntax-python.c',
+  'src/syntax-shell.c',
+  'src/syntax-js.c',
+  'src/syntax-yaml.c',
+  'src/syntax-xml.c',
+  'src/syntax-desktop.c'
 )
 
 executable('vite',

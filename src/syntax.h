@@ -30,7 +30,12 @@ typedef enum {
     STATE_C_ENUM_WAIT_LBRACE = 7,   /* Saw 'enum', waiting for '{' */
     STATE_C_ENUM = 8,               /* Inside enum { ... } */
     STATE_C_ENUM_ML_COMMENT = 9,    /* multi-line comment inside enum */
-    STATE_C_PARAMS_ML_COMMENT = 10  /* multi-line comment inside params */
+    STATE_C_PARAMS_ML_COMMENT = 10, /* multi-line comment inside params */
+    STATE_SH_BACKTICK = 11,         /* `...` (command substitution) */
+    STATE_BASH_CMD_SUBST = 12,      /* $(...) */
+    STATE_BASH_CONTINUATION = 13,   /* Previous line ended with \ */
+    STATE_BASH_CASE = 14,           /* Inside a case statement, looking for patterns */
+    STATE_BASH_CASE_BODY = 15       /* Inside a case statement, inside a command block */
 } SyntaxState;
 
 typedef struct _SyntaxContext SyntaxContext;

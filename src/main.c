@@ -2930,7 +2930,10 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
             g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "json") == 0 || 
             g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "rst") == 0 ||
             g_ascii_strcasecmp(ext, "h") == 0 || g_ascii_strcasecmp(ext, "js") == 0 ||
-            g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) {
+            g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0 ||
+            g_ascii_strcasecmp(ext, "xml") == 0 || g_ascii_strcasecmp(ext, "html") == 0 ||
+            g_ascii_strcasecmp(ext, "svg") == 0 || g_ascii_strcasecmp(ext, "xsl") == 0 ||
+            g_ascii_strcasecmp(ext, "desktop") == 0) {
             editor_widget_set_language(EDITOR_WIDGET(editor), ext);
             /* Refresh status bar now that language is set */
             if (vite_tab_is_active(tab_to_use)) {
