@@ -41,7 +41,8 @@ sources = files(
   'src/syntax-js.c',
   'src/syntax-yaml.c',
   'src/syntax-xml.c',
-  'src/syntax-desktop.c'
+  'src/syntax-desktop.c',
+  'src/syntax-rust.c'
 )
 
 executable('vite',

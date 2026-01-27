@@ -187,6 +187,7 @@ static const FileTypeEntry file_types[] = {
     { "C++", "cpp" },
     { "Python", "python" },
     { "Bash", "bash" },
+    { "Rust", "rust" },
     { "Header", "h" },
     { NULL, NULL }
 };

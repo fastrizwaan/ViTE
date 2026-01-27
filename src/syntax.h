@@ -12,7 +12,8 @@ typedef enum {
     LANG_JSON,
     LANG_YAML,
     LANG_XML,
-    LANG_DESKTOP
+    LANG_DESKTOP,
+    LANG_RUST
 } SyntaxLanguage;
 
 void syntax_set_theme_mode(gboolean is_dark);
@@ -35,7 +36,8 @@ typedef enum {
     STATE_BASH_CMD_SUBST = 12,      /* $(...) */
     STATE_BASH_CONTINUATION = 13,   /* Previous line ended with \ */
     STATE_BASH_CASE = 14,           /* Inside a case statement, looking for patterns */
-    STATE_BASH_CASE_BODY = 15       /* Inside a case statement, inside a command block */
+    STATE_BASH_CASE_BODY = 15,      /* Inside a case statement, inside a command block */
+    STATE_RUST_ML_COMMENT = 16      /* Rust nested block comments */
 } SyntaxState;
 
 typedef struct _SyntaxContext SyntaxContext;

@@ -227,8 +227,8 @@ syntax_context_set_language(SyntaxContext *ctx, const char *lang_name)
         ctx->lang = LANG_XML;
     } else if (strcmp(lang_name, "desktop") == 0) {
         ctx->lang = LANG_DESKTOP;
-    } else if (strcmp(lang_name, "rst") == 0) {
-        ctx->lang = LANG_NONE; /* Acknowledged requested highlightable type */
+    } else if (strcmp(lang_name, "rust") == 0 || strcmp(lang_name, "rs") == 0 || strcmp(lang_name, "rst") == 0) {
+        ctx->lang = LANG_RUST;
     } else {
         ctx->lang = LANG_NONE;
     }
@@ -257,6 +257,7 @@ syntax_context_get_language_name(SyntaxContext *ctx)
         case LANG_YAML: return "YAML";
         case LANG_XML: return "XML/HTML";
         case LANG_DESKTOP: return "Desktop Entry";
+        case LANG_RUST: return "Rust";
         case LANG_NONE: 
         default: return "Plain Text";
     }
@@ -440,6 +441,9 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
             break;
         case LANG_DESKTOP:
             syntax_highlight_desktop(ctx, attrs, text, len, start_state, line_index);
+            break;
+        case LANG_RUST:
+            syntax_highlight_rust(ctx, attrs, text, len, start_state, line_index);
             break;
         default:
              /* Just save state if we don't have a handler (shouldn't happen if lang!=NONE) */

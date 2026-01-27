@@ -115,5 +115,6 @@ void syntax_highlight_json(SyntaxContext *ctx, PangoAttrList *attrs, const char 
 void syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index);
 void syntax_highlight_xml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index);
 void syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index);
+void syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index);
 
 #endif
