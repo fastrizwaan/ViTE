@@ -80,8 +80,11 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
              if (cur+1 < len && !g_ascii_isspace(text[cur+1])) {
                  size_t start = cur;
                  cur++;
+                 add_attr(attrs, start, cur, &d_keyword); /* Prefix: Purple */
+                 
+                 size_t name_start = cur;
                  while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '-' || text[cur] == '_')) cur++;
-                 add_attr(attrs, start, cur, &d_keyword); /* Purple */
+                 add_attr(attrs, name_start, cur, &d_type); /* Name: Yellow */
                  continue;
              }
         }
