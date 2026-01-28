@@ -189,6 +189,11 @@ static const FileTypeEntry file_types[] = {
     { "Bash", "bash" },
     { "Rust", "rust" },
     { "Header", "h" },
+    { "YAML", "yaml" },
+    { "JSON", "json" },
+    { "XML", "xml" },
+    { "JavaScript", "javascript" },
+    { "Desktop Entry", "desktop" },
     { NULL, NULL }
 };
 

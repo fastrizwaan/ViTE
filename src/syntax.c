@@ -312,6 +312,27 @@ syntax_detect_language(const char *content)
     if (strstr(content, "import ") && strstr(content, "from ")) return "python";
     if (strstr(content, "if __name__ == \"__main__\":")) return "python";
 
+    if (strstr(content, "if __name__ == \"__main__\":")) return "python";
+
+    /* YAML Heuristics */
+    if (g_str_has_prefix(content, "%YAML") || g_str_has_prefix(content, "---")) return "yaml";
+    /* Look for typical "key: value" or "- item" at start */
+    /* Check first line manually */
+    {
+        const char *s = content;
+        while (*s && g_ascii_isspace(*s)) s++;
+        
+        /* List item */
+        if (*s == '-') return "yaml";
+        
+        /* Key: Value */
+        if (g_ascii_isalnum(*s)) {
+            const char *k = s;
+            while (*k && (g_ascii_isalnum(*k) || *k == '-' || *k == '_')) k++;
+            if (*k == ':' && (g_ascii_isspace(k[1]) || k[1] == '\0')) return "yaml";
+        }
+    }
+
     return NULL;
 }
 
