@@ -114,35 +114,23 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             size_t seg_start = cur;
             while (cur < len) {
                 if (text[cur] == '"') {
-                    add_attr(attrs, seg_start, cur, &d_string);
-                    add_attr(attrs, cur, cur+1, &d_string);
+                    if (cur > seg_start) add_attr(attrs, seg_start, cur, &d_string);
+                    add_attr(attrs, cur, cur+1, &d_string); /* Close quote */
                     cur++;
                     break;
                 }
+                
+                /* Escapes */
                 if (text[cur] == '\\') {
-                    add_attr(attrs, seg_start, cur, &d_string);
+                    if (cur > seg_start) add_attr(attrs, seg_start, cur, &d_string);
                     size_t esc_end = cur + 1;
                     if (esc_end < len) {
                         char type = text[esc_end];
-                        esc_end++; /* Consume type char */
-                        
-                        /* Unicode / Hex Check */
-                        if (type == 'u') {
-                            /* \uXXXX */
+                        esc_end++; 
+                        if (strchr("uUx", type)) {
                             int digits = 0;
-                            while (esc_end < len && g_ascii_isxdigit(text[esc_end]) && digits < 4) {
-                                esc_end++; digits++;
-                            }
-                        } else if (type == 'U') {
-                            /* \UXXXXXXXX */
-                            int digits = 0;
-                            while (esc_end < len && g_ascii_isxdigit(text[esc_end]) && digits < 8) {
-                                esc_end++; digits++;
-                            }
-                        } else if (type == 'x') {
-                            /* \xXX */
-                            int digits = 0;
-                            while (esc_end < len && g_ascii_isxdigit(text[esc_end]) && digits < 2) {
+                            int max = (type == 'u') ? 4 : (type == 'U') ? 8 : 2;
+                            while (esc_end < len && g_ascii_isxdigit(text[esc_end]) && digits < max) {
                                 esc_end++; digits++;
                             }
                         }
@@ -152,34 +140,58 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                     seg_start = cur;
                     continue;
                 }
+                
+                /* Numbers inside String */
+                if (g_ascii_isdigit(text[cur])) {
+                     if (cur > seg_start) add_attr(attrs, seg_start, cur, &d_string);
+                     
+                     size_t num_start = cur;
+                     while (cur < len && (g_ascii_isdigit(text[cur]) || text[cur] == '.')) cur++;
+                     
+                     /* Validate it looks like a number? User just said "numbers". 
+                        "24.08" is digits and dots. */
+                     add_attr(attrs, num_start, cur, &d_number); /* Orange */
+                     seg_start = cur;
+                     continue;
+                }
+                
                 cur++;
             }
             if (cur >= len && text[cur-1] != '"') {
-                add_attr(attrs, seg_start, cur, &d_string);
-            }
-            
-            /* Check if this quoted string is a Key (followed by :) */
-            size_t p = cur;
-            while (p < len && g_ascii_isspace(text[p])) p++;
-            if (p < len && text[p] == ':') {
-                 /* Treat quoted identifier followed by colon as a Key (Red) if requested. 
-                    User asked "a, b, c (XXX: YYY) XXX should be red". 
-                    This usually implies unquoted identifiers in inline maps {a: 1}.
-                    But let's leave quoted strings as Green for now unless user clarifies. */
+                if (cur > seg_start) add_attr(attrs, seg_start, cur, &d_string);
             }
             continue;
         }
+        
         if (text[cur] == '\'') {
             size_t start_pos = cur;
             cur++;
+            add_attr(attrs, start_pos, cur, &d_string);
+            
+            size_t seg_start = cur;
             while (cur < len) {
                 if (text[cur] == '\'' && text[cur-1] != '\\') {
+                    if (cur > seg_start) add_attr(attrs, seg_start, cur, &d_string);
+                    add_attr(attrs, cur, cur+1, &d_string);
                     cur++;
                     break;
                 }
+                
+                /* Numbers inside String */
+                if (g_ascii_isdigit(text[cur])) {
+                     if (cur > seg_start) add_attr(attrs, seg_start, cur, &d_string);
+                     size_t num_start = cur;
+                     while (cur < len && (g_ascii_isdigit(text[cur]) || text[cur] == '.')) cur++;
+                     add_attr(attrs, num_start, cur, &d_number); /* Orange */
+                     seg_start = cur;
+                     continue;
+                }
+                
                 cur++;
             }
-            add_attr(attrs, start_pos, cur, &d_string);
+            if (cur >= len && text[cur-1] != '\'') {
+                  if (cur > seg_start) add_attr(attrs, seg_start, cur, &d_string);
+            }
             continue;
         }
         
@@ -187,11 +199,8 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
         if (g_ascii_isdigit(text[cur]) || text[cur] == '-' || text[cur] == '.') {
             size_t start_pos = cur;
             size_t probe = cur;
-            
-            /* Check for leading sign */
             if (text[probe] == '-') probe++;
             
-            /* Special check: ".nan", ".inf" */
             gboolean is_number_special = FALSE;
             if (text[probe] == '.' && probe + 3 <= len) {
                 if (strncmp(text+probe, ".nan", 4) == 0 || strncmp(text+probe, ".inf", 4) == 0) match:
@@ -207,8 +216,6 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             
             if (probe < len && g_ascii_isdigit(text[probe])) {
                 while (probe < len && (g_ascii_isalnum(text[probe]) || text[probe] == '.')) probe++;
-                
-                /* Delimiter check to confirm it's a value and not part of text */
                 if (probe == len || g_ascii_isspace(text[probe]) || strchr("#,]}", text[probe])) {
                     add_attr(attrs, start_pos, probe, &d_number);
                     cur = probe;
@@ -221,9 +228,16 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
         if (text[cur] == '$' && cur + 1 < len && text[cur+1] == '{') {
             size_t start = cur;
             cur += 2;
+            add_attr(attrs, start, cur, &d_preproc); /* ${ -> Purple */
+            
+            size_t var_start = cur;
             while (cur < len && text[cur] != '}') cur++;
-            if (cur < len) cur++; /* Consume } */
-            add_attr(attrs, start, cur, &d_preproc); /* Purple/Cyan for variable */
+            add_attr(attrs, var_start, cur, &d_variable); /* XXXX -> Red */
+            
+            if (cur < len) {
+                add_attr(attrs, cur, cur+1, &d_preproc); /* } -> Purple */
+                cur++; 
+            }
             continue;
         }
         
