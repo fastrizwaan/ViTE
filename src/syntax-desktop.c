@@ -32,7 +32,7 @@ syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *t
             while (cur < len && text[cur] != ']') cur++;
             
             if (cur > name_start) {
-                add_attr(attrs, name_start, cur, &d_type); /* Name -> Yellow */
+                add_attr(attrs, name_start, cur, &d_builtin); /* Name -> Cyan */
             }
             
             if (cur < len && text[cur] == ']') {
