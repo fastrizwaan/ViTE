@@ -4,74 +4,78 @@
 void 
 syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index)
 {
-    GMatchInfo *mi;
-    if (g_regex_match(ctx->desktop_comment, text, 0, &mi)) {
-        while (g_match_info_matches(mi)) {
-            int s, e;
-            g_match_info_fetch_pos(mi, 0, &s, &e);
-            add_attr(attrs, s, e, &d_comment);
-            g_match_info_next(mi, NULL);
-        }
-    }
-    g_match_info_free(mi);
+    size_t cur = 0;
     
-    if (g_regex_match(ctx->desktop_section, text, 0, &mi)) {
-        while (g_match_info_matches(mi)) {
-            int s, e;
-            g_match_info_fetch_pos(mi, 0, &s, &e);
-            add_attr(attrs, s, e, &d_keyword); /* Keywords color for Section */
-            g_match_info_next(mi, NULL);
+    while (cur < len) {
+        /* Whitespace */
+        if (g_ascii_isspace(text[cur])) {
+            cur++;
+            continue;
         }
-    }
-    g_match_info_free(mi);
-    
-    if (g_regex_match(ctx->desktop_key, text, 0, &mi)) {
-        while (g_match_info_matches(mi)) {
-            int ks, ke;
-            int full_s, full_e;
-            g_match_info_fetch_pos(mi, 0, &full_s, &full_e);
-            g_match_info_fetch_pos(mi, 1, &ks, &ke); /* Group 1 key */
-            add_attr(attrs, ks, ke, &d_tag); /* Key -> Red */
+        
+        /* Comment # */
+        if (text[cur] == '#') {
+            add_attr(attrs, cur, len, &d_comment);
+            cur = len;
+            continue;
+        }
+        
+        /* Section Header [Section] */
+        if (text[cur] == '[') {
+            /* Check if it's a section line (starts with [) - usually matches regex ^\[...\] */
+            /* We can enforce start of line logic if needed, but simplistic is fine */
+            size_t start = cur;
+            add_attr(attrs, cur, cur+1, &d_keyword); /* [ -> Purple */
+            cur++;
             
-            /* Highlight everything after the key match (=) as string (Green) */
-            /* The regex matches "Key=", so full_e is after = */
-            add_attr(attrs, full_e, len, &d_string); 
+            size_t name_start = cur;
+            while (cur < len && text[cur] != ']') cur++;
             
-            g_match_info_next(mi, NULL);
+            if (cur > name_start) {
+                add_attr(attrs, name_start, cur, &d_type); /* Name -> Yellow */
+            }
+            
+            if (cur < len && text[cur] == ']') {
+                add_attr(attrs, cur, cur+1, &d_keyword); /* ] -> Purple */
+                cur++;
+            }
+            continue;
         }
-    }
-    g_match_info_free(mi);
-    
-    if (g_regex_match(ctx->desktop_arg, text, 0, &mi)) {
-        while (g_match_info_matches(mi)) {
-            int s, e;
-            g_match_info_fetch_pos(mi, 0, &s, &e);
-            add_attr(attrs, s, e, &d_param); /* Argument -> Orange */
-            g_match_info_next(mi, NULL);
+        
+        /* Assigment Key=Val */
+        /* Scan for = */
+        size_t p = cur;
+        while (p < len && text[p] != '=' && text[p] != '#' && text[p] != '[') p++;
+        
+        if (p < len && text[p] == '=') {
+            /* Found key */
+            add_attr(attrs, cur, p, &d_tag); /* Key -> Red (or Tag color) */
+            
+            /* Highlight = as Cyan */
+            add_attr(attrs, p, p+1, &d_builtin); 
+            
+            cur = p + 1;
+            
+            /* Highlight Value */
+            /* Value runs to end of line, but handle ; as Orange */
+            size_t val_start = cur;
+            while (cur < len) {
+                if (text[cur] == ';') {
+                    if (cur > val_start) add_attr(attrs, val_start, cur, &d_string);
+                    add_attr(attrs, cur, cur+1, &d_punctuation); /* ; -> Orange */
+                    cur++;
+                    val_start = cur;
+                } else {
+                    cur++;
+                }
+            }
+            if (cur > val_start) add_attr(attrs, val_start, cur, &d_string);
+            continue;
         }
+        
+        /* Fallback */
+        cur++;
     }
-    g_match_info_free(mi);
-    
-    /* Strings */
-    if (g_regex_match(ctx->desktop_string_dq, text, 0, &mi)) {
-        while (g_match_info_matches(mi)) {
-            int s, e;
-            g_match_info_fetch_pos(mi, 0, &s, &e);
-            add_attr(attrs, s, e, &d_string);
-            g_match_info_next(mi, NULL);
-        }
-    }
-    g_match_info_free(mi);
-    
-    if (g_regex_match(ctx->desktop_string_sq, text, 0, &mi)) {
-        while (g_match_info_matches(mi)) {
-            int s, e;
-            g_match_info_fetch_pos(mi, 0, &s, &e);
-            add_attr(attrs, s, e, &d_string);
-            g_match_info_next(mi, NULL);
-        }
-    }
-    g_match_info_free(mi);
 
     set_line_end_state(ctx, line_index, state);
 }
