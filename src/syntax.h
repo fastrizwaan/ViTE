@@ -53,6 +53,8 @@ void syntax_context_invalidate_all(SyntaxContext *ctx);  /* Clear all cached hig
 const char *syntax_context_get_language_name(SyntaxContext *ctx);
 SyntaxLanguage syntax_context_get_language(SyntaxContext *ctx);
 
+const char *syntax_detect_language(const char *content);
+
 /* Highlight a line given its index. Updates the internal state chain for the NEXT line. 
    'text' should be the content of the line.
    Returns a PangoAttrList to apply.

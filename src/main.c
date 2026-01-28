@@ -577,6 +577,27 @@ on_document_content_changed(Document *doc, void *user_data)
         if (vite_tab_is_active(tab)) {
             update_window_title_for_tab(tab);
         }
+
+        /* Auto-detect language if currently Plain Text */
+        GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+        GtkWidget *editor = get_editor_from_page(page);
+        if (EDITOR_IS_WIDGET(editor)) {
+             SyntaxContext *ctx = editor_widget_get_syntax_context(EDITOR_WIDGET(editor));
+             if (ctx && syntax_context_get_language(ctx) == LANG_NONE) {
+                 /* Read sample */
+                 char *sample = document_get_text_range(doc, 0, 1024);
+                 if (sample) {
+                     const char *detected = syntax_detect_language(sample);
+                     if (detected) {
+                         editor_widget_set_language(EDITOR_WIDGET(editor), detected);
+                         if (vite_tab_is_active(tab)) {
+                             on_tab_clicked(tab, NULL); /* Refresh status bar */
+                         }
+                     }
+                     g_free(sample);
+                 }
+             }
+        }
     }
 }
 
@@ -2924,22 +2945,42 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
     GtkWidget *page = g_object_get_data(G_OBJECT(tab_to_use), "page");
     GtkWidget *editor = get_editor_from_page(page);
     const char *dot = strrchr(path, '.');
+    gboolean lang_set = FALSE;
     if (dot && EDITOR_IS_WIDGET(editor)) {
         const char *ext = dot + 1;
-        if (g_ascii_strcasecmp(ext, "c") == 0 || g_ascii_strcasecmp(ext, "py") == 0 || 
-            g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "json") == 0 || 
-            g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "rst") == 0 ||
-            g_ascii_strcasecmp(ext, "h") == 0 || g_ascii_strcasecmp(ext, "js") == 0 ||
-            g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0 ||
-            g_ascii_strcasecmp(ext, "xml") == 0 || g_ascii_strcasecmp(ext, "html") == 0 ||
-            g_ascii_strcasecmp(ext, "svg") == 0 || g_ascii_strcasecmp(ext, "xsl") == 0 ||
-            g_ascii_strcasecmp(ext, "desktop") == 0) {
-            editor_widget_set_language(EDITOR_WIDGET(editor), ext);
-            /* Refresh status bar now that language is set */
-            if (vite_tab_is_active(tab_to_use)) {
-                on_tab_clicked(tab_to_use, NULL);
+        if (g_ascii_strcasecmp(ext, "c") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "c"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "cc") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "c"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "h") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "c"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "py") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "python"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "bash") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "bash"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "js") == 0 || g_ascii_strcasecmp(ext, "ts") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "javascript"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "json") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "json"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "yaml"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "xml") == 0 || g_ascii_strcasecmp(ext, "html") == 0 || g_ascii_strcasecmp(ext, "svg") == 0 || g_ascii_strcasecmp(ext, "xsl") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "xml"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "desktop") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "desktop"); lang_set = TRUE; }
+        else if (g_ascii_strcasecmp(ext, "rs") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "rust"); lang_set = TRUE; }
+    }
+
+    if (!lang_set && EDITOR_IS_WIDGET(editor)) {
+        /* Fallback: Content Detection (First 1KB) */
+        char sample[1024];
+        GFileInputStream *in_stream = g_file_read(file, NULL, NULL);
+        if (in_stream) {
+            gssize bytes = g_input_stream_read(G_INPUT_STREAM(in_stream), sample, 1023, NULL, NULL);
+            if (bytes > 0) {
+                sample[bytes] = '\0';
+                const char *detected = syntax_detect_language(sample);
+                if (detected) {
+                    editor_widget_set_language(EDITOR_WIDGET(editor), detected);
+                    lang_set = TRUE;
+                }
             }
+            g_object_unref(in_stream);
         }
+    }
+    
+    if (lang_set && vite_tab_is_active(tab_to_use)) {
+        on_tab_clicked(tab_to_use, NULL);
     }
 
     /* Setup Async Load */

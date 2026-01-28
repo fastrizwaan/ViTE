@@ -263,6 +263,58 @@ syntax_context_get_language_name(SyntaxContext *ctx)
     }
 }
 
+const char *
+syntax_detect_language(const char *content)
+{
+    if (!content) return NULL;
+    
+    /* Shebang Check */
+    if (g_str_has_prefix(content, "#!")) {
+        if (strstr(content, "bash") || strstr(content, "sh")) return "bash";
+        if (strstr(content, "python")) return "python";
+        if (strstr(content, "node")) return "javascript";
+        if (strstr(content, "perl")) return NULL; /* Not supported yet */
+    }
+    
+    /* XML / HTML */
+    if (strstr(content, "<?xml") || strstr(content, "<!DOCTYPE html") || strstr(content, "<html")) {
+        return "xml";
+    }
+    
+    /* Desktop Entry */
+    if (strstr(content, "[Desktop Entry]")) {
+        return "desktop";
+    }
+    
+    /* C Headers */
+    if (strstr(content, "#include <") || strstr(content, "#include \"")) {
+        return "c";
+    }
+    
+    /* JSON (heuristic: starts with { or [ and looks like valid JSON start) */
+    /* Skip whitespace */
+    const char *p = content;
+    while (*p && g_ascii_isspace(*p)) p++;
+    if (*p == '{' || *p == '[') {
+        if (strstr(content, "\"")) return "json";
+    }
+    
+    /* Rust Heuristics */
+    if (strstr(content, "fn main()") || strstr(content, "use std::") || 
+        strstr(content, "pub mod") || strstr(content, "pub struct") || 
+        strstr(content, "pub fn") || strstr(content, "#[derive(")) {
+        return "rust";
+    }
+    
+    /* Python Heuristics */
+    /* Look for "def " or "import " at start of lines, or "if __name__" */
+    if (strstr(content, "def ") && strstr(content, ":")) return "python";
+    if (strstr(content, "import ") && strstr(content, "from ")) return "python";
+    if (strstr(content, "if __name__ == \"__main__\":")) return "python";
+
+    return NULL;
+}
+
 void
 syntax_context_invalidate(SyntaxContext *ctx, size_t start_line)
 {
