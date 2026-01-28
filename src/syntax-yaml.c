@@ -223,7 +223,7 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             if (text[cur] == '~') {
                  cur++;
             } else {
-                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_' || text[cur] == '-')) cur++;
+                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_' || text[cur] == '-' || text[cur] == '.')) cur++;
             }
             size_t word_len = cur - start_pos;
             
