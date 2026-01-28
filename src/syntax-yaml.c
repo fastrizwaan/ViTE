@@ -251,22 +251,11 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                 char c = text[cur];
                 if (g_ascii_isspace(c)) break;
                 if (strchr("[]{},:", c)) { 
-                    /* Special handling for colon: only delimiter if followed by space? 
-                       But we are already past key scan. 
-                       In value position, 'http://foo' contains colon. 
-                       'key:val' (inline) -> val has no space. 
-                       Let's treat colon as a stop only if strictly safe, or just stop for safety.
-                       But waiting ... if we stop at colon, `http://` breaks.
-                       Compromise: Stop at colon only if we are creating a key? 
-                       We already checked for Keys at line start. 
-                       If we are in a list `- value`, `value` is `http://foo`.
-                       Let's Include colon in scalar IF it is not followed by space? 
-                       Easier: Just include it. Key scan logic above handles the 'key:' case first.
-                    */
-                    /* Wait, if we have {a:1}, we are at 'a'. 'a' follows by ':'. Loop runs. 
-                       We need to realize 'a' is a key. 
-                       My previous logic checked "is_key" AFTER the word scan. 
-                       We can keep that logic. */
+                    /* Allow :// in scalars (URLs) */
+                    if (c == ':' && cur + 2 < len && text[cur+1] == '/' && text[cur+2] == '/') {
+                        cur++; continue;
+                    }
+                    
                      if (c == ':' || c == ',' || c == '}' || c == ']') break;
                 }
                 /* Also break on variable start */

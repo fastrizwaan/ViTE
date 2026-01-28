@@ -25,18 +25,18 @@ syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *t
             /* Check if it's a section line (starts with [) - usually matches regex ^\[...\] */
             /* We can enforce start of line logic if needed, but simplistic is fine */
             size_t start = cur;
-            add_attr(attrs, cur, cur+1, &d_keyword); /* [ -> Purple */
+            add_attr(attrs, cur, cur+1, &d_number); /* [ -> orange */
             cur++;
             
             size_t name_start = cur;
             while (cur < len && text[cur] != ']') cur++;
             
             if (cur > name_start) {
-                add_attr(attrs, name_start, cur, &d_builtin); /* Name -> Cyan */
+                add_attr(attrs, name_start, cur, &d_function); /* Name -> Cyan */
             }
             
             if (cur < len && text[cur] == ']') {
-                add_attr(attrs, cur, cur+1, &d_keyword); /* ] -> Purple */
+                add_attr(attrs, cur, cur+1, &d_number); /* ] -> orange */
                 cur++;
             }
             continue;
