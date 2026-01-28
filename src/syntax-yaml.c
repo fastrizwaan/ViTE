@@ -217,28 +217,55 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             }
         }
         
-        /* Keywords (Scalars) or Keys */
-        if (g_ascii_isalpha(text[cur]) || text[cur] == '~') {
+        /* Variable Substitution ${...} */
+        if (text[cur] == '$' && cur + 1 < len && text[cur+1] == '{') {
+            size_t start = cur;
+            cur += 2;
+            while (cur < len && text[cur] != '}') cur++;
+            if (cur < len) cur++; /* Consume } */
+            add_attr(attrs, start, cur, &d_preproc); /* Purple/Cyan for variable */
+            continue;
+        }
+        
+        /* Keywords (Scalars) or Keys or Generic Unquoted Strings */
+        /* Accept almost anything that isn't a delimiter as start of scalar */
+        if (g_ascii_isalnum(text[cur]) || strchr("._-/+@=^%", text[cur])) {
             size_t start_pos = cur;
-            if (text[cur] == '~') {
-                 cur++;
-            } else {
-                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_' || text[cur] == '-' || text[cur] == '.')) cur++;
+            
+            /* Consume until delimiter */
+            while (cur < len) {
+                char c = text[cur];
+                if (g_ascii_isspace(c)) break;
+                if (strchr("[]{},:", c)) { 
+                    /* Special handling for colon: only delimiter if followed by space? 
+                       But we are already past key scan. 
+                       In value position, 'http://foo' contains colon. 
+                       'key:val' (inline) -> val has no space. 
+                       Let's treat colon as a stop only if strictly safe, or just stop for safety.
+                       But waiting ... if we stop at colon, `http://` breaks.
+                       Compromise: Stop at colon only if we are creating a key? 
+                       We already checked for Keys at line start. 
+                       If we are in a list `- value`, `value` is `http://foo`.
+                       Let's Include colon in scalar IF it is not followed by space? 
+                       Easier: Just include it. Key scan logic above handles the 'key:' case first.
+                    */
+                    /* Wait, if we have {a:1}, we are at 'a'. 'a' follows by ':'. Loop runs. 
+                       We need to realize 'a' is a key. 
+                       My previous logic checked "is_key" AFTER the word scan. 
+                       We can keep that logic. */
+                     if (c == ':' || c == ',' || c == '}' || c == ']') break;
+                }
+                /* Also break on variable start */
+                if (c == '$' && cur+1 < len && text[cur+1] == '{') break;
+                
+                cur++;
             }
+            
             size_t word_len = cur - start_pos;
             
             /* Check if Key (followed by :) */
-            size_t p = cur;
-            /* Allow spaces before colon? "key : value" */
-            /* In inline maps {key: value}, space is allowed. */
-            /* Check if next significant char is ':' */
-            /* Note: We shouldn't scan past newline or comments, but this loop is per line. */
-             
-            /* Check for colon */
             gboolean is_key = FALSE;
-            if (p < len && text[p] == ':') {
-                 is_key = TRUE;
-            }
+            if (cur < len && text[cur] == ':') is_key = TRUE;
             
             gboolean delim = (cur == len || g_ascii_isspace(text[cur]) || strchr(":#,]}", text[cur]));
             
