@@ -105,6 +105,7 @@ size_t document_search_task_get_total_lines(SearchTask *task);
 size_t document_search_task_get_lines_searched(SearchTask *task);
 size_t document_search_task_get_match_count(SearchTask *task);
 GArray *document_search_task_get_viewport_matches(SearchTask *task, size_t start_offset, size_t end_offset);
+gboolean document_search_task_get_match_at(SearchTask *task, size_t idx, SearchMatch *out);
 
 GArray *document_search(Document *doc, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word);
 gboolean document_find_next(Document *doc, SearchMatch *result, size_t start_pos, const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word);

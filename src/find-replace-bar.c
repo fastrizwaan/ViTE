@@ -363,6 +363,7 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
     if (self->current_search) {
         document_search_async_cancel(self->current_search);
         self->current_search = NULL;
+        editor_widget_set_active_search(self->editor, NULL);
     }
     
     if (!doc) return G_SOURCE_REMOVE;
@@ -392,6 +393,9 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
     gtk_widget_set_visible(self->matches_label, TRUE);
     
     self->current_search = document_search_async_start(doc, text, regex, case_sensitive, whole_word, on_search_update, self);
+    
+    /* Set active search on editor for global navigation */
+    editor_widget_set_active_search(self->editor, self->current_search);
     
     /* Connect scroll handler to update highlights on scroll */
     if (!self->viewport_scroll_handler_id && self->editor) {
@@ -847,6 +851,11 @@ void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
          }
     } else {
          editor_widget_set_search_results(bar->editor, NULL);
+         editor_widget_set_active_search(bar->editor, NULL);
+         if (bar->current_search) {
+             document_search_async_cancel(bar->current_search);
+             bar->current_search = NULL;
+         }
     }
     
     gtk_widget_grab_focus(GTK_WIDGET(bar->editor));

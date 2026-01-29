@@ -276,7 +276,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                         if (local_start < local_end) {
                             /* Yellow: 65535, 65535, 0 */
                             guint16 r = 65535, g = 65535, b = 0;
-                            if (m == self->current_match_idx) {
+                            if (match.start == self->current_match_offset) {
                                 /* Orange for active: 65535, 40000, 0 */
                                 g = 40000; b = 0;
                             }

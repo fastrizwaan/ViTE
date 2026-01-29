@@ -23,6 +23,8 @@ void editor_widget_next_match(EditorWidget *self);
 void editor_widget_prev_match(EditorWidget *self);
 void editor_widget_replace_current(EditorWidget *self, const char *replacement, gboolean regex, const char *regex_text);
 int editor_widget_get_current_match_index(EditorWidget *self);
+void editor_widget_set_active_search(EditorWidget *self, SearchTask *task);
+void editor_widget_clear_search(EditorWidget *self);
 void editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *end);
 void editor_widget_get_visible_offset_range(EditorWidget *self, size_t *start_offset, size_t *end_offset);
 GtkAdjustment *editor_widget_get_vadjustment(EditorWidget *self);

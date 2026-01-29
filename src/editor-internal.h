@@ -90,8 +90,11 @@ struct _EditorWidget {
     gboolean alt_word_mode;
 
     /* Search */
-    GArray *search_matches;
-    int current_match_idx;
+    GArray *search_matches;          /* Viewport matches for rendering */
+    int current_match_idx;           /* Index in viewport matches (for rendering, deprecated) */
+    SearchTask *active_search;       /* Global search reference for navigation */
+    size_t global_match_idx;         /* Position in ALL matches, not just viewport */
+    size_t current_match_offset;     /* Start offset of current match for highlight comparison */
 
     /* Filter */
     CompactMatches *filtered_lines;

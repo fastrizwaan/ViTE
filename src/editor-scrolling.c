@@ -209,10 +209,13 @@ scroll_to_cursor(EditorWidget *self)
     double page_size = gtk_adjustment_get_page_size(self->vadjustment);
     double value = gtk_adjustment_get_value(self->vadjustment);
     
+    /* Add extra padding at bottom for overlaid find bar (~80px = ~3-4 lines) */
+    double bottom_padding = self->line_height * 4;
+    
     if (y < value) {
         gtk_adjustment_set_value(self->vadjustment, y);
-    } else if (y + self->line_height > value + page_size) {
-        gtk_adjustment_set_value(self->vadjustment, y + self->line_height - page_size);
+    } else if (y + self->line_height + bottom_padding > value + page_size) {
+        gtk_adjustment_set_value(self->vadjustment, y + self->line_height + bottom_padding - page_size);
     }
     /* Else visible */
 }

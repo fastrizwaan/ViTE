@@ -1469,6 +1469,32 @@ GArray *document_search_task_get_viewport_matches(SearchTask *task, size_t start
     return viewport;
 }
 
+/* Get a single match by global index - O(1) for regex, O(n) worst case for compact */
+gboolean document_search_task_get_match_at(SearchTask *task, size_t idx, SearchMatch *out) {
+    if (!task || !out) return FALSE;
+    
+    if (task->compact_matches) {
+        size_t count = compact_matches_count(task->compact_matches);
+        if (idx >= count) return FALSE;
+        
+        /* Extract single match from compact storage */
+        size_t start, end;
+        if (!compact_matches_get(task->compact_matches, idx, &start, &end))
+            return FALSE;
+        out->start = start;
+        out->end = end;
+        return TRUE;
+    }
+    
+    /* Regex search - direct array access */
+    if (task->matches && idx < task->matches->len) {
+        *out = g_array_index(task->matches, SearchMatch, idx);
+        return TRUE;
+    }
+    
+    return FALSE;
+}
+
 
 static GRegex *compile_search_regex(const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word) {
     char *query = NULL;
