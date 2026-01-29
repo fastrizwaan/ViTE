@@ -6,11 +6,11 @@ static const char *py_keywords[] = {
     "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
     "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
     "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
-    "while", "with", "yield", NULL
+    "while", "with", "yield", "and", NULL
 };
 
 static const char *py_bools[] = {
-    "False", "None", "True", "and", NULL
+    "False", "None", "True", NULL
 };
 
 static const char *py_builtins[] = {
@@ -31,6 +31,8 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
     size_t cur = 0;
     gboolean expect_func = FALSE;
     gboolean expect_class = FALSE;
+    gboolean in_lambda_def = FALSE;
+    int paren_depth = 0;
 
     /* If continuation of multiline string, handle immediately */
     if (state == STATE_IN_TRIPLE_DQ_STRING) {
@@ -143,39 +145,100 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
             /* Identifiers / Keywords */
             if (g_ascii_isalpha(text[cur]) || text[cur] == '_') {
                 size_t start_pos = cur;
+                /* Check if preceding char was '.' (Attribute) */
+                gboolean is_attr = (start_pos > 0 && text[start_pos-1] == '.');
+                
                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) {
                     cur++;
                 }
                 size_t word_len = cur - start_pos;
                 const char *word_start = text + start_pos;
 
-                /* Check Helpers (self) or Function/Class Definitions */
-                if (expect_func) {
-                    add_attr(attrs, start_pos, cur, &d_function);
-                    expect_func = FALSE;
-                } 
-                else if (expect_class) {
-                    add_attr(attrs, start_pos, cur, &d_type);
-                    expect_class = FALSE;
+                /* Look ahead for '(': Function Call */
+                gboolean is_call = FALSE;
+                size_t peek = cur;
+                while (peek < len && g_ascii_isspace(text[peek])) peek++;
+                if (peek < len && text[peek] == '(') is_call = TRUE;
+
+                /* Look ahead for '=': Keyword Arg / Assignment */
+                gboolean is_assignment = FALSE;
+                if (peek < len && text[peek] == '=') {
+                    if (peek + 1 < len && text[peek+1] == '=') {
+                        is_assignment = FALSE; /* It's == */
+                    } else {
+                        is_assignment = TRUE;
+                    }
                 }
-                else if (strncmp(word_start, "self", word_len) == 0 && word_len == 4) {
-                    add_attr(attrs, start_pos, cur, &d_variable);
+
+                /* 1. Keywords / Bools / Builtins */
+                /* 'self' -> Yellow (d_type) */
+                if (word_len == 4 && strncmp(word_start, "self", 4) == 0) {
+                     add_attr(attrs, start_pos, cur, &d_type); 
                 }
                 else if (is_word_in_list(word_start, word_len, py_keywords)) {
                     add_attr(attrs, start_pos, cur, &d_keyword);
-                    /* Check if this keyword triggers next-token coloring */
-                    if (strncmp(word_start, "def", word_len) == 0 && word_len == 3) expect_func = TRUE;
-                    else if (strncmp(word_start, "class", word_len) == 0 && word_len == 5) expect_class = TRUE;
+                    /* Check for 'lambda' to start lambda param state */
+                    if (word_len == 6 && strncmp(word_start, "lambda", 6) == 0) {
+                        in_lambda_def = TRUE;
+                    }
                 }
                 else if (is_word_in_list(word_start, word_len, py_bools)) {
-                    add_attr(attrs, start_pos, cur, &d_number); /* Orange for bools */
+                     add_attr(attrs, start_pos, cur, &d_number);
                 }
                 else if (is_word_in_list(word_start, word_len, py_builtins)) {
-                    add_attr(attrs, start_pos, cur, &d_builtin);
+                     add_attr(attrs, start_pos, cur, &d_builtin);
                 }
+                /* 2. Function Call */
+                else if (is_call) {
+                     add_attr(attrs, start_pos, cur, &d_function);
+                }
+                /* 3. Attributes */
+                else if (is_attr) {
+                     /* Check if owner is 'self'. 
+                        Look back from start_pos-1 (the dot). 
+                     */
+                     gboolean owner_is_self = FALSE;
+                     if (start_pos > 1) {
+                         size_t p = start_pos - 1; /* at dot */
+                         if (p > 0) p--; /* before dot */
+                         /* skip whitespace backwards? usually none, but safe to skip */
+                         // while (p > 0 && g_ascii_isspace(text[p])) p--; 
+                         
+                         /* Check if 4 chars ending at p are 'self' */
+                         /* We need to be careful about bounds and ensuring logic matches 'self' word */
+                         if (p >= 3 && strncmp(text + p - 3, "self", 4) == 0) {
+                             /* Check boundary: p-4 shouldn't be identifier char */
+                             if (p == 3 || (p > 3 && !g_ascii_isalnum(text[p-4]) && text[p-4] != '_')) {
+                                 owner_is_self = TRUE;
+                             }
+                         }
+                     }
+                     
+                     if (owner_is_self) {
+                         add_attr(attrs, start_pos, cur, &d_variable_c); /* self.XXX -> Grey */
+                     } else {
+                         add_attr(attrs, start_pos, cur, &d_type); /* other.XXX -> Yellow */
+                     }
+                }
+                /* 4. Lambda Params -> Orange */
+                else if (in_lambda_def) {
+                    add_attr(attrs, start_pos, cur, &d_attribute); /* Orange */
+                }
+                /* 5. Types (CamelCase) -> Yellow */
+                else if (g_ascii_isupper(word_start[0]) && !is_all_caps(word_start, word_len)) {
+                     add_attr(attrs, start_pos, cur, &d_type);
+                }
+                /* 6. Assignment LHS / Keyword Arg -> Red */
+                else if (is_assignment) {
+                     add_attr(attrs, start_pos, cur, &d_variable);
+                }
+                /* 7. Inside Parens (Args) -> Red */
+                else if (paren_depth > 0) {
+                     add_attr(attrs, start_pos, cur, &d_variable);
+                }
+                /* 8. Default Variable -> Grey */
                 else {
-                    /* Variable - use d_variable (Red) instead of C variable color */
-                    add_attr(attrs, start_pos, cur, &d_variable);
+                    add_attr(attrs, start_pos, cur, &d_variable_c);
                 }
                 continue;
             }
@@ -184,20 +247,96 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
             if (text[cur] == '@') {
                 size_t start_pos = cur;
                 cur++;
-                while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) {
+                while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_' || text[cur] == '.')) {
                     cur++;
                 }
                 add_attr(attrs, start_pos, cur, &d_decorator);
                 continue;
             }
             
-            /* Operators / Punctuation */
-            if (strchr("()[]{}:;.,", text[cur])) {
+            /* Punctuation */
+            /* Handle '.' specifically as Grey */
+            if (text[cur] == '.') {
+                 add_attr(attrs, cur, cur+1, &d_variable_c);
+                 cur++;
+                 continue;
+            }
+            
+            /* Colon terminates lambda definition */
+            if (text[cur] == ':') {
+                 in_lambda_def = FALSE;
                  add_attr(attrs, cur, cur+1, &d_punctuation);
                  cur++;
                  continue;
             }
+            
+            /* Parens track depth & Rainbow Brackets */
+            /* Cycle: Orange -> Purple -> Cyan */
+            if (strchr("([{", text[cur])) {
+                 const PangoColor *bracket_color;
+                 int depth_mod = paren_depth % 3;
+                 
+                 if (depth_mod == 0) bracket_color = &d_punctuation; /* Orange */
+                 else if (depth_mod == 1) bracket_color = &d_keyword; /* Purple */
+                 else bracket_color = &d_logical; /* Cyan */
+                 
+                 add_attr(attrs, cur, cur+1, bracket_color);
+                 paren_depth++;
+                 cur++;
+                 continue;
+            }
+            if (strchr(")]}", text[cur])) {
+                 if (paren_depth > 0) paren_depth--;
+                 
+                 const PangoColor *bracket_color;
+                 int depth_mod = paren_depth % 3;
+                 
+                 if (depth_mod == 0) bracket_color = &d_punctuation; /* Orange */
+                 else if (depth_mod == 1) bracket_color = &d_keyword; /* Purple */
+                 else bracket_color = &d_logical; /* Cyan */
+                 
+                 add_attr(attrs, cur, cur+1, bracket_color);
+                 cur++;
+                 continue;
+            }
+            
+            /* Other Punctuation */
+            if (strchr(":;,", text[cur])) {
+                 add_attr(attrs, cur, cur+1, &d_punctuation);
+                 cur++;
+                 continue;
+            }
+            
+            /* Operators - Logical cyan */
             if (strchr("=+-*/%&|^<>!~", text[cur])) {
+                 /* = & | explicitly requested as Cyan */
+                 if (strchr("=&|", text[cur])) {
+                     /* Careful with ==, &&, || */
+                     add_attr(attrs, cur, cur+1, &d_logical);
+                     cur++;
+                     continue;
+                 }
+                 
+                 /* Compare ops: ==, !=, <=, >= */
+                 if (cur + 1 < len) {
+                     if ((text[cur] == '=' && text[cur+1] == '=') ||
+                         (text[cur] == '!' && text[cur+1] == '=') ||
+                         (text[cur] == '<' && text[cur+1] == '=') ||
+                         (text[cur] == '>' && text[cur+1] == '=')) {
+                         add_attr(attrs, cur, cur+2, &d_logical);
+                         cur += 2;
+                         continue;
+                     }
+                 }
+                 /* Single Ops */
+                 if (text[cur] == '<' || text[cur] == '>') {
+                     add_attr(attrs, cur, cur+1, &d_logical);
+                     cur++;
+                     continue;
+                 }
+                 
+                 /* Other math ops: +, -, *, /, % */
+                 /* Can stay keyword (purple) or operator (orange). Let's keep Keyword/Purple for now */
                  add_attr(attrs, cur, cur+1, &d_keyword);
                  cur++;
                  continue;

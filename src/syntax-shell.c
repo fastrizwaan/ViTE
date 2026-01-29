@@ -79,6 +79,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
     gboolean in_case_patterns = (BASH_CUR == STATE_BASH_CASE);
     gboolean in_case_stmt = FALSE;
     gboolean in_export_context = FALSE;
+    int paren_depth = 0;
 
     while (cur < len) {
         int s = BASH_CUR;
@@ -184,7 +185,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
         }
 
         /* Delimiters and operators */
-        if (strchr(";&|()<>", text[cur])) {
+        if (strchr(";&|()<>[]{}", text[cur])) {
             size_t start = cur;
             in_export_context = FALSE;
             if (cur + 1 < len && ((text[cur] == '&' && text[cur+1] == '&') || (text[cur] == '|' && text[cur+1] == '|'))) {
@@ -199,15 +200,34 @@ syntax_highlight_bash(SyntaxContext *ctx,
                 }
                 is_cmd_start = TRUE;
                 in_case_patterns = TRUE;
-            } else if (text[cur] == '(' || text[cur] == ')') {
-                add_attr(attrs, cur, cur + 1, &d_punctuation);
+            /* Rainbow Brackets: ( ) [ ] { } */
+            } else if (strchr("()[]{}", text[cur])) {
+                const PangoColor *bracket_color = &d_punctuation;
+                if (strchr("([{", text[cur])) {
+                   int depth_mod = paren_depth % 3;
+                   if (depth_mod == 0) bracket_color = &d_punctuation;      /* Orange */
+                   else if (depth_mod == 1) bracket_color = &d_keyword;     /* Purple */
+                   else bracket_color = &d_logical;                         /* Cyan */
+                   paren_depth++;
+                } else {
+                   if (paren_depth > 0) paren_depth--;
+                   int depth_mod = paren_depth % 3;
+                   if (depth_mod == 0) bracket_color = &d_punctuation;      /* Orange */
+                   else if (depth_mod == 1) bracket_color = &d_keyword;     /* Purple */
+                   else bracket_color = &d_logical;                         /* Cyan */
+                }
+                
+                add_attr(attrs, cur, cur + 1, bracket_color);
+                
+                /* Case statement `)` handling */
                 if (text[cur] == ')' && BASH_CUR == STATE_BASH_CASE) {
                     BASH_POP();
-                    BASH_PUSH(STATE_BASH_CASE_BODY); /* Enter command block */
+                    BASH_PUSH(STATE_BASH_CASE_BODY); 
                     in_case_patterns = FALSE;
                     is_cmd_start = TRUE;
                 }
                 cur++;
+                continue;
             } else {
                 add_attr(attrs, cur, cur + 1, &d_variable_c);
                 cur++;

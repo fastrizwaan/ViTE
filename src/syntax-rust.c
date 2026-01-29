@@ -27,6 +27,7 @@ void
 syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index)
 {
     size_t cur = 0;
+    int paren_depth = 0;
 
     while (cur < len) {
         /* Nested Block Comments */
@@ -333,10 +334,34 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             }
 
             /* Punctuation / Operators */
-            if (strchr("(){}[],.;", text[cur])) {
-                add_attr(attrs, cur, cur + 1, &d_punctuation);
-                cur++;
-                continue;
+            /* Rainbow Brackets */
+            if (strchr("([{", text[cur])) {
+                 const PangoColor *bracket_color;
+                 int depth_mod = paren_depth % 3;
+                 if (depth_mod == 0) bracket_color = &d_punctuation;
+                 else if (depth_mod == 1) bracket_color = &d_keyword;
+                 else bracket_color = &d_logical;
+                 add_attr(attrs, cur, cur + 1, bracket_color);
+                 paren_depth++;
+                 cur++;
+                 continue;
+            }
+            if (strchr(")]}", text[cur])) {
+                 if (paren_depth > 0) paren_depth--;
+                 const PangoColor *bracket_color;
+                 int depth_mod = paren_depth % 3;
+                 if (depth_mod == 0) bracket_color = &d_punctuation;
+                 else if (depth_mod == 1) bracket_color = &d_keyword;
+                 else bracket_color = &d_logical;
+                 add_attr(attrs, cur, cur + 1, bracket_color);
+                 cur++;
+                 continue;
+            }
+
+            if (strchr(",.;", text[cur])) {
+                 add_attr(attrs, cur, cur + 1, &d_punctuation);
+                 cur++;
+                 continue;
             }
             if (strchr("+-*/%=&|<>!^:", text[cur])) {
                  if (cur + 1 < len) {
