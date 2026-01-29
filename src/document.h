@@ -44,6 +44,12 @@ void document_remove_content_callback(Document *doc, DocumentContentCallback cal
 void document_add_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data);
 void document_remove_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data);
 
+/* Precise Content Editing (Byte-level) */
+/* delta_len is positive for insertion, negative for deletion. offset is where the change happened. */
+typedef void (*DocumentEditCallback)(Document *doc, size_t offset, int64_t delta_len, void *user_data);
+void document_add_edit_callback(Document *doc, DocumentEditCallback callback, void *user_data);
+void document_remove_edit_callback(Document *doc, DocumentEditCallback callback, void *user_data);
+
 /* Content Access */
 char *document_get_line(Document *doc, size_t line_index, size_t *len);
 char *document_get_line(Document *doc, size_t line_index, size_t *len);

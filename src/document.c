@@ -27,6 +27,7 @@ struct _Document {
     /* Content Observation Listeners */
     GList *content_callbacks; /* List of struct { func, user_data } */
     GList *update_callbacks;
+    GList *edit_callbacks; /* List of struct { func, user_data } */
     gboolean callbacks_suspended;
 
     /* Async Loading */
@@ -99,7 +100,8 @@ document_free(Document *doc)
     g_list_free_full(doc->mod_callbacks, g_free);
     g_list_free_full(doc->content_callbacks, g_free);
     g_list_free_full(doc->update_callbacks, g_free);
-    free(doc);
+    g_list_free_full(doc->edit_callbacks, g_free);
+    g_free(doc);
 }
 
 const char *
@@ -211,6 +213,18 @@ document_emit_update(Document *doc, size_t start_line, int line_delta)
     }
 }
 
+static void
+document_emit_edit(Document *doc, size_t offset, int64_t delta_len)
+{
+    if (doc->callbacks_suspended) return;
+    
+    for (GList *l = doc->edit_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        DocumentEditCallback func = (DocumentEditCallback)cb->func;
+        func(doc, offset, delta_len, cb->user_data);
+    }
+}
+
 void
 document_insert(Document *doc, size_t offset, const char *text, size_t len)
 {
@@ -225,6 +239,7 @@ document_insert(Document *doc, size_t offset, const char *text, size_t len)
     int line_delta = (int)new_lines - (int)old_lines;
 
     check_modification_state(doc);
+    document_emit_edit(doc, offset, (int64_t)len);
     document_emit_update(doc, start_line, line_delta);
 }
 
@@ -273,6 +288,7 @@ document_delete_streaming(Document *doc, size_t offset, size_t len)
     int line_delta = (int)new_lines - (int)old_lines;
 
     check_modification_state(doc);
+    document_emit_edit(doc, offset, -(int64_t)len);
     document_emit_update(doc, start_line, line_delta);
 }
 
@@ -291,6 +307,7 @@ document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len)
     
     /* Update state */
     check_modification_state(doc);
+    document_emit_edit(doc, offset, (int64_t)len);
     for (GList *l = doc->content_callbacks; l != NULL; l = l->next) {
         ContentCallbackData *cb = l->data;
         cb->func(doc, cb->user_data);
@@ -355,6 +372,7 @@ document_delete(Document *doc, size_t offset, size_t len)
     int line_delta = (int)new_lines - (int)old_lines;
 
     check_modification_state(doc);
+    document_emit_edit(doc, offset, -(int64_t)len);
     document_emit_update(doc, start_line, line_delta);
 }
 
@@ -394,6 +412,20 @@ document_undo(Document *doc)
     size_t start_line = piece_table_get_line_of_offset(doc->pt, info.start);
 
     check_modification_state(doc);
+    
+    /* Calculate byte delta from UndoInfo for edit callback */
+    int64_t byte_delta = 0;
+    if (info.is_insert) {
+        /* is_insert means positive delta */
+        byte_delta = (int64_t)info.length;
+    } else {
+         /* !is_insert means delete (negative delta) */
+         byte_delta = -(int64_t)info.length;
+    }
+    if (byte_delta != 0) {
+        document_emit_edit(doc, info.start, byte_delta);
+    }
+    
     document_emit_update(doc, start_line, line_delta);
     return info;
 }
@@ -409,6 +441,20 @@ document_redo(Document *doc)
     size_t start_line = piece_table_get_line_of_offset(doc->pt, info.start);
 
     check_modification_state(doc);
+
+    /* Calculate byte delta from UndoInfo for edit callback */
+    int64_t byte_delta = 0;
+    if (info.is_insert) {
+        /* Redo Insert = Insert. Delta = +length */
+        byte_delta = (int64_t)info.length;
+    } else {
+         /* Redo Delete = Delete. Delta = -length */
+         byte_delta = -(int64_t)info.length;
+    }
+    if (byte_delta != 0) {
+        document_emit_edit(doc, info.start, byte_delta);
+    }
+
     document_emit_update(doc, start_line, line_delta);
     return info;
 }
@@ -517,6 +563,29 @@ document_remove_content_callback(Document *doc, DocumentContentCallback callback
         ContentCallbackData *cb = l->data;
         if (cb->func == callback && cb->user_data == user_data) {
             doc->content_callbacks = g_list_delete_link(doc->content_callbacks, l);
+            g_free(cb);
+            return;
+        }
+    }
+}
+
+
+void
+document_add_edit_callback(Document *doc, DocumentEditCallback callback, void *user_data)
+{
+    ContentCallbackData *cb = g_new(ContentCallbackData, 1);
+    cb->func = (void (*)(Document *, void *))callback;
+    cb->user_data = user_data;
+    doc->edit_callbacks = g_list_append(doc->edit_callbacks, cb);
+}
+
+void
+document_remove_edit_callback(Document *doc, DocumentEditCallback callback, void *user_data)
+{
+    for (GList *l = doc->edit_callbacks; l != NULL; l = l->next) {
+        ContentCallbackData *cb = l->data;
+        if (cb->func == (void (*)(Document *, void *))callback && cb->user_data == user_data) {
+            doc->edit_callbacks = g_list_delete_link(doc->edit_callbacks, l);
             g_free(cb);
             return;
         }

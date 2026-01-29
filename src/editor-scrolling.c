@@ -203,7 +203,12 @@ scroll_to_cursor(EditorWidget *self)
     if (self->line_y_offsets && line_idx < self->line_y_offsets->len) {
         y = g_array_index(self->line_y_offsets, double, line_idx);
     } else {
-        y = (double)line_idx * self->line_height; /* Fallback */
+        /* Fallback for large files where offsets aren't cached: use average */
+        if (self->wrap_lines && self->avg_visual_lines > 1.0) {
+            y = (double)line_idx * self->avg_visual_lines * self->line_height;
+        } else {
+            y = (double)line_idx * self->line_height;
+        }
     }
     
     double page_size = gtk_adjustment_get_page_size(self->vadjustment);

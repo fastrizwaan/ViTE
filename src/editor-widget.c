@@ -194,6 +194,64 @@ syntax_scan_step(gpointer user_data)
 }
 
 static void
+on_document_edit(Document *doc, size_t offset, int64_t delta_len, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    if (!self->search_matches || self->search_matches->len == 0) return;
+    
+    if (delta_len > 0) {
+        /* Insertion */
+        for (guint i = 0; i < self->search_matches->len; i++) {
+             SearchMatch *m = &g_array_index(self->search_matches, SearchMatch, i);
+             
+             /* If insertion happens strictly BEFORE the match, shift it. */
+             /* If insertion happens AT the start of the match (offset == m->start), 
+                we usually consider this "before" and shift the match right. */
+             if (m->start >= offset) {
+                 m->start += delta_len;
+                 m->end += delta_len;
+             } 
+             /* If insertion happens strictly INSIDE the match (offset > m->start && offset < m->end),
+                block is broken. Remove it. */
+             else if (m->end > offset) {
+                 g_array_remove_index(self->search_matches, i);
+                 i--; 
+             }
+        }
+    } else {
+        /* Deletion (delta_len is negative) */
+        size_t abs_delta = (size_t)(-delta_len);
+        size_t del_end = offset + abs_delta;
+        
+        for (guint i = 0; i < self->search_matches->len; i++) {
+             SearchMatch *m = &g_array_index(self->search_matches, SearchMatch, i);
+             
+             /* Check overlap */
+             /* Match is [start, end). Deletion is [offset, del_end). */
+             
+             if (m->end <= offset) {
+                 /* Match is totally before deletion. Unaffected. */
+                 continue;
+             }
+             
+             if (m->start >= del_end) {
+                 /* Match is totally after deletion. Shift down. */
+                 m->start -= abs_delta;
+                 m->end -= abs_delta;
+                 continue;
+             }
+             
+             /* Overlap detected: Match is damaged. Remove. */
+             g_array_remove_index(self->search_matches, i);
+             i--;
+        }
+    }
+    
+    /* Queue redraw to remove old highlights / show shifted ones */
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+static void
 on_document_update(Document *doc, size_t start_line, int line_delta, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -259,6 +317,8 @@ editor_widget_dispose(GObject *object)
     
     if (self->doc) {
         document_remove_content_callback(self->doc, on_doc_content_changed, self);
+        document_remove_update_callback(self->doc, on_document_update, self);
+        document_remove_edit_callback(self->doc, on_document_edit, self);
         self->doc = NULL;
     }
     
@@ -678,11 +738,13 @@ editor_widget_set_document(EditorWidget *self, Document *doc)
     if (self->doc) {
         document_remove_content_callback(self->doc, on_doc_content_changed, self);
         document_remove_update_callback(self->doc, on_document_update, self);
+        document_remove_edit_callback(self->doc, on_document_edit, self);
     }
     self->doc = doc;
     if (self->doc) {
         document_add_content_callback(self->doc, on_doc_content_changed, self);
         document_add_update_callback(self->doc, on_document_update, self);
+        document_add_edit_callback(self->doc, on_document_edit, self);
     }
     /* Force clear all cursors including the default one from init */
     if (self->cursors) g_array_set_size(self->cursors, 0);
