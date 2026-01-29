@@ -15,6 +15,7 @@ enum {
     CARET_MOVED,
     CURSOR_MOVED,
     INSERT_MODE_CHANGED,
+    UNDO_REDO_PROGRESS,
     LAST_SIGNAL
 };
 
@@ -129,6 +130,9 @@ struct _EditorWidget {
     guint syntax_scan_idle_id; /* For background full-document scanning */
     
     gboolean last_theme_dark_mode; /* Tracking for syntax cache invalidation */
+    
+    /* Async Undo/Redo */
+    UndoRedoTask *undo_redo_task; /* Active undo/redo operation */
 };
 
 /* Helper Functions */

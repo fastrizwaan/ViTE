@@ -666,6 +666,17 @@ editor_widget_class_init(EditorWidgetClass *klass)
                                  NULL, NULL,
                                  NULL,
                                  G_TYPE_NONE, 0);
+    
+    editor_signals[UNDO_REDO_PROGRESS] = g_signal_new("undo-redo-progress",
+                                 G_TYPE_FROM_CLASS(klass),
+                                 G_SIGNAL_RUN_LAST,
+                                 0,
+                                 NULL, NULL,
+                                 NULL,
+                                 G_TYPE_NONE,
+                                 2,
+                                 G_TYPE_DOUBLE,
+                                 G_TYPE_BOOLEAN);
 
     widget_class->snapshot = editor_widget_snapshot;
     widget_class->measure = editor_widget_measure;

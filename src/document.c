@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 #include "vite-clipboard.h"
 #include "resource-check.h"
@@ -13,6 +14,9 @@
 
 typedef struct _StreamingChangeCaseTask StreamingChangeCaseTask;
 typedef char (*CharTransformFunc)(char c);
+
+/* Forward declarations */
+static char *document_snapshot_to_file(Document *doc);
 
 struct _Document {
     PieceTable *pt;
@@ -483,6 +487,189 @@ document_set_redo_group_selection(Document *doc, size_t start, size_t end)
 {
     undo_stack_set_group_selection_after(doc->undo_stack, start, end);
 }
+
+/* Async Undo/Redo Implementation */
+
+struct _UndoRedoTask {
+    Document *doc;
+    UndoCommand *cmd;
+    gboolean is_undo;
+    UndoRedoProgressCallback callback;
+    gpointer user_data;
+    guint idle_id;
+    
+    /* Incremental restoration */
+    PieceTableReplaceTask *pt_task;
+};
+
+static void
+undo_redo_task_free(UndoRedoTask *task)
+{
+    if (!task) return;
+    
+    if (task->idle_id) {
+        g_source_remove(task->idle_id);
+    }
+    
+    if (task->pt_task) {
+        piece_table_replace_async_cancel(task->pt_task);
+    }
+    
+    g_free(task);
+}
+
+static gboolean
+undo_redo_idle_step(gpointer user_data)
+{
+    UndoRedoTask *task = user_data;
+    Document *doc = task->doc;
+    
+    /* If we have an active piece table replacement (massive file restore), continue it */
+    if (task->pt_task) {
+        double progress = 0;
+        if (!piece_table_replace_async_step(task->pt_task, 10000, &progress)) {
+            /* Still processing chunks, yield */
+            if (task->callback) {
+                task->callback(progress, FALSE, task->user_data);
+            }
+            return G_SOURCE_CONTINUE;
+        }
+        
+        /* Finished counting newlines, now swap the document content */
+        piece_table_replace_async_finalize(task->pt_task);
+        task->pt_task = NULL;
+        
+        /* Now finalize the undo stack state without re-executing */
+        size_t old_lines = piece_table_get_line_count(doc->pt); /* This is the NEW line count now actually */
+        /* Wait, we need the OLD line count for delta calculation. 
+           But for RESTORE_FROM_PATH, old_lines isn't as critical as the final update. */
+           
+        UndoInfo info;
+        if (task->is_undo) {
+            info = undo_stack_undo_skip_execute(doc->undo_stack);
+        } else {
+            info = undo_stack_redo_skip_execute(doc->undo_stack);
+        }
+        
+        check_modification_state(doc);
+        
+        /* For restorations, we just emit a full update */
+        document_emit_update(doc, 0, 0); /* 0, 0 triggers full refresh in renderer usually */
+    } else {
+        /* Standard operation (INSERT/DELETE) or small restore */
+        size_t old_lines = piece_table_get_line_count(doc->pt);
+        
+        UndoInfo info;
+        if (task->is_undo) {
+            info = undo_stack_undo(doc->undo_stack, doc->pt);
+        } else {
+            info = undo_stack_redo(doc->undo_stack, doc->pt);
+        }
+        
+        if (info.success) {
+            size_t new_lines = piece_table_get_line_count(doc->pt);
+            int line_delta = (int)new_lines - (int)old_lines;
+            
+            size_t start_line = 0;
+            if (info.length > 0) {
+                start_line = piece_table_get_line_of_offset(doc->pt, info.start);
+            }
+            
+            check_modification_state(doc);
+            
+            int64_t byte_delta = info.is_insert ? (int64_t)info.length : -(int64_t)info.length;
+            if (byte_delta != 0) {
+                document_emit_edit(doc, info.start, byte_delta);
+            }
+            
+            document_emit_update(doc, start_line, line_delta);
+        }
+    }
+    
+    /* Operation complete */
+    if (task->callback) {
+        task->callback(1.0, TRUE, task->user_data);
+    }
+    
+    task->idle_id = 0;
+    undo_redo_task_free(task);
+    return G_SOURCE_REMOVE;
+}
+
+UndoRedoTask *
+document_undo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data)
+{
+    if (!doc->undo_stack || !undo_stack_peek(doc->undo_stack)) {
+        if (callback) callback(1.0, TRUE, user_data);
+        return NULL;
+    }
+    
+    UndoRedoTask *task = g_new0(UndoRedoTask, 1);
+    task->doc = doc;
+    task->is_undo = TRUE;
+    task->callback = callback;
+    task->user_data = user_data;
+    
+    /* Check if this is a massive restoration */
+    UndoCommand *cmd = undo_stack_peek(doc->undo_stack);
+    if (cmd && cmd->type == UNDO_OP_RESTORE_FROM_PATH && cmd->undo_path) {
+        int fd = open(cmd->undo_path, O_RDONLY);
+        if (fd >= 0) {
+            struct stat st;
+            fstat(fd, &st);
+            if (st.st_size > 10 * 1024 * 1024) { /* > 10MB, process async */
+                task->pt_task = piece_table_replace_async_start(doc->pt, fd, st.st_size);
+            }
+            close(fd); /* task will re-open or piece_table uses mmap */
+            /* Wait, piece_table_replace_async_start needs the fd open or it mmaps. 
+               It mmaps immediately, so we can close. */
+        }
+    }
+    
+    task->idle_id = g_idle_add(undo_redo_idle_step, task);
+    return task;
+}
+
+UndoRedoTask *
+document_redo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data)
+{
+    if (!doc->undo_stack || !undo_stack_peek_redo(doc->undo_stack)) {
+        if (callback) callback(1.0, TRUE, user_data);
+        return NULL;
+    }
+    
+    UndoRedoTask *task = g_new0(UndoRedoTask, 1);
+    task->doc = doc;
+    task->is_undo = FALSE;
+    task->callback = callback;
+    task->user_data = user_data;
+    
+    /* Check if this is a massive restoration */
+    UndoCommand *cmd = undo_stack_peek_redo(doc->undo_stack);
+    if (cmd && cmd->type == UNDO_OP_RESTORE_FROM_PATH && cmd->redo_path) {
+        int fd = open(cmd->redo_path, O_RDONLY);
+        if (fd >= 0) {
+            struct stat st;
+            fstat(fd, &st);
+            if (st.st_size > 10 * 1024 * 1024) { /* > 10MB, process async */
+                task->pt_task = piece_table_replace_async_start(doc->pt, fd, st.st_size);
+            }
+            close(fd);
+        }
+    }
+    
+    task->idle_id = g_idle_add(undo_redo_idle_step, task);
+    return task;
+}
+
+void
+document_undo_redo_cancel(UndoRedoTask *task)
+{
+    if (task) {
+        undo_redo_task_free(task);
+    }
+}
+
 
 gboolean
 document_is_modified(Document *doc)
@@ -1335,9 +1522,7 @@ search_idle_step(gpointer user_data)
         task->current_offset += len;
         task->lines_searched++;
         
-        if (task->lines_searched % 100000 == 0) {
-            g_print("[DEBUG] Search progress: %zu lines, offset: %zu\n", task->lines_searched, task->current_offset);
-        }
+
 
         lines_this_chunk++;
     }
@@ -1349,7 +1534,7 @@ search_idle_step(gpointer user_data)
     }
     
     /* Finished - EOF was reached */
-    g_print("[DEBUG] Search finished. Total matches: %zu, Total lines: %zu\n", document_search_task_get_match_count(task), task->total_lines);
+
     if (task->callback) task->callback(task->matches, TRUE, task->user_data);
     
     task->idle_id = 0; /* Source removed */
@@ -2181,6 +2366,18 @@ static gboolean streaming_replace_idle_step(gpointer user_data) {
     fflush(task->output_file);
     int fd = fileno(task->output_file);
     fsync(fd);
+    
+    /* Snapshot BEFORE replacing - for undo support */
+    char *undo_path = document_snapshot_to_file(doc);
+    
+    /* Push Undo Command - use output_path as redo_path */
+    if (undo_path) {
+        undo_stack_push_restore_path(doc->undo_stack, undo_path, task->output_path);
+        g_free(undo_path);
+        /* Don't free output_path here - it's now owned by the undo stack */
+        /* Set to NULL so streaming_replace_task_free won't unlink it */
+        task->output_path = NULL;
+    }
     
     /* mmap the temp file and replace document content */
     piece_table_replace_from_fd(doc->pt, fd, task->output_size, task->lf_count);

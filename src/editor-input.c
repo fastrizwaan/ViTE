@@ -18,6 +18,31 @@ static void on_focus_enter(GtkEventControllerFocus *controller, gpointer user_da
 static void on_focus_leave(GtkEventControllerFocus *controller, gpointer user_data);
 static void on_im_commit(GtkIMContext *context, const char *str, gpointer user_data);
 
+/* Undo/Redo Progress Callback */
+static void
+editor_widget_on_undo_redo_progress(double progress, gboolean finished, gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    
+    if (finished) {
+        /* Operation complete - clear task and update UI */
+        self->undo_redo_task = NULL;
+        
+        /* Refresh editor */
+        editor_widget_reset_cursor_blink(self);
+        editor_widget_update_adjustments(self, -1, -1);
+        scroll_to_cursor(self);
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        
+        /* Emit signal to hide progress */
+        g_signal_emit_by_name(self, "undo-redo-progress", 1.0, FALSE);
+    } else {
+        /* Progress update */
+        g_signal_emit_by_name(self, "undo-redo-progress", progress, TRUE);
+    }
+}
+
+
 void
 editor_input_init_controllers(EditorWidget *self)
 {
@@ -607,6 +632,17 @@ on_key_pressed(GtkEventControllerKey *controller,
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->doc) return FALSE;
     
+    /* Block all editing if undo/redo is in progress */
+    if (self->undo_redo_task) {
+        /* Allow Ctrl+Z and Ctrl+Y to be handled (they check the task themselves) */
+        if ((keyval == GDK_KEY_z || keyval == GDK_KEY_y) && (state & GDK_CONTROL_MASK)) {
+            /* Let it through */
+        } else {
+            /* Block all other keys */
+            return TRUE;
+        }
+    }
+    
     if (gtk_im_context_filter_keypress(self->im_context, gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller))))
         return TRUE;
 
@@ -956,56 +992,36 @@ on_key_pressed(GtkEventControllerKey *controller,
              break;
         case GDK_KEY_z:
             if (state & GDK_CONTROL_MASK) {
-                 UndoInfo info = document_undo(self->doc);
-                 if (info.success) {
-                     editor_widget_clear_cursors(self);
-                     EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
-                     
-                     if (info.has_selection) {
-                         primary->selection_anchor = info.selection_start;
-                         primary->cursor_offset = info.selection_end;
-                     } else if (info.is_insert) {
-                         primary->cursor_offset = info.start + info.length;
-                         primary->selection_anchor = info.start;
-                     } else {
-                         primary->cursor_offset = info.start;
-                         primary->selection_anchor = info.start;
-                     }
-                     self->cursor_offset = primary->cursor_offset;
-                     self->selection_anchor = primary->selection_anchor;
-                     
-                     editor_widget_reset_cursor_blink(self);
-                     editor_widget_update_adjustments(self, -1, -1);
-                     scroll_to_cursor(self);
+                 /* Block if already doing undo/redo */
+                 if (self->undo_redo_task) {
+                     return TRUE;
                  }
-                 gtk_widget_queue_draw(GTK_WIDGET(self));
+                 
+                 /* Start async undo */
+                 self->undo_redo_task = document_undo_async(self->doc, 
+                     (UndoRedoProgressCallback)editor_widget_on_undo_redo_progress, self);
+                 
+                 /* Emit signal to show progress in tab */
+                 if (self->undo_redo_task) {
+                     g_signal_emit_by_name(self, "undo-redo-progress", 0.0, TRUE);
+                 }
             }
             break;
         case GDK_KEY_y:
             if (state & GDK_CONTROL_MASK) {
-                 UndoInfo info = document_redo(self->doc);
-                 if (info.success) {
-                     editor_widget_clear_cursors(self);
-                     EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
-
-                     if (info.has_selection) {
-                         primary->selection_anchor = info.selection_start;
-                         primary->cursor_offset = info.selection_end;
-                     } else if (info.is_insert) {
-                         primary->cursor_offset = info.start + info.length;
-                         primary->selection_anchor = info.start;
-                     } else {
-                         primary->cursor_offset = info.start;
-                         primary->selection_anchor = info.start;
-                     }
-                     self->cursor_offset = primary->cursor_offset;
-                     self->selection_anchor = primary->selection_anchor;
-                     
-                     editor_widget_reset_cursor_blink(self);
-                     editor_widget_update_adjustments(self, -1, -1);
-                     scroll_to_cursor(self);
+                 /* Block if already doing undo/redo */
+                 if (self->undo_redo_task) {
+                     return TRUE;
                  }
-                 gtk_widget_queue_draw(GTK_WIDGET(self));
+                 
+                 /* Start async redo */
+                 self->undo_redo_task = document_redo_async(self->doc,
+                     (UndoRedoProgressCallback)editor_widget_on_undo_redo_progress, self);
+                 
+                 /* Emit signal to show progress in tab */
+                 if (self->undo_redo_task) {
+                     g_signal_emit_by_name(self, "undo-redo-progress", 0.0, TRUE);
+                 }
             }
             break;
         case GDK_KEY_c:

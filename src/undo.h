@@ -84,7 +84,12 @@ typedef struct {
 UndoInfo undo_stack_undo(UndoStack *stack, PieceTable *pt);
 UndoInfo undo_stack_redo(UndoStack *stack, PieceTable *pt);
 
+/* Variants that only manage the stack/info and skip execution (for async management) */
+UndoInfo undo_stack_undo_skip_execute(UndoStack *stack);
+UndoInfo undo_stack_redo_skip_execute(UndoStack *stack);
+
 /* For modification tracking */
 void *undo_stack_peek(UndoStack *stack);
+void *undo_stack_peek_redo(UndoStack *stack);
 
 #endif

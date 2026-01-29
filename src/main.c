@@ -301,6 +301,105 @@ on_overlay_focus_enter(GtkEventControllerFocus *controller, gpointer user_data)
 /* Retry logic with correct pre-fetch */
 
 
+/* Retry logic with correct pre-fetch */
+
+static void
+on_find_bar_progress(ViteFindReplaceBar *bar, double progress, gboolean busy, gpointer user_data)
+{
+    /* Find the tab containing this bar */
+    GtkWidget *widget = GTK_WIDGET(bar);
+    GtkRoot *root = gtk_widget_get_root(widget);
+    if (!root) return;
+    
+    ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
+    if (!win) return;
+    
+    /* Iterate tabs to find which one owns the page containing this bar */
+    /* The bar is in a ViewContainer, which is in a StackPage usually, or nested in paneds */
+    /* Scan tabs */
+    GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+    ViteTab *found_tab = NULL;
+    
+    for (GList *l = tabs; l != NULL; l = l->next) {
+        ViteTab *t = VITE_TAB(l->data);
+        GtkWidget *page = g_object_get_data(G_OBJECT(t), "page");
+        if (page && gtk_widget_is_ancestor(widget, page)) {
+            found_tab = t;
+            break;
+        }
+    }
+    g_list_free(tabs);
+    
+    if (found_tab) {
+        if (busy) {
+            /* For replace operations, only show progress bar, not spinner */
+            vite_tab_set_progress(found_tab, progress);
+        } else {
+            vite_tab_set_progress(found_tab, 0.0);
+        }
+    }
+}
+
+static void
+on_editor_undo_redo_progress(EditorWidget *editor, double progress, gboolean busy, gpointer user_data)
+{
+    /* Find the tab containing this editor */
+    GtkWidget *widget = GTK_WIDGET(editor);
+    GtkRoot *root = gtk_widget_get_root(widget);
+    if (!root) return;
+    
+    ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
+    if (!win) return;
+    
+    /* Find the tab that owns this editor */
+    GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+    ViteTab *found_tab = NULL;
+    
+    for (GList *l = tabs; l != NULL; l = l->next) {
+        ViteTab *t = VITE_TAB(l->data);
+        GtkWidget *page = g_object_get_data(G_OBJECT(t), "page");
+        if (page && gtk_widget_is_ancestor(widget, page)) {
+            found_tab = t;
+            break;
+        }
+    }
+    g_list_free(tabs);
+    
+    if (found_tab) {
+        if (busy) {
+            /* Show spinner and progress on the tab itself */
+            vite_tab_set_loading(found_tab, TRUE);
+            vite_tab_set_progress(found_tab, progress);
+            
+            /* Update headerbar progress only if requested conditions met 
+               User wants header progress when it's "header only" (single tab)
+            */
+            if (win->header_progress) {
+                GList *all_tabs = vite_tab_bar_get_tabs(win->tab_bar);
+                guint tab_count = g_list_length(all_tabs);
+                g_list_free(all_tabs);
+                
+                if (tab_count <= 1) {
+                    gtk_widget_set_visible(win->header_progress, TRUE);
+                    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(win->header_progress), progress);
+                } else {
+                    gtk_widget_set_visible(win->header_progress, FALSE);
+                }
+            }
+        } else {
+            /* Hide spinner and progress */
+            vite_tab_set_loading(found_tab, FALSE);
+            vite_tab_set_progress(found_tab, 0.0);
+            
+            if (win->header_progress) {
+                gtk_widget_set_visible(win->header_progress, FALSE);
+                gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(win->header_progress), 0.0);
+            }
+        }
+    }
+}
+
+
 static GtkWidget *
 create_view_container(ViteWindow *win, GtkWidget *editor)
 {
@@ -367,6 +466,8 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
         
         /* Store logical association */
         g_object_set_data(G_OBJECT(root_box), "find_bar", find_bar);
+        
+        g_signal_connect(find_bar, "progress-changed", G_CALLBACK(on_find_bar_progress), win);
         
     }
     
@@ -1894,6 +1995,7 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     
     g_signal_connect(editor, "cursor-moved", G_CALLBACK(on_cursor_moved), win);
     g_signal_connect(editor, "insert-mode-changed", G_CALLBACK(on_insert_mode_changed), win);
+    g_signal_connect(editor, "undo-redo-progress", G_CALLBACK(on_editor_undo_redo_progress), win);
     
     /* Synced via bindings in on_tab_clicked now */
     /* g_signal_connect(editor, "notify::show-line-numbers", ...); removed */

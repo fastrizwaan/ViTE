@@ -116,6 +116,15 @@ void piece_table_delete(PieceTable *pt, size_t offset, size_t len);
 void piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, size_t lf_count);
 /* Zero-RAM replacement from file descriptor (mmap) */
 void piece_table_replace_from_fd(PieceTable *pt, int fd, size_t len, size_t lf_count);
+
+/* Async versions for massive files */
+typedef struct _PieceTableReplaceTask PieceTableReplaceTask;
+
+PieceTableReplaceTask *piece_table_replace_async_start(PieceTable *pt, int fd, size_t len);
+gboolean piece_table_replace_async_step(PieceTableReplaceTask *task, gint64 budget_us, double *progress_out);
+void piece_table_replace_async_finalize(PieceTableReplaceTask *task);
+void piece_table_replace_async_cancel(PieceTableReplaceTask *task);
+
 /* Insert content from an external file descriptor (Zero-RAM) */
 void piece_table_insert_from_fd_range(PieceTable *pt, size_t offset, int fd, size_t file_offset, size_t len);
 char *piece_table_get_text_range(PieceTable *pt, size_t offset, size_t len);

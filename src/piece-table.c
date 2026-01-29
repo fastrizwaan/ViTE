@@ -849,6 +849,140 @@ piece_table_replace_from_fd(PieceTable *pt, int fd, size_t len, size_t lf_count)
     free(nodes);
 }
 
+/* Async versions */
+struct _PieceTableReplaceTask {
+    PieceTable *pt;
+    int fd;
+    size_t len;
+    
+    char *map;
+    size_t map_size;
+    
+    size_t chunk_size;
+    size_t total_chunks;
+    size_t current_chunk;
+    
+    PieceNode **nodes;
+};
+
+PieceTableReplaceTask *
+piece_table_replace_async_start(PieceTable *pt, int fd, size_t len)
+{
+    struct stat st;
+    if (fstat(fd, &st) < 0) return NULL;
+    
+    size_t size = st.st_size;
+    if (size == 0) return NULL; /* Async empty replace not supported for now */
+    
+    char *map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (map == MAP_FAILED) return NULL;
+    
+    PieceTableReplaceTask *task = g_new0(PieceTableReplaceTask, 1);
+    task->pt = pt;
+    task->fd = fd;
+    task->len = len;
+    task->map = map;
+    task->map_size = size;
+    
+    task->chunk_size = 16 * 1024;
+    task->total_chunks = (len + task->chunk_size - 1) / task->chunk_size;
+    task->current_chunk = 0;
+    task->nodes = g_malloc0(task->total_chunks * sizeof(PieceNode*));
+    
+    return task;
+}
+
+gboolean
+piece_table_replace_async_step(PieceTableReplaceTask *task, gint64 budget_us, double *progress_out)
+{
+    gint64 start_time = g_get_monotonic_time();
+    
+    while (task->current_chunk < task->total_chunks) {
+        size_t i = task->current_chunk;
+        size_t chunk_start = i * task->chunk_size;
+        size_t chunk_len = task->chunk_size;
+        if (chunk_start + chunk_len > task->len) chunk_len = task->len - chunk_start;
+        
+        /* Count newlines in this chunk */
+        size_t chunk_lf = 0;
+        const char *chunk_data = task->map + chunk_start;
+        for (size_t j = 0; j < chunk_len; j++) {
+            if (chunk_data[j] == '\n') chunk_lf++;
+        }
+        
+        Piece p = { SOURCE_ORIGINAL, chunk_start, chunk_len, chunk_lf };
+        task->nodes[i] = node_new(p);
+        
+        task->current_chunk++;
+        
+        /* Check budget every 20 chunks */
+        if (task->current_chunk % 20 == 0) {
+            if (g_get_monotonic_time() - start_time > budget_us) break;
+        }
+    }
+    
+    if (progress_out) {
+        *progress_out = (double)task->current_chunk / task->total_chunks;
+    }
+    
+    return (task->current_chunk >= task->total_chunks);
+}
+
+void
+piece_table_replace_async_finalize(PieceTableReplaceTask *task)
+{
+    PieceTable *pt = task->pt;
+    
+    pt->change_count++;
+    
+    /* 1. Free old tree */
+    free_tree(pt->root);
+    pt->root = NULL;
+
+    /* 2. Free old backing store */
+    if (pt->is_mmapped) {
+        if (pt->mmap_base && pt->mmap_size > 0)
+            munmap(pt->mmap_base, pt->mmap_size);
+    } else {
+        if (pt->orig_data)
+            g_free(pt->orig_data);
+    }
+    
+    /* 3. Set up new backing store */
+    pt->is_mmapped = TRUE;
+    pt->mmap_base = task->map;
+    pt->mmap_size = task->map_size;
+    pt->orig_data = task->map;
+    pt->orig_size = task->len;
+    
+    if (task->len > task->map_size) pt->orig_size = task->map_size;
+    
+    /* 4. Reset add buffer */
+    pt->add_buffer->len = 0;
+    
+    /* 5. Finalize tree build */
+    pt->root = build_balanced_tree_recursive(task->nodes, 0, (int)task->total_chunks - 1, pt);
+    
+    /* Free task container (but map belongs to pt now) */
+    g_free(task->nodes);
+    g_free(task);
+}
+
+void
+piece_table_replace_async_cancel(PieceTableReplaceTask *task)
+{
+    if (!task) return;
+    
+    /* Free created nodes */
+    for (size_t i = 0; i < task->current_chunk; i++) {
+        if (task->nodes[i]) free(task->nodes[i]);
+    }
+    
+    munmap(task->map, task->map_size);
+    g_free(task->nodes);
+    g_free(task);
+}
+
 
 /* Delete logic */
 /* Helper: Split buffer at logical offset. 

@@ -478,3 +478,38 @@ undo_stack_peek(UndoStack *stack)
     if (!stack || !stack->undo_stack) return NULL;
     return stack->undo_stack->data;
 }
+
+void *
+undo_stack_peek_redo(UndoStack *stack)
+{
+    if (!stack || !stack->redo_stack) return NULL;
+    return stack->redo_stack->data;
+}
+
+UndoInfo
+undo_stack_undo_skip_execute(UndoStack *stack)
+{
+    UndoInfo info = {0};
+    if (!stack || !stack->undo_stack) return info;
+    
+    UndoCommand *cmd = stack->undo_stack->data;
+    stack->undo_stack = g_list_remove(stack->undo_stack, cmd);
+    stack->redo_stack = g_list_prepend(stack->redo_stack, cmd);
+    
+    get_command_info(cmd, TRUE, &info);
+    return info;
+}
+
+UndoInfo
+undo_stack_redo_skip_execute(UndoStack *stack)
+{
+    UndoInfo info = {0};
+    if (!stack || !stack->redo_stack) return info;
+    
+    UndoCommand *cmd = stack->redo_stack->data;
+    stack->redo_stack = g_list_remove(stack->redo_stack, cmd);
+    stack->undo_stack = g_list_prepend(stack->undo_stack, cmd);
+    
+    get_command_info(cmd, FALSE, &info);
+    return info;
+}

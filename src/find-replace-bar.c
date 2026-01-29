@@ -36,7 +36,15 @@ struct _ViteFindReplaceBar {
     DocumentFilterTask *current_filter_task;
     FilterResult *current_filter_result;
     guint filter_tick_id;
+
 };
+
+enum {
+    SIGNAL_PROGRESS_CHANGED,
+    N_SIGNALS
+};
+
+static guint signals[N_SIGNALS] = {0};
 
 G_DEFINE_TYPE(ViteFindReplaceBar, vite_find_replace_bar, GTK_TYPE_BOX)
 
@@ -89,6 +97,10 @@ static void vite_find_replace_bar_dispose(GObject *object) {
     if (self->filter_tick_id) {
         g_source_remove(self->filter_tick_id);
         self->filter_tick_id = 0;
+    }
+
+    if (self->editor) {
+        g_signal_handlers_disconnect_by_data(self->editor, self);
     }
     
     G_OBJECT_CLASS(vite_find_replace_bar_parent_class)->dispose(object);
@@ -459,6 +471,17 @@ static void on_replace_clicked(GtkButton *btn, gpointer user_data) {
 static void on_replace_progress(int processed, int total, gboolean finished, void *user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     
+    /* Check for error condition (disk space, etc.) */
+    if (processed == -1) {
+        self->current_replace_task = NULL;
+        self->current_streaming_replace = NULL;
+        gtk_button_set_label(GTK_BUTTON(self->replace_all_btn), "Replace All");
+        gtk_label_set_text(GTK_LABEL(self->matches_label), "Error: Insufficient disk space in /tmp");
+        gtk_widget_set_visible(self->matches_label, TRUE);
+        
+        return;
+    }
+    
     if (finished) {
         /* Task Done - clear both task types */
         self->current_replace_task = NULL;
@@ -573,12 +596,42 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval, 
     return FALSE;
 }
 
+static void
+on_editor_undo_redo_progress(EditorWidget *editor, double progress, gboolean finished, gpointer user_data)
+{
+    ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
+    (void)editor;
+    
+    /* When undo/redo starts, cancel active searches and filters */
+    if (!finished && progress == 0.0) {
+        if (self->current_search) {
+             document_search_async_cancel(self->current_search);
+             self->current_search = NULL;
+             /* Clear highlights since content is about to change significantly */
+             editor_widget_set_search_results(self->editor, NULL);
+        }
+        if (self->current_filter_task) {
+             document_filter_async_cancel(self->current_filter_task);
+             self->current_filter_task = NULL;
+        }
+        /* For Replace All, we already cancel it in on_replace_all_clicked, 
+           but if user triggers undo MID-replace (though UI is blocked), 
+           it's good to be safe. */
+    }
+}
+
 static void vite_find_replace_bar_class_init(ViteFindReplaceBarClass *klass) {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
     GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
     
     
     object_class->dispose = vite_find_replace_bar_dispose;
+    
+    signals[SIGNAL_PROGRESS_CHANGED] = g_signal_new("progress-changed",
+        G_TYPE_FROM_CLASS(klass),
+        G_SIGNAL_RUN_LAST,
+        0, NULL, NULL, NULL,
+        G_TYPE_NONE, 2, G_TYPE_DOUBLE, G_TYPE_BOOLEAN);
     
     gtk_widget_class_set_css_name(widget_class, "findbar");
 }
@@ -746,6 +799,9 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     if (doc) {
         document_add_modification_callback(doc, on_document_changed, self);
     }
+    
+    /* Listen for undo/redo on the editor to cancel search if needed */
+    g_signal_connect(editor, "undo-redo-progress", G_CALLBACK(on_editor_undo_redo_progress), self);
     
     return GTK_WIDGET(self);
 }

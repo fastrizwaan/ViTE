@@ -80,6 +80,14 @@ void document_end_undo_group(Document *doc);
 void document_set_undo_group_selection(Document *doc, size_t start, size_t end);
 void document_set_redo_group_selection(Document *doc, size_t start, size_t end);
 
+/* Async Undo/Redo with Progress */
+typedef void (*UndoRedoProgressCallback)(double progress, gboolean finished, gpointer user_data);
+typedef struct _UndoRedoTask UndoRedoTask;
+
+UndoRedoTask *document_undo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data);
+UndoRedoTask *document_redo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data);
+void document_undo_redo_cancel(UndoRedoTask *task);
+
 
 typedef struct {
     size_t start;
