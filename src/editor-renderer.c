@@ -52,7 +52,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     if (self->last_theme_dark_mode != dark_mode_needed) {
         syntax_set_theme_mode(dark_mode_needed);
         if (self->syntax_ctx) {
-            syntax_context_invalidate_all(self->syntax_ctx);
+            syntax_context_invalidate_cache(self->syntax_ctx);
         }
         self->last_theme_dark_mode = dark_mode_needed;
     }
@@ -243,59 +243,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         PangoAttrList *cached_attrs = syntax_highlight_line(self->syntax_ctx, phys_line, text);
         PangoAttrList *attrs = cached_attrs ? pango_attr_list_copy(cached_attrs) : pango_attr_list_new();
         
-        /* Inject Search Highlights */
-        if (self->search_matches && self->search_matches->len > 0) {
-            size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
-            size_t raw_line_end = line_start_off + len;
-            
-            /* Binary search to find first match that could overlap this line */
-            int low = 0;
-            int high = (int)self->search_matches->len - 1;
-            int first_candidate = -1;
-            
-            while (low <= high) {
-                int mid = (low + high) / 2;
-                SearchMatch *m = &g_array_index(self->search_matches, SearchMatch, mid);
-                if (m->end > line_start_off) {
-                    first_candidate = mid;
-                    high = mid - 1;
-                } else {
-                    low = mid + 1;
-                }
-            }
-            
-            if (first_candidate >= 0) {
-                for (int m = first_candidate; m < (int)self->search_matches->len; m++) {
-                    SearchMatch match = g_array_index(self->search_matches, SearchMatch, m);
-                    if (match.start >= raw_line_end) break;
-                    
-                    if (match.start < raw_line_end && match.end > line_start_off) {
-                        size_t local_start = MAX(match.start, line_start_off) - line_start_off;
-                        size_t local_end = MIN(match.end, raw_line_end) - line_start_off;
-                        
-                        if (local_start < local_end) {
-                            /* Yellow: 65535, 65535, 0 */
-                            guint16 r = 65535, g = 65535, b = 0;
-                            if (match.start == self->current_match_offset) {
-                                /* Orange for active: 65535, 40000, 0 */
-                                g = 40000; b = 0;
-                            }
-                            
-                            PangoAttribute *bg = pango_attr_background_new(r, g, b);
-                            bg->start_index = (guint)local_start;
-                            bg->end_index = (guint)local_end;
-                            pango_attr_list_change(attrs, bg);
-                            
-                            /* Alpha: 0.5 -> 32768 */
-                            PangoAttribute *alpha = pango_attr_background_alpha_new(32768);
-                            alpha->start_index = (guint)local_start;
-                            alpha->end_index = (guint)local_end;
-                            pango_attr_list_change(attrs, alpha);
-                        }
-                    }
-                }
-            }
-        }
+        /* Attribute injection removed for search matches - moving to manual drawing below */
         
         /* Filter Matches Collection */
         GArray *filter_highlight_ranges = NULL;
@@ -435,8 +383,103 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* Selection rendering across lines is complex. 
            Simplified: If line is fully selected or partially.
         */
-        
-        /* 1. Draw Selections for all cursors */
+
+        /* Draws Search Matches (Manual Drawing) */
+        if (self->search_matches && self->search_matches->len > 0) {
+            size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
+            size_t raw_line_end = line_start_off + len + 1; /* Match selection logic */
+            
+            int low = 0;
+            int high = (int)self->search_matches->len - 1;
+            int first_candidate = -1;
+            
+            while (low <= high) {
+                int mid = (low + high) / 2;
+                SearchMatch *m = &g_array_index(self->search_matches, SearchMatch, mid);
+                if (m->end > line_start_off) {
+                    first_candidate = mid;
+                    high = mid - 1;
+                } else {
+                    low = mid + 1;
+                }
+            }
+            
+            if (first_candidate >= 0) {
+                for (int m = first_candidate; m < (int)self->search_matches->len; m++) {
+                    SearchMatch match = g_array_index(self->search_matches, SearchMatch, m);
+                    if (match.start >= raw_line_end) break;
+                    
+                    /* Calculate intersection */
+                    size_t match_start = match.start;
+                    size_t match_end = match.end;
+                    
+                    if (match_start < raw_line_end && match_end > line_start_off) {
+                        int i_start = (int)(MAX(match_start, line_start_off) - line_start_off);
+                        int i_end = (int)(MIN(match_end, (line_start_off + len)) - line_start_off);
+                        
+                        if (i_start < i_end) {
+                            /* Draw this range on the layout */
+                            PangoLayoutIter *iter = pango_layout_get_iter(layout);
+                            do {
+                                PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
+                                int line_start_index = p_line->start_index;
+                                int line_end_index = line_start_index + p_line->length;
+                                
+                                PangoRectangle line_rect;
+                                pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
+                                double ry = pango_units_to_double(line_rect.y);
+                                double rh = pango_units_to_double(line_rect.height);
+
+                                if (i_end >= line_start_index && i_start <= line_end_index) {
+                                    int *ranges; int n_ranges;
+                                    int range_start = MAX(i_start, line_start_index);
+                                    int range_end = MIN(i_end, line_end_index);
+                                    
+                                    pango_layout_line_get_x_ranges(p_line, range_start, range_end, &ranges, &n_ranges);
+                                    for (int r = 0; r < n_ranges; r++) {
+                                        double rx = pango_units_to_double(ranges[2 * r]);
+                                        double rw = pango_units_to_double(ranges[2 * r + 1] - ranges[2 * r]);
+                                        
+                                        if (rw > 0) {
+                                            if (match.start == self->current_match_offset) {
+                                                /* Current Match: Border only? Or light Fill + Border? 
+                                                   User said "current match has border". 
+                                                   Let's do light orange fill + solid border. */
+                                                GdkRGBA fill = {1.0, 0.8, 0.4, 0.2}; /* Light Orange, Low Opacity */
+                                                GdkRGBA border = {1.0, 0.6, 0.0, 1.0}; /* Solid Orange Border */
+                                                
+                                                gtk_snapshot_append_color(snapshot, &fill, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                                                
+                                                gtk_snapshot_append_border(snapshot, 
+                                                    &GSK_ROUNDED_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh),
+                                                    (float[4]){1, 1, 1, 1},
+                                                    (GdkRGBA[4]){border, border, border, border});
+                                            } else {
+                                                /* Other matches: Greyish, low opacity, no border */
+                                                GdkRGBA fill = {0.6, 0.6, 0.6, 0.2}; 
+                                                if (dark_mode_needed) fill = (GdkRGBA){0.8, 0.8, 0.8, 0.15};
+                                                
+                                                gtk_snapshot_append_color(snapshot, &fill, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                                                
+                                                /* Underline (Bottom Border) */
+                                                GdkRGBA underline_col = {0.5, 0.5, 0.5, 0.5};
+                                                if (dark_mode_needed) underline_col = (GdkRGBA){0.7, 0.7, 0.7, 0.4};
+                                                
+                                                gtk_snapshot_append_color(snapshot, &underline_col, 
+                                                    &GRAPHENE_RECT_INIT((float)rx, (float)(ry + rh - 1.0), (float)rw, 1.0f));
+                                            }
+                                        }
+                                    }
+                                    g_free(ranges);
+                                }
+                            } while (pango_layout_iter_next_line(iter));
+                            pango_layout_iter_free(iter);
+                        }
+                    }
+                }
+            }
+        }
+
         size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
         size_t raw_line_end = line_start_off + len + 1;
 

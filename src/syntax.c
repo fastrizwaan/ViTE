@@ -415,6 +415,16 @@ syntax_context_invalidate_all(SyntaxContext *ctx)
     }
 }
 
+void
+syntax_context_invalidate_cache(SyntaxContext *ctx)
+{
+    /* Only clear the attribute cache, preserving state chain.
+       Useful for theme changes where syntax logic is unchanged but colors change. */
+    if (ctx->line_cache) {
+        g_ptr_array_set_size(ctx->line_cache, 0);
+    }
+}
+
 /* Helper to add attribute - selects color based on theme */
 void
 add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref)

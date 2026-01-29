@@ -50,6 +50,7 @@ void syntax_context_free(SyntaxContext *ctx); /* deprecated in favor of unref */
 void syntax_context_set_language(SyntaxContext *ctx, const char *lang_name);
 void syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta);
 void syntax_context_invalidate_all(SyntaxContext *ctx);  /* Clear all cached highlights */
+void syntax_context_invalidate_cache(SyntaxContext *ctx); /* Clear attributes but keep state */
 const char *syntax_context_get_language_name(SyntaxContext *ctx);
 SyntaxLanguage syntax_context_get_language(SyntaxContext *ctx);
 
