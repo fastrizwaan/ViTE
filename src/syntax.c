@@ -465,6 +465,10 @@ add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref)
         else if (color_ref == &d_variable_c) effective_color = &l_variable_c;
         else if (color_ref == &d_constant) effective_color = &l_constant;
         else if (color_ref == &d_logical) effective_color = &l_logical;
+        else if (color_ref == &d_param) effective_color = &l_param;
+        else if (color_ref == &d_tag) effective_color = &l_tag;
+        else if (color_ref == &d_attribute) effective_color = &l_attribute;
+        else if (color_ref == &d_property) effective_color = &l_property;
         
         /* Refine: Constants/Numbers are Orange in One Light, not Purple */
         if (color_ref == &d_number || color_ref == &d_type) effective_color = &l_number; 

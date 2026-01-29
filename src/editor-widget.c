@@ -446,6 +446,8 @@ editor_widget_init(EditorWidget *self)
     
     self->syntax_scan_idle_id = 0;
     
+    self->last_theme_dark_mode = -1; /* Force initial theme sync */
+    
     /* Viewport padding */
     self->padding_left = 4;
     self->padding_top = 8;
