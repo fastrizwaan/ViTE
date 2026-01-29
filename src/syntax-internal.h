@@ -12,8 +12,8 @@ struct _SyntaxContext {
     /* State tracking: index i = state AFTER line i */
     GByteArray *state_chain;
 
-    /* Cache: maps line_index -> {content_hash, PangoAttrList*} */
-    GHashTable *line_cache;  /* size_t -> SyntaxCacheEntry* */
+    /* Cache: maps line_index -> SyntaxCacheEntry* */
+    GPtrArray *line_cache;
     
     /* Regexes (Shared or Specific) */
     /* Bash */
@@ -43,6 +43,8 @@ struct _SyntaxContext {
     GRegex *desktop_arg;     /* %f %u etc */
     GRegex *desktop_string_dq;
     GRegex *desktop_string_sq;
+
+    size_t valid_up_to;  /* Number of lines with valid state in state_chain */
 };
 
 /* Cache entry structure */

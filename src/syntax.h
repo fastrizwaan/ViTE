@@ -48,7 +48,7 @@ void syntax_context_unref(SyntaxContext *ctx);
 void syntax_context_free(SyntaxContext *ctx); /* deprecated in favor of unref */
 
 void syntax_context_set_language(SyntaxContext *ctx, const char *lang_name);
-void syntax_context_invalidate(SyntaxContext *ctx, size_t start_line);
+void syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta);
 void syntax_context_invalidate_all(SyntaxContext *ctx);  /* Clear all cached highlights */
 const char *syntax_context_get_language_name(SyntaxContext *ctx);
 SyntaxLanguage syntax_context_get_language(SyntaxContext *ctx);

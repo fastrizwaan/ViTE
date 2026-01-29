@@ -1,5 +1,6 @@
 #include "editor-internal.h"
 #include "syntax.h"
+#include "syntax-internal.h"
 #include <math.h>
 
 #define MAX_PANGO_LINE_LEN 10485760 /* 10MB limit for single line rendering to avoid int overflow/crash */
@@ -157,8 +158,34 @@ syntax_scan_step(gpointer user_data)
              size_t tlen = len;
              while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;
              text[tlen] = '\0';
+             
+             /* Optimization: Check for state convergence */
+             SyntaxState old_state = STATE_ROOT;
+             if (i < self->syntax_ctx->state_chain->len) {
+                 old_state = self->syntax_ctx->state_chain->data[i];
+             }
+             
              syntax_process_line(self->syntax_ctx, i, text, FALSE);
+             
+             /* Mark this line as valid */
+             self->syntax_ctx->valid_up_to = i + 1;
+
+             SyntaxState new_state = STATE_ROOT;
+             if (i < self->syntax_ctx->state_chain->len) {
+                 new_state = self->syntax_ctx->state_chain->data[i];
+             }
+             
              g_free(text);
+             
+             /* If state hasn't changed, and we have valid states ahead, we can stop early! */
+             if (old_state == new_state && i < self->syntax_ctx->state_chain->len - 1) {
+                 /* Converged! The rest of the file state is valid (shifted correctly). */
+                 /* Only stop if we are sure (maybe check if we are past the initial edit line?)
+                    Actually, if output matches, and next line content is static, it propagates. */
+                 self->syntax_ctx->valid_up_to = total; /* Mark all as valid */
+                 self->syntax_scan_idle_id = 0;
+                 return G_SOURCE_REMOVE;
+             }
         }
     }
     
@@ -172,8 +199,8 @@ on_document_update(Document *doc, size_t start_line, int line_delta, gpointer us
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->syntax_ctx) return;
 
-    /* Partial invalidation: only from start_line onwards */
-    syntax_context_invalidate(self->syntax_ctx, start_line);
+    /* Efficiently shift the syntax cache and invalidate states from start_line onwards */
+    syntax_context_apply_edit(self->syntax_ctx, start_line, line_delta);
     
     /* Restart background scanner for global consistency */
     if (self->syntax_scan_idle_id) {

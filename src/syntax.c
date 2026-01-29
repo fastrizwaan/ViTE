@@ -51,6 +51,7 @@ static gboolean colors_initialized = FALSE;
 static void
 syntax_cache_entry_free(gpointer data)
 {
+    if (!data) return;
     SyntaxCacheEntry *entry = data;
     if (entry->attrs) pango_attr_list_unref(entry->attrs);
     g_free(entry);
@@ -125,6 +126,7 @@ syntax_context_new(void)
     ctx->ref_count = 1;
     ctx->lang = LANG_NONE;
     ctx->state_chain = g_byte_array_new();
+    ctx->valid_up_to = 0;
     
     /* Compile Regexes */
     
@@ -154,7 +156,7 @@ syntax_context_new(void)
     ctx->desktop_string_sq = g_regex_new("'(?:[^']|'')*'", G_REGEX_OPTIMIZE, 0, NULL);
 
     /* Initialize line cache */
-    ctx->line_cache = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, syntax_cache_entry_free);
+    ctx->line_cache = g_ptr_array_new_with_free_func(syntax_cache_entry_free);
 
     return ctx;
 }
@@ -200,7 +202,7 @@ syntax_context_unref(SyntaxContext *ctx)
     if (ctx->desktop_string_sq) g_regex_unref(ctx->desktop_string_sq);
 
     if (ctx->line_cache) {
-        g_hash_table_destroy(ctx->line_cache);
+        g_ptr_array_unref(ctx->line_cache);
     }
     
     g_free(ctx);
@@ -233,8 +235,10 @@ syntax_context_set_language(SyntaxContext *ctx, const char *lang_name)
         ctx->lang = LANG_NONE;
     }
     
-    /* Clear states */
+    /* Clear states and cache */
     g_byte_array_set_size(ctx->state_chain, 0);
+    ctx->valid_up_to = 0;
+    if (ctx->line_cache) g_ptr_array_set_size(ctx->line_cache, 0);
 }
 
 SyntaxLanguage
@@ -336,22 +340,67 @@ syntax_detect_language(const char *content)
     return NULL;
 }
 
+
 void
-syntax_context_invalidate(SyntaxContext *ctx, size_t start_line)
+syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta)
 {
-    if (start_line < ctx->state_chain->len) {
-        g_byte_array_set_size(ctx->state_chain, start_line);
-    }
-    /* Remove cache entries from start_line onwards. */
-    if (ctx->line_cache) {
-        GHashTableIter iter;
-        gpointer key, value;
-        g_hash_table_iter_init(&iter, ctx->line_cache);
-        while (g_hash_table_iter_next(&iter, &key, &value)) {
-            size_t line = GPOINTER_TO_SIZE(key);
-            if (line >= start_line) {
-                g_hash_table_iter_remove(&iter);
+    /* 1. Shift the state chain to preserve future states for convergence check */
+    if (ctx->state_chain->len > start_line) {
+        if (line_delta > 0) {
+            /* Insertion: Shift data up to make room */
+            size_t old_len = ctx->state_chain->len;
+            size_t move_count = old_len - start_line;
+            g_byte_array_set_size(ctx->state_chain, old_len + line_delta);
+            /* Memmove: dest, src, length */
+            memmove(ctx->state_chain->data + start_line + line_delta, 
+                    ctx->state_chain->data + start_line, 
+                    move_count);
+            /* Invalidate the inserted gap (optional, set to ROOT) */
+            memset(ctx->state_chain->data + start_line, STATE_ROOT, line_delta);
+        } else if (line_delta < 0) {
+            /* Deletion: Shift data down */
+            size_t start_src = start_line + (-line_delta);
+            if (start_src < ctx->state_chain->len) {
+                size_t move_count = ctx->state_chain->len - start_src;
+                memmove(ctx->state_chain->data + start_line,
+                        ctx->state_chain->data + start_src,
+                        move_count);
+                g_byte_array_set_size(ctx->state_chain, ctx->state_chain->len + line_delta);
+            } else {
+                /* Deleting everything until end or beyond */
+                g_byte_array_set_size(ctx->state_chain, start_line);
             }
+        }
+    }
+    /* Reset valid_up_to to the start of edit. We must re-scan from here. */
+    if (ctx->valid_up_to > start_line) {
+        ctx->valid_up_to = start_line;
+    }
+
+    /* 2. Shift the cache (keep existing logic) */
+    if (ctx->line_cache) {
+        if (line_delta > 0) {
+            /* Insertion: insert NULL entries */
+            for (int i = 0; i < line_delta; i++) {
+                g_ptr_array_insert(ctx->line_cache, start_line, NULL);
+            }
+        } else if (line_delta < 0) {
+            /* Deletion: remove entries */
+            int to_remove = -line_delta;
+            if (start_line < ctx->line_cache->len) {
+                int count = MIN(to_remove, (int)(ctx->line_cache->len - start_line));
+                g_ptr_array_remove_range(ctx->line_cache, start_line, count);
+            }
+        }
+        
+        /* 3. Invalidate current line entry if it's within bounds. */
+        if (start_line < ctx->line_cache->len) {
+             SyntaxCacheEntry *old = g_ptr_array_index(ctx->line_cache, start_line);
+             if (old) {
+                 /* Replace with NULL to trigger re-highlight */
+                 g_ptr_array_remove_index(ctx->line_cache, start_line);
+                 g_ptr_array_insert(ctx->line_cache, start_line, NULL);
+             }
         }
     }
 }
@@ -360,8 +409,9 @@ void
 syntax_context_invalidate_all(SyntaxContext *ctx)
 {
     g_byte_array_set_size(ctx->state_chain, 0);
+    ctx->valid_up_to = 0;
     if (ctx->line_cache) {
-        g_hash_table_remove_all(ctx->line_cache);
+        g_ptr_array_set_size(ctx->line_cache, 0);
     }
 }
 
@@ -466,7 +516,7 @@ is_word_in_list(const char *word, size_t len, const char **list)
 size_t
 syntax_get_processed_line_count(SyntaxContext *ctx)
 {
-    return ctx->state_chain->len;
+    return ctx->valid_up_to;
 }
 
 PangoAttrList *
@@ -478,8 +528,8 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
     guint content_hash = g_str_hash(text);
     
     /* Cache lookup - Only if we need attributes */
-    if (compute_attributes && ctx->line_cache) {
-        SyntaxCacheEntry *cached = g_hash_table_lookup(ctx->line_cache, GSIZE_TO_POINTER(line_index));
+    if (compute_attributes && ctx->line_cache && line_index < ctx->line_cache->len) {
+        SyntaxCacheEntry *cached = g_ptr_array_index(ctx->line_cache, line_index);
         if (cached && cached->content_hash == content_hash && cached->start_state == start_state) {
             /* Cache hit - return a copy of the cached attrs */
             return pango_attr_list_ref(cached->attrs);
@@ -524,13 +574,21 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
              break;
     }
 
-    /* Store in cache - hash table's destroy function handles cleanup */
+    /* Store in cache */
     if (ctx->line_cache && attrs) {
         SyntaxCacheEntry *entry = g_new(SyntaxCacheEntry, 1);
         entry->content_hash = content_hash;
         entry->start_state = start_state;
         entry->attrs = pango_attr_list_ref(attrs);
-        g_hash_table_insert(ctx->line_cache, GSIZE_TO_POINTER(line_index), entry);
+        
+        if (line_index >= ctx->line_cache->len) {
+            g_ptr_array_set_size(ctx->line_cache, line_index + 1);
+        } else {
+            /* Free old entry if any */
+            SyntaxCacheEntry *old = g_ptr_array_index(ctx->line_cache, line_index);
+            if (old) syntax_cache_entry_free(old);
+        }
+        ctx->line_cache->pdata[line_index] = entry;
     }
     
     return attrs;
