@@ -17,9 +17,17 @@ static gboolean on_key_released(GtkEventControllerKey *controller, guint keyval,
 static void on_focus_enter(GtkEventControllerFocus *controller, gpointer user_data);
 static void on_focus_leave(GtkEventControllerFocus *controller, gpointer user_data);
 static void on_im_commit(GtkIMContext *context, const char *str, gpointer user_data);
+static void on_ctx_cut(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_cut(EDITOR_WIDGET(user_data)); }
+static void on_ctx_copy(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_copy(EDITOR_WIDGET(user_data)); }
+static void on_ctx_paste(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_paste(EDITOR_WIDGET(user_data)); }
+static void on_ctx_delete(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_delete(EDITOR_WIDGET(user_data)); }
+static void on_ctx_undo(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_undo(EDITOR_WIDGET(user_data)); }
+static void on_ctx_redo(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_redo(EDITOR_WIDGET(user_data)); }
+static void on_ctx_select_all(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_select_all(EDITOR_WIDGET(user_data)); }
+static void on_ctx_change_case(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_change_case(EDITOR_WIDGET(user_data), g_variant_get_int32(param)); }
 
 /* Undo/Redo Progress Callback */
-static void
+void
 editor_widget_on_undo_redo_progress(double progress, gboolean finished, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -40,6 +48,13 @@ editor_widget_on_undo_redo_progress(double progress, gboolean finished, gpointer
         /* Progress update */
         g_signal_emit_by_name(self, "undo-redo-progress", progress, TRUE);
     }
+}
+
+void
+editor_widget_on_change_case_progress(int processed, int total, gboolean finished, gpointer user_data)
+{
+    double progress = (total > 0) ? (double)processed / (double)total : 1.0;
+    editor_widget_on_undo_redo_progress(progress, finished, user_data);
 }
 
 
@@ -124,10 +139,77 @@ on_motion(GtkEventControllerMotion *controller, double x, double y, gpointer use
     }
 }
 
+static void right_click(GtkGestureClick *gesture,
+                        int n_press,
+                        double x,
+                        double y,
+                        gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+
+    GMenu *root = g_menu_new();
+    
+    /* Section 1: Edit Operations */
+    GMenu *sect_edit = g_menu_new();
+    g_menu_append(sect_edit, "Cut",    "app.cut");
+    g_menu_append(sect_edit, "Copy",   "app.copy");
+    g_menu_append(sect_edit, "Paste",  "app.paste");
+    g_menu_append(sect_edit, "Delete", "app.delete");
+    g_menu_append_section(root, NULL, G_MENU_MODEL(sect_edit));
+    g_object_unref(sect_edit);
+
+    /* Section 2: Undo/Redo */
+    GMenu *sect_undo = g_menu_new();
+    g_menu_append(sect_undo, "Undo",   "app.undo");
+    g_menu_append(sect_undo, "Redo",   "app.redo");
+    g_menu_append_section(root, NULL, G_MENU_MODEL(sect_undo));
+    g_object_unref(sect_undo);
+
+    /* Section 3: Selection & Special */
+    GMenu *sect_sel = g_menu_new();
+    g_menu_append(sect_sel, "Select All", "win.select-all");
+
+    GMenu *case_menu = g_menu_new();
+    g_menu_append(case_menu, "ALL CAPS",       "app.upper");
+    g_menu_append(case_menu, "all lowercase", "app.lower");
+    g_menu_append(case_menu, "Title Case",    "app.title");
+    g_menu_append(case_menu, "Invert Case",   "app.invert");
+    g_menu_append_submenu(sect_sel, "Change Case", G_MENU_MODEL(case_menu));
+    g_object_unref(case_menu);
+    
+    g_menu_append_section(root, NULL, G_MENU_MODEL(sect_sel));
+    g_object_unref(sect_sel);
+
+    GtkWidget *popover =
+        gtk_popover_menu_new_from_model_full(
+            G_MENU_MODEL(root),
+            GTK_POPOVER_MENU_NESTED
+        );
+
+    gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
+    gtk_popover_set_position(GTK_POPOVER(popover), GTK_POS_BOTTOM);
+    gtk_widget_set_halign(popover, GTK_ALIGN_START);
+    
+    gtk_widget_set_parent(popover, GTK_WIDGET(self));
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover),
+        &(GdkRectangle){ (int)x, (int)y, 1, 1 });
+    
+    gtk_widget_add_css_class(popover, "editor-context-menu");
+    gtk_popover_popup(GTK_POPOVER(popover));
+    
+    g_object_unref(root);
+}
+
 static void
 on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
+
+    guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
+    if (button == GDK_BUTTON_SECONDARY) {
+        right_click(gesture, n_press, x, y, user_data);
+        return;
+    }
     gtk_widget_grab_focus(GTK_WIDGET(self));
     
     if (!self->doc) return;
@@ -317,6 +399,68 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         
         if (gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 2) {
             editor_widget_paste_primary(self);
+        } else if (gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 3) {
+            /* Right Click - Context Menu */
+            GMenu *menu = g_menu_new();
+            GSimpleActionGroup *group = g_simple_action_group_new();
+
+            /* Section 1: Clipboard */
+            GMenu *s1 = g_menu_new();
+            g_menu_append(s1, "Cut", "ctx.cut");
+            g_menu_append(s1, "Copy", "ctx.copy");
+            g_menu_append(s1, "Paste", "ctx.paste");
+            g_menu_append(s1, "Delete", "ctx.delete");
+            g_menu_append_section(menu, NULL, G_MENU_MODEL(s1));
+            g_object_unref(s1);
+
+            /* Section 2: Undo/Redo */
+            GMenu *s2 = g_menu_new();
+            g_menu_append(s2, "Undo", "ctx.undo");
+            g_menu_append(s2, "Redo", "ctx.redo");
+            g_menu_append_section(menu, NULL, G_MENU_MODEL(s2));
+            g_object_unref(s2);
+
+            /* Section 3: Selection */
+            GMenu *s3 = g_menu_new();
+            g_menu_append(s3, "Select All", "ctx.select-all");
+
+            /* Change Case Submenu */
+            GMenu *case_menu = g_menu_new();
+            g_menu_append(case_menu, "lower case", "ctx.change-case(0)");
+            g_menu_append(case_menu, "UPPER CASE", "ctx.change-case(1)");
+            g_menu_append(case_menu, "Title Case", "ctx.change-case(2)");
+            g_menu_append(case_menu, "iNVERT cASE", "ctx.change-case(3)");
+            g_menu_append_submenu(s3, "Change Case", G_MENU_MODEL(case_menu));
+            g_object_unref(case_menu);
+
+            g_menu_append_section(menu, NULL, G_MENU_MODEL(s3));
+            g_object_unref(s3);
+
+            /* Actions */
+            const GActionEntry ctx_entries[] = {
+                { "cut", on_ctx_cut, NULL, NULL, NULL },
+                { "copy", on_ctx_copy, NULL, NULL, NULL },
+                { "paste", on_ctx_paste, NULL, NULL, NULL },
+                { "delete", on_ctx_delete, NULL, NULL, NULL },
+                { "undo", on_ctx_undo, NULL, NULL, NULL },
+                { "redo", on_ctx_redo, NULL, NULL, NULL },
+                { "select-all", on_ctx_select_all, NULL, NULL, NULL },
+                { "change-case", on_ctx_change_case, "i", NULL, NULL }
+            };
+            g_action_map_add_action_entries(G_ACTION_MAP(group), ctx_entries, G_N_ELEMENTS(ctx_entries), self);
+
+            GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+            gtk_widget_set_parent(popover, GTK_WIDGET(self));
+            gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
+
+            GdkRectangle rect = { (int)x, (int)y, 1, 1 };
+            gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+
+            gtk_widget_insert_action_group(popover, "ctx", G_ACTION_GROUP(group));
+            gtk_popover_popup(GTK_POPOVER(popover));
+
+            g_object_unref(menu);
+            g_object_unref(group);
         }
     }
     
@@ -992,36 +1136,12 @@ on_key_pressed(GtkEventControllerKey *controller,
              break;
         case GDK_KEY_z:
             if (state & GDK_CONTROL_MASK) {
-                 /* Block if already doing undo/redo */
-                 if (self->undo_redo_task) {
-                     return TRUE;
-                 }
-                 
-                 /* Start async undo */
-                 self->undo_redo_task = document_undo_async(self->doc, 
-                     (UndoRedoProgressCallback)editor_widget_on_undo_redo_progress, self);
-                 
-                 /* Emit signal to show progress in tab */
-                 if (self->undo_redo_task) {
-                     g_signal_emit_by_name(self, "undo-redo-progress", 0.0, TRUE);
-                 }
+                 editor_widget_undo(self);
             }
             break;
         case GDK_KEY_y:
             if (state & GDK_CONTROL_MASK) {
-                 /* Block if already doing undo/redo */
-                 if (self->undo_redo_task) {
-                     return TRUE;
-                 }
-                 
-                 /* Start async redo */
-                 self->undo_redo_task = document_redo_async(self->doc,
-                     (UndoRedoProgressCallback)editor_widget_on_undo_redo_progress, self);
-                 
-                 /* Emit signal to show progress in tab */
-                 if (self->undo_redo_task) {
-                     g_signal_emit_by_name(self, "undo-redo-progress", 0.0, TRUE);
-                 }
+                 editor_widget_redo(self);
             }
             break;
         case GDK_KEY_c:
@@ -1046,21 +1166,9 @@ on_key_pressed(GtkEventControllerKey *controller,
             }
             break;
         case GDK_KEY_a:
-            if (state & GDK_CONTROL_MASK) {
-                editor_widget_clear_cursors(self);
-                EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
-                
-                size_t total = document_get_length(self->doc);
-                primary->selection_anchor = 0;
-                primary->cursor_offset = total;
-                
-                self->cursor_offset = primary->cursor_offset;
-                self->selection_anchor = primary->selection_anchor;
-                
-                self->alt_word_mode = TRUE;
-                scroll_to_cursor(self);
-                gtk_widget_queue_draw(GTK_WIDGET(self));
-            } else {
+             if (state & GDK_CONTROL_MASK) {
+                 editor_widget_select_all(self);
+             } else {
                 handled = FALSE;
             }
             break;

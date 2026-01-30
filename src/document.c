@@ -12,9 +12,6 @@
 #include "resource-check.h"
 #include <ctype.h>
 
-typedef struct _StreamingChangeCaseTask StreamingChangeCaseTask;
-typedef char (*CharTransformFunc)(char c);
-
 /* Forward declarations */
 static char *document_snapshot_to_file(Document *doc);
 

@@ -153,6 +153,8 @@ void editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_de
 /* Input */
 void editor_input_init_controllers(EditorWidget *self);
 void editor_widget_update_im_cursor_location(EditorWidget *self);
+void editor_widget_on_undo_redo_progress(double progress, gboolean finished, gpointer user_data);
+void editor_widget_on_change_case_progress(int processed, int total, gboolean finished, gpointer user_data);
 void move_cursor(EditorWidget *self, int visual_lines);
 
 /* Selection */
@@ -181,7 +183,10 @@ void editor_widget_cut(EditorWidget *self);
 void editor_widget_paste_primary(EditorWidget *self);
 void editor_widget_paste(EditorWidget *self);
 size_t editor_widget_delete_selection(EditorWidget *self);
-/* editor_widget_delete might be in editor-actions.c ? */ 
+void editor_widget_undo(EditorWidget *self);
+void editor_widget_redo(EditorWidget *self);
+void editor_widget_select_all(EditorWidget *self);
+void editor_widget_change_case(EditorWidget *self, int type);
 
 void editor_widget_update_adjustments(EditorWidget *self, int width, int height);
 

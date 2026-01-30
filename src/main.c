@@ -1142,6 +1142,11 @@ load_css(void)
     "    margin-left: 0px;"
     "    margin-right: 0px;"
     "}"
+    "popover.editor-context-menu > contents {"
+    "    min-width: 220px;"
+    "    min-height: 295px;"
+    "    padding: 0px;"
+    "}"
     "statusbar label {"
     "    font-size: small;"
     "    opacity: 0.8;"
@@ -2493,6 +2498,16 @@ on_toggle_insert_mode(GSimpleAction *action, GVariant *value, gpointer user_data
     }
 }
 
+static void
+on_select_all_action(GSimpleAction *action, GVariant *value, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         editor_widget_select_all(EDITOR_WIDGET(editor));
+    }
+}
+
 static ViteWindow *
 setup_window(GtkWindow *window)
 {
@@ -2709,6 +2724,7 @@ setup_window(GtkWindow *window)
         { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled },
         { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled },
         { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL },
+        { "select-all", on_select_all_action, NULL, NULL, NULL },
         { "filter", on_filter_action, NULL, NULL, NULL }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);

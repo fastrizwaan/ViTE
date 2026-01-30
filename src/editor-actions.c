@@ -690,3 +690,75 @@ editor_widget_delete(EditorWidget *self)
     scroll_to_cursor(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
+
+void
+editor_widget_undo(EditorWidget *self)
+{
+    if (!self->doc || self->undo_redo_task) return;
+    
+    self->undo_redo_task = document_undo_async(self->doc, 
+        (UndoRedoProgressCallback)editor_widget_on_undo_redo_progress, self);
+    
+    if (self->undo_redo_task) {
+        g_signal_emit_by_name(self, "undo-redo-progress", 0.0, TRUE);
+    }
+}
+
+void
+editor_widget_redo(EditorWidget *self)
+{
+    if (!self->doc || self->undo_redo_task) return;
+    
+    self->undo_redo_task = document_redo_async(self->doc, 
+        (UndoRedoProgressCallback)editor_widget_on_undo_redo_progress, self);
+    
+    if (self->undo_redo_task) {
+        g_signal_emit_by_name(self, "undo-redo-progress", 0.0, TRUE);
+    }
+}
+
+void
+editor_widget_select_all(EditorWidget *self)
+{
+    if (!self->doc || !self->cursors) return;
+    
+    editor_widget_clear_cursors(self);
+    EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+    
+    size_t total = document_get_length(self->doc);
+    primary->selection_anchor = 0;
+    primary->cursor_offset = total;
+    
+    self->cursor_offset = primary->cursor_offset;
+    self->selection_anchor = primary->selection_anchor;
+    
+    self->alt_word_mode = TRUE;
+    scroll_to_cursor(self);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+void
+editor_widget_change_case(EditorWidget *self, int type)
+{
+    if (!self->doc || self->undo_redo_task) return;
+    
+    EditorCursor *primary = editor_widget_get_primary_cursor(self);
+    if (!primary) return;
+    
+    size_t start = MIN(primary->cursor_offset, primary->selection_anchor);
+    size_t end = MAX(primary->cursor_offset, primary->selection_anchor);
+    
+    if (start == end) return;
+    
+    CharTransformFunc func = NULL;
+    if (type == 0) func = g_ascii_tolower;
+    else if (type == 1) func = g_ascii_toupper;
+    
+    document_change_case_streaming_start(self->doc, start, end, func, type, 
+                                          (ReplaceProgressCallback)editor_widget_on_change_case_progress, self);
+    /* Note: We reuse editor_widget_on_undo_redo_progress because it has the same signature 
+       and logic for updating UI after document operation. 
+       Wait, document_change_case_streaming_start takes ReplaceProgressCallback. 
+       Let's check ReplaceProgressCallback vs UndoRedoProgressCallback.
+    */
+}

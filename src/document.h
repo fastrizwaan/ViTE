@@ -10,6 +10,8 @@ typedef struct _Document Document;
 void document_suspend_callbacks(Document *doc);
 void document_resume_callbacks(Document *doc);
 
+typedef char (*CharTransformFunc)(char c);
+
 Document *document_new(const char *filename);
 Document *document_new_empty(void);
 void document_load_file_async(Document *doc, const char *filename, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data);
@@ -83,6 +85,7 @@ void document_set_redo_group_selection(Document *doc, size_t start, size_t end);
 /* Async Undo/Redo with Progress */
 typedef void (*UndoRedoProgressCallback)(double progress, gboolean finished, gpointer user_data);
 typedef struct _UndoRedoTask UndoRedoTask;
+typedef struct _StreamingChangeCaseTask StreamingChangeCaseTask;
 
 UndoRedoTask *document_undo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data);
 UndoRedoTask *document_redo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data);
@@ -142,6 +145,13 @@ size_t document_replace(Document *doc, SearchMatch match, const char *replacemen
 /* Replace all matches. Returns number of replacements. */
 /* Replace all matches. Returns number of replacements. */
 int document_replace_all(Document *doc, const char *raw_query, const char *replacement, gboolean regex, gboolean case_sensitive, gboolean whole_word);
+
+StreamingChangeCaseTask *document_change_case_streaming_start(Document *doc, 
+                                     size_t start, size_t end,
+                                     CharTransformFunc simple_func,
+                                     int type,
+                                     ReplaceProgressCallback callback, void *user_data);
+void document_change_case_streaming_cancel(StreamingChangeCaseTask *task);
 
 /* Efficiently replace pre-calculated matches (skips re-search). matches must be valid. */
 int document_replace_known_matches(Document *doc, GArray *matches, const char *replacement, gboolean regex, GRegex *cached_regex);
