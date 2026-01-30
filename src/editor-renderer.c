@@ -376,8 +376,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* Clip text area to ensure it doesn't draw over the gutter */
         gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(gutter_w, 0, width - gutter_w, height));
         
-        /* Apply centering_offset to the text drawing translation */
-        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x - scroll_x, current_y_pos + self->padding_top + centering_offset));
+        /* Translate to the TOP of the line slot (contiguous baseline) */
+        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x - scroll_x, current_y_pos + self->padding_top));
         
         /* Draw Line Background if selected */
         /* Selection rendering across lines is complex. 
@@ -420,6 +420,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                         if (i_start < i_end) {
                             /* Draw this range on the layout */
                             PangoLayoutIter *iter = pango_layout_get_iter(layout);
+                            int m_count = pango_layout_get_line_count(layout);
+                            int m_line_idx = 0;
                             do {
                                 PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
                                 int line_start_index = p_line->start_index;
@@ -427,8 +429,17 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                                 
                                 PangoRectangle line_rect;
                                 pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
-                                double ry = pango_units_to_double(line_rect.y);
+                                double ry = pango_units_to_double(line_rect.y) + centering_offset;
                                 double rh = pango_units_to_double(line_rect.height);
+                                
+                                /* CONTIGUOUS FIX: Expand highlights to cover centering gaps */
+                                if (m_line_idx == 0) {
+                                    rh += ry;
+                                    ry = 0;
+                                }
+                                if (m_line_idx == m_count - 1) {
+                                    rh = layout_h - ry;
+                                }
 
                                 if (i_end >= line_start_index && i_start <= line_end_index) {
                                     int *ranges; int n_ranges;
@@ -472,6 +483,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                                     }
                                     g_free(ranges);
                                 }
+                                m_line_idx++;
                             } while (pango_layout_iter_next_line(iter));
                             pango_layout_iter_free(iter);
                         }
@@ -495,13 +507,15 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                 
                 if (len == 0) {
                     if (end_sel > line_start_off) {
-                        /* For empty lines, draw selection block using layout_h */
+                        /* For empty lines, draw selection block filling full layout_h */
                         gtk_snapshot_append_color(snapshot, 
                                                   &(GdkRGBA){0.2, 0.4, 0.8, 0.35},
-                                                  &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)real_layout_h));
+                                                  &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)layout_h));
                     }
                 } else {
                     PangoLayoutIter *iter = pango_layout_get_iter(layout);
+                    int s_count = pango_layout_get_line_count(layout);
+                    int s_line_idx = 0;
                     do {
                         PangoLayoutLine *p_line = pango_layout_iter_get_line_readonly(iter);
                         int line_start_index = p_line->start_index;
@@ -509,9 +523,17 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                         
                         PangoRectangle line_rect;
                         pango_layout_iter_get_line_extents(iter, NULL, &line_rect);
-                        double ry = pango_units_to_double(line_rect.y);
-                        /* Use logical line height directly instead of copying iterator to peek ahead */
+                        double ry = pango_units_to_double(line_rect.y) + centering_offset;
                         double rh = pango_units_to_double(line_rect.height);
+
+                        /* CONTIGUOUS FIX: Expand highlights to cover centering gaps */
+                        if (s_line_idx == 0) {
+                            rh += ry;
+                            ry = 0;
+                        }
+                        if (s_line_idx == s_count - 1) {
+                            rh = layout_h - ry;
+                        }
 
                         if (sel_in_line_end >= (size_t)line_start_index && sel_in_line_start <= (size_t)line_end_index) {
                             int *ranges; int n_ranges;
@@ -535,14 +557,18 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                                 if (ew > 0) gtk_snapshot_append_color(snapshot, &(GdkRGBA){0.2, 0.4, 0.8, 0.35}, &GRAPHENE_RECT_INIT((float)ex, (float)ry, (float)ew, (float)rh));
                             }
                         }
+                        s_line_idx++;
                     } while (pango_layout_iter_next_line(iter));
                     pango_layout_iter_free(iter);
                 }
             }
         }
         
-        /* 2. Draw Text */
+        /* 2. Draw Text (Apply centering offset here) */
+        gtk_snapshot_save(snapshot);
+        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(0, (float)centering_offset));
         gtk_snapshot_append_layout(snapshot, layout, &self->color_text);
+        gtk_snapshot_restore(snapshot);
 
         /* Draw Custom Filter Underlines */
         /* Draw Custom Filter Underlines */
@@ -597,7 +623,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                             
                             if (li_start < li_end) {
                                 int baseline = pango_layout_iter_get_baseline(liter);
-                                double y_base = (double)baseline / PANGO_SCALE;
+                                double y_base = (double)baseline / PANGO_SCALE + centering_offset;
                                 /* Pixel-snap the underline vertical position */
                                 double underline_y = floor(y_base + 3.0 + 0.5);
                                 
@@ -665,7 +691,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
                      /* Calculate Cursor Height and Y: match line height and center */
                      double pango_h = pango_units_to_double(strong_pos.height);
-                     double pango_y = pango_units_to_double(strong_pos.y);
+                     double pango_y = pango_units_to_double(strong_pos.y) + centering_offset;
                      
                      double cursor_h = MAX(pango_h, self->line_height);
                      double cursor_y = pango_y - (cursor_h - pango_h) / 2.0;
@@ -699,7 +725,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                 caret_x = (float)floor(caret_x * scale + 0.5) / scale;
                 
                 double pango_h = pango_units_to_double(strong_pos.height);
-                double pango_y = pango_units_to_double(strong_pos.y);
+                double pango_y = pango_units_to_double(strong_pos.y) + centering_offset;
                 double caret_h = MAX(pango_h, self->line_height);
                 double caret_y = pango_y - (caret_h - pango_h) / 2.0;
 
