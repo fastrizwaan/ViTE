@@ -21,7 +21,12 @@ static const char *py_builtins[] = {
     "issubclass", "iter", "len", "list", "locals", "map", "max", "memoryview", "min",
     "next", "object", "oct", "open", "ord", "pow", "print", "property", "range",
     "repr", "reversed", "round", "set", "setattr", "slice", "sorted", "staticmethod",
-    "str", "sum", "super", "tuple", "type", "vars", "zip", "__import__", "__init__", NULL
+    "str", "sum", "super", "tuple", "type", "vars", "zip", "__import__", NULL
+};
+
+static const char *py_special_vars[] = {
+    "__name__", "__file__", "__doc__", "__package__", "__loader__", "__spec__",
+    "__cached__", "__dict__", NULL
 };
 
 
@@ -211,6 +216,15 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                 }
                 else if (is_word_in_list(word_start, word_len, py_builtins)) {
                      add_attr(attrs, start_pos, cur, &d_builtin);
+                }
+                /* 1.5. Special Dunder Variables */
+                else if (word_len >= 4 && word_start[0] == '_' && word_start[1] == '_' && 
+                         word_start[word_len-1] == '_' && word_start[word_len-2] == '_') {
+                     if (is_word_in_list(word_start, word_len, py_special_vars)) {
+                         add_attr(attrs, start_pos, cur, &d_variable); /* Red */
+                     } else {
+                         add_attr(attrs, start_pos, cur, &d_logical);  /* Cyan */
+                     }
                 }
                 /* 2. Function Call */
                 else if (is_call) {
