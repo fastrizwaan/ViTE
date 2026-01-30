@@ -209,7 +209,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         char *text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024);
         // fprintf(stderr, "[DEBUG] snapshot loop: len=%zu\n", len);
 
-        /* UTF-8 Validation */
+        /* UTF-8 Validation and Cleanup */
         if (!g_utf8_validate(text, len, NULL)) {
              char *safe_text = g_utf8_make_valid(text, len);
              g_free(text);
@@ -219,6 +219,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         
         /* Strip trailing newlines for Pango render (\n, \r\n, \r) */
         while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r')) {
+            text[len-1] = '\0'; /* Null terminate at the new end */
             len--;
         }
 
