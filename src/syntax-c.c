@@ -32,7 +32,7 @@ void
 syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index)
 {
     size_t cur = 0;
-    int paren_depth = (state == STATE_C_PARAMS) ? 1 : 0;
+    int paren_depth = 0;
     while (cur < len) {
         if (state == STATE_C_ENUM_ML_COMMENT) {
             size_t start_pos = cur;
@@ -721,7 +721,6 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 } else if (is_func_call) {
                      add_attr(attrs, start_pos, cur, &d_function);
                      state = STATE_C_PARAMS;
-                     paren_depth++; /* Entering params implies 1 level deeper conceptually or just track open paren */
                 } else if (is_word_in_list(word_start, word_len, c_special_constants) ||
                            is_pointer_access || is_type_list ||
                            g_ascii_isupper(word_start[0]) || 
