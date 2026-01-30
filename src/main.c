@@ -18,8 +18,10 @@ struct _ViteWindow {
     GtkStack *stack;
     AdwWindowTitle *window_title;
     GtkWidget *header_progress;
+    GtkWidget *header_spinner;
     GtkWidget *status_bar;
     GtkWidget *last_active_editor; /* Fallback when focus is lost (e.g. to a popover) */
+    int loading_count;
 };
 
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
@@ -92,6 +94,8 @@ static void update_open_tabs_list(GtkWidget *widget, gpointer user_data);
 static GtkWidget *create_view_container(ViteWindow *win, GtkWidget *editor);
 static void on_find_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_replace_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_save_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_right(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_down(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_close_split_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
@@ -224,7 +228,41 @@ defer_focus(GtkWidget *widget)
     }
 }
 
+static void
+update_header_spinner(ViteWindow *win)
+{
+    if (!win->header_spinner) return;
+    
+    /* Show logic: 
+       - Must have active loading (loading_count > 0)
+       - Tab bar must NOT be visible (avoids redundancy)
+    */
+    gboolean active = (win->loading_count > 0);
+    gboolean tab_bar_visible = win->tab_bar && gtk_widget_get_visible(GTK_WIDGET(win->tab_bar));
+    
+    if (active && !tab_bar_visible) {
+        if (!gtk_widget_get_visible(win->header_spinner)) {
+            gtk_widget_set_visible(win->header_spinner, TRUE);
+            gtk_spinner_start(GTK_SPINNER(win->header_spinner));
+        }
+    } else {
+        if (gtk_widget_get_visible(win->header_spinner)) {
+            gtk_spinner_stop(GTK_SPINNER(win->header_spinner));
+            gtk_widget_set_visible(win->header_spinner, FALSE);
+        }
+    }
+}
+
+static void
+on_tab_bar_visible_changed(GObject *obj, GParamSpec *pspec, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    update_header_spinner(win);
+}
+
+/* Forward declarations */
 static void close_split_view(GtkWidget *overlay);
+static void update_window_title_for_tab(ViteTab *tab);
 
 static void
 on_close_split_clicked(GtkWidget *overlay, gpointer user_data)
@@ -579,18 +617,34 @@ update_window_title_for_tab(ViteTab *tab)
         GFile *f = g_file_new_for_path(doc_path);
         title = g_file_get_basename(f);
         
+        /* Null safety for basename */
+        if (!title || !*title) {
+            g_free(title);
+            title = g_strdup("Untitled");
+        }
+        
         char *dir = g_path_get_dirname(doc_path);
         const char *home = g_get_home_dir();
-        if (g_str_has_prefix(dir, home)) {
+        if (dir && home && g_str_has_prefix(dir, home)) {
             subtitle = g_strconcat("~", dir + strlen(home), NULL);
-        } else {
+        } else if (dir) {
             subtitle = g_strdup(dir);
+        } else {
+            subtitle = g_strdup("");
         }
         g_free(dir);
         g_object_unref(f);
     } else {
-        title = g_strdup(vite_tab_get_title(tab));
+        const char *tab_title = vite_tab_get_title(tab);
+        title = g_strdup(tab_title && *tab_title ? tab_title : "Untitled");
         subtitle = g_strdup("Unsaved Document");
+    }
+    
+    /* UTF-8 validation for title */
+    if (title && !g_utf8_validate(title, -1, NULL)) {
+        char *safe = g_utf8_make_valid(title, -1);
+        g_free(title);
+        title = safe;
     }
     
     if (document_is_modified(doc)) {
@@ -600,7 +654,7 @@ update_window_title_for_tab(ViteTab *tab)
     } else if (!doc_path) {
         /* Check if this is the only tab */
         GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
-        if (g_list_length(tabs) == 1) {
+        if (g_list_length(tabs) == 1 && !vite_tab_is_loading(tab)) {
             /* Single untitled, unmodified tab -> Default Title */
             g_free(title);
             g_free(subtitle);
@@ -610,7 +664,7 @@ update_window_title_for_tab(ViteTab *tab)
         g_list_free(tabs);
     }
     
-    adw_window_title_set_title(win->window_title, title);
+    adw_window_title_set_title(win->window_title, title ? title : "Virtual Text Editor");
     adw_window_title_set_subtitle(win->window_title, subtitle);
     
     g_free(title);
@@ -1319,7 +1373,13 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     GtkWidget *parent = NULL;
     
+    /* Get the document before we destroy the page so we can free it */
+    Document *doc_to_free = NULL;
     if (page && GTK_IS_WIDGET(page)) {
+        GtkWidget *editor = get_editor_from_page(page);
+        if (EDITOR_IS_WIDGET(editor)) {
+            doc_to_free = editor_widget_get_document(EDITOR_WIDGET(editor));
+        }
         g_object_ref(page);
         parent = gtk_widget_get_parent(page);
     } else {
@@ -1340,6 +1400,11 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
     
     if (page) {
         g_object_unref(page);
+    }
+    
+    /* Free the document (this frees the piece table and releases mmap) */
+    if (doc_to_free) {
+        document_free(doc_to_free);
     }
     
     /* Close window if no tabs remain */
@@ -2544,7 +2609,20 @@ setup_window(GtkWindow *window)
     
     GtkWidget *title = adw_window_title_new("ViTE", NULL);
     win->window_title = ADW_WINDOW_TITLE(title);
-    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title);
+    
+    /* Header Spinner (initially hidden) */
+    win->header_spinner = gtk_spinner_new();
+    gtk_widget_set_visible(win->header_spinner, FALSE);
+    
+    /* Create a box to hold Spinner + Title centered */
+    GtkWidget *title_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign(title_box, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(title_box, GTK_ALIGN_CENTER);
+    
+    gtk_box_append(GTK_BOX(title_box), win->header_spinner);
+    gtk_box_append(GTK_BOX(title_box), title);
+    
+    adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title_box);
     
     GSimpleAction *pref_act = g_simple_action_new("preferences", NULL);
     g_signal_connect(pref_act, "activate", G_CALLBACK(on_preferences_action), win);
@@ -2558,6 +2636,14 @@ setup_window(GtkWindow *window)
     g_signal_connect(replace_act, "activate", G_CALLBACK(on_replace_action), win);
     g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(replace_act));
     
+    GSimpleAction *save_act = g_simple_action_new("save", NULL);
+    g_signal_connect(save_act, "activate", G_CALLBACK(on_save_action), win);
+    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(save_act));
+    
+    GSimpleAction *save_as_act = g_simple_action_new("save-as", NULL);
+    g_signal_connect(save_as_act, "activate", G_CALLBACK(on_save_as_action), win);
+    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(save_as_act));
+    
     /* Shortcuts */
     GtkShortcutController *shortcuts = GTK_SHORTCUT_CONTROLLER(gtk_shortcut_controller_new());
     gtk_shortcut_controller_set_scope(shortcuts, GTK_SHORTCUT_SCOPE_GLOBAL);
@@ -2567,6 +2653,12 @@ setup_window(GtkWindow *window)
 
     GtkShortcut *repl_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_h, GDK_CONTROL_MASK), gtk_named_action_new("win.replace"));
     gtk_shortcut_controller_add_shortcut(shortcuts, repl_sc);
+    
+    GtkShortcut *save_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_s, GDK_CONTROL_MASK), gtk_named_action_new("win.save"));
+    gtk_shortcut_controller_add_shortcut(shortcuts, save_sc);
+    
+    GtkShortcut *save_as_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_s, GDK_CONTROL_MASK | GDK_SHIFT_MASK), gtk_named_action_new("win.save-as"));
+    gtk_shortcut_controller_add_shortcut(shortcuts, save_as_sc);
     
     gtk_widget_add_controller(GTK_WIDGET(window), GTK_EVENT_CONTROLLER(shortcuts));
     
@@ -2651,6 +2743,8 @@ setup_window(GtkWindow *window)
     gtk_widget_set_tooltip_text(btn_new, "New Tab");
     g_signal_connect(btn_new, "clicked", G_CALLBACK(on_new_tab_clicked_header), window);
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), btn_new);
+    
+    win->loading_count = 0;
     
     /* Main Menu */
     GMenu *main_menu = g_menu_new();
@@ -2774,6 +2868,9 @@ setup_window(GtkWindow *window)
     g_signal_connect(win->tab_bar, "tab-dropped", G_CALLBACK(on_tab_dropped), win);
     g_signal_connect(tabs_popover, "map", G_CALLBACK(update_open_tabs_list), tabs_list);
     
+    /* Monitor tab bar visibility to update header spinner */
+    g_signal_connect(win->tab_bar, "notify::visible", G_CALLBACK(on_tab_bar_visible_changed), win);
+    
     /* Main Content Area (outside titlebar) */
     GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_window_set_child(window, main_box);
@@ -2829,6 +2926,7 @@ typedef struct {
     ViteTab *tab;
     ViteTabBar *tab_bar; /* Weak Ref */
     GtkWidget *header_progress; /* Weak Ref */
+    GtkWidget *header_spinner; /* Weak Ref */
     char *filename;
 } LoadContext;
 
@@ -2931,6 +3029,24 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
          gtk_widget_set_visible(ctx->header_progress, FALSE);
          g_object_remove_weak_pointer(G_OBJECT(ctx->header_progress), (gpointer *)&ctx->header_progress);
          ctx->header_progress = NULL;
+    }
+
+    if (ctx->header_spinner) {
+         /* Just remove weak pointer, logic handled by window counter */
+         g_object_remove_weak_pointer(G_OBJECT(ctx->header_spinner), (gpointer *)&ctx->header_spinner);
+         ctx->header_spinner = NULL;
+    }
+    
+    /* ctx->tab_bar is weak ref. */
+    if (ctx->tab_bar) {
+        GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(ctx->tab_bar));
+        if (root) {
+            ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
+            if (win && win->loading_count > 0) {
+                win->loading_count--;
+                update_header_spinner(win);
+            }
+        }
     }
     
     if (ctx->tab) {
@@ -3112,27 +3228,26 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
     }
 
     /* Setup Async Load */
+    /* Setup Async Load */
     vite_tab_set_loading(tab_to_use, TRUE);
     if (EDITOR_IS_WIDGET(editor)) {
-        gtk_widget_set_sensitive(editor, FALSE);
+         gtk_widget_set_sensitive(editor, FALSE);
     }
-    if (target_window->header_progress) {
-        GList *tabs = vite_tab_bar_get_tabs(target_window->tab_bar);
-        guint n_tabs = g_list_length(tabs);
-        g_list_free(tabs);
-        
-        if (n_tabs <= 1) {
-            gtk_widget_set_visible(target_window->header_progress, TRUE);
-            gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(target_window->header_progress), 0.0);
-        } else {
-            gtk_widget_set_visible(target_window->header_progress, FALSE);
-        }
-    }
+    
+    target_window->loading_count++;
+    update_header_spinner(target_window);
+    
+    /* Force title update now that loading state is active (prevent "Virtual Text Editor" override) */
+    update_window_title_for_tab(tab_to_use);
     
     LoadContext *ctx = g_new0(LoadContext, 1);
     ctx->tab = tab_to_use;
     ctx->tab_bar = target_window->tab_bar;
-    ctx->header_progress = target_window->header_progress; 
+    /* We don't need header_progress weak ref anymore if we just use window logic, 
+       BUT on_load_progress uses it. Let's keep it for progress bar, 
+       but for Spinner we use window logic. */
+    ctx->header_progress = target_window->header_progress;
+    ctx->header_spinner = target_window->header_spinner; /* Still keep weak ref for safety in callback? */
     ctx->filename = g_strdup(path);
     
     /* Weak references for safety */
@@ -3142,6 +3257,9 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
     }
     if (ctx->header_progress) {
         g_object_add_weak_pointer(G_OBJECT(ctx->header_progress), (gpointer *)&ctx->header_progress);
+    }
+    if (ctx->header_spinner) {
+        g_object_add_weak_pointer(G_OBJECT(ctx->header_spinner), (gpointer *)&ctx->header_spinner);
     }
     
     document_set_progress_callback(doc, on_load_progress, ctx);
@@ -3273,5 +3391,132 @@ static void on_replace_action(GSimpleAction *action, GVariant *parameter, gpoint
         
         /* Show replace bar, focus depends on whether we had selection */
         vite_find_replace_bar_show_replace(VITE_FIND_REPLACE_BAR(bar), has_selection);
+    }
+}
+
+/* ============================================================================
+ * Save / Save As Actions
+ * ============================================================================ */
+
+static void
+on_save_as_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    
+    GFile *file = gtk_file_dialog_save_finish(dialog, result, NULL);
+    if (file) {
+        char *path = g_file_get_path(file);
+        if (path) {
+            /* Get the active editor's document */
+            GtkWidget *editor = get_active_editor(win);
+            if (EDITOR_IS_WIDGET(editor)) {
+                Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+                
+                GError *error = NULL;
+                if (document_save_as(doc, path, &error)) {
+                    /* Success - Update tab title */
+                    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+                    if (tab) {
+                        char *basename = g_file_get_basename(file);
+                        vite_tab_set_title(tab, basename);
+                        g_free(basename);
+                        
+                        /* Store original title for content-based naming */
+                        g_object_set_data_full(G_OBJECT(tab), "original_title",
+                                               g_file_get_basename(file), g_free);
+                        
+                        update_window_title_for_tab(tab);
+                    }
+                    
+                    /* Add to recent files */
+                    char *uri = g_file_get_uri(file);
+                    if (uri) {
+                        add_to_local_recents(uri);
+                        g_free(uri);
+                    }
+                } else {
+                    g_warning("Save failed: %s", error ? error->message : "Unknown error");
+                    g_clear_error(&error);
+                }
+            }
+            g_free(path);
+        }
+        g_object_unref(file);
+    }
+}
+
+static void
+on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win) return;
+    
+    GtkWidget *editor = get_active_editor(win);
+    if (!EDITOR_IS_WIDGET(editor)) return;
+    
+    Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+    const char *current_path = document_get_file_path(doc);
+    
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, "Save As");
+    
+    /* Set initial file/folder if document has path */
+    if (current_path) {
+        GFile *file = g_file_new_for_path(current_path);
+        GFile *parent = g_file_get_parent(file);
+        if (parent) {
+            gtk_file_dialog_set_initial_folder(dialog, parent);
+            g_object_unref(parent);
+        }
+        char *basename = g_file_get_basename(file);
+        if (basename) {
+            gtk_file_dialog_set_initial_name(dialog, basename);
+            g_free(basename);
+        }
+        g_object_unref(file);
+    } else {
+        /* Suggest a name based on tab title */
+        ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+        if (tab) {
+            const char *title = vite_tab_get_title(tab);
+            if (title && *title) {
+                gtk_file_dialog_set_initial_name(dialog, title);
+            }
+        }
+    }
+    
+    gtk_file_dialog_save(dialog, win->window, NULL,
+                         (GAsyncReadyCallback)on_save_as_dialog_response, win);
+}
+
+static void
+on_save_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win) return;
+    
+    GtkWidget *editor = get_active_editor(win);
+    if (!EDITOR_IS_WIDGET(editor)) return;
+    
+    Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+    const char *path = document_get_file_path(doc);
+    
+    if (!path) {
+        /* No path - trigger Save As */
+        on_save_as_action(action, parameter, user_data);
+        return;
+    }
+    
+    /* Save to existing path */
+    GError *error = NULL;
+    if (!document_save(doc, &error)) {
+        g_warning("Save failed: %s", error ? error->message : "Unknown error");
+        g_clear_error(&error);
+    } else {
+        /* Update window title (removes modified indicator) */
+        ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+        if (tab) {
+            update_window_title_for_tab(tab);
+        }
     }
 }

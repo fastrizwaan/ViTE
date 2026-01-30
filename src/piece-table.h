@@ -64,6 +64,7 @@ typedef struct {
     gboolean is_mmapped;
     char *mmap_base;
     size_t mmap_size;
+    char *temp_path;         /* Temp file path for UTF-16 conversion (NULL if not used) */
     
     uint64_t change_count;
     
@@ -124,6 +125,22 @@ PieceTableReplaceTask *piece_table_replace_async_start(PieceTable *pt, int fd, s
 gboolean piece_table_replace_async_step(PieceTableReplaceTask *task, gint64 budget_us, double *progress_out);
 void piece_table_replace_async_finalize(PieceTableReplaceTask *task);
 void piece_table_replace_async_cancel(PieceTableReplaceTask *task);
+
+/* ============================================================================
+ * Streaming Save API - Zero-RAM file saving
+ * Uses piece table iterator for zero-copy writes to disk
+ * ============================================================================ */
+
+/* Synchronous streaming save - writes piece table content to fd without RAM allocation */
+gboolean piece_table_save_to_fd(PieceTable *pt, int fd, GError **error);
+
+/* Async save task for huge files with progress reporting */
+typedef struct _PieceTableSaveTask PieceTableSaveTask;
+
+PieceTableSaveTask *piece_table_save_async_start(PieceTable *pt, int fd);
+gboolean piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *progress_out);
+void piece_table_save_async_finalize(PieceTableSaveTask *task);
+void piece_table_save_async_cancel(PieceTableSaveTask *task);
 
 /* Insert content from an external file descriptor (Zero-RAM) */
 void piece_table_insert_from_fd_range(PieceTable *pt, size_t offset, int fd, size_t file_offset, size_t len);

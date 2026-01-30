@@ -3131,3 +3131,209 @@ document_change_case_streaming_cancel(StreamingChangeCaseTask *task)
     streaming_change_case_task_free(task);
 }
 
+/* ============================================================================
+ * Save Implementation - Atomic file saving with temp file + rename
+ * ============================================================================ */
+
+gboolean
+document_save_as(Document *doc, const char *path, GError **error)
+{
+    if (!doc) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "NULL document");
+        return FALSE;
+    }
+    
+    if (!path || *path == '\0') {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Invalid path");
+        return FALSE;
+    }
+    
+    /* Create temp file in same directory as target for atomic rename */
+    char *dir = g_path_get_dirname(path);
+    char *temp_path = g_strdup_printf("%s/.vite_save_XXXXXX", dir);
+    g_free(dir);
+    
+    int fd = mkstemp(temp_path);
+    if (fd < 0) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Failed to create temp file: %s", strerror(errno));
+        g_free(temp_path);
+        return FALSE;
+    }
+    
+    /* Stream content to temp file */
+    if (!piece_table_save_to_fd(doc->pt, fd, error)) {
+        close(fd);
+        unlink(temp_path);
+        g_free(temp_path);
+        return FALSE;
+    }
+    
+    /* Ensure data is on disk before rename */
+    if (fsync(fd) < 0) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "fsync failed: %s", strerror(errno));
+        close(fd);
+        unlink(temp_path);
+        g_free(temp_path);
+        return FALSE;
+    }
+    
+    close(fd);
+    
+    /* Atomic rename */
+    if (rename(temp_path, path) < 0) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Rename failed: %s", strerror(errno));
+        unlink(temp_path);
+        g_free(temp_path);
+        return FALSE;
+    }
+    
+    g_free(temp_path);
+    
+    /* Update document state */
+    document_set_file_path(doc, path);
+    document_mark_saved(doc);
+    
+    return TRUE;
+}
+
+gboolean
+document_save(Document *doc, GError **error)
+{
+    if (!doc) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "NULL document");
+        return FALSE;
+    }
+    
+    const char *current_path = document_get_file_path(doc);
+    if (!current_path) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                    "Document has no file path. Use Save As.");
+        return FALSE;
+    }
+    
+    /* IMPORTANT: Make a copy of the path because document_save_as() will
+     * call document_set_file_path() which frees doc->file_path.
+     * If we pass doc->file_path directly, it becomes a use-after-free. */
+    char *path_copy = g_strdup(current_path);
+    gboolean result = document_save_as(doc, path_copy, error);
+    g_free(path_copy);
+    
+    return result;
+}
+
+/* Async Save Task */
+struct _DocumentSaveTask {
+    Document *doc;
+    char *path;
+    char *temp_path;
+    int fd;
+    PieceTableSaveTask *pt_task;
+    gboolean cancelled;
+    GError *error;
+};
+
+DocumentSaveTask *
+document_save_async_start(Document *doc, const char *path)
+{
+    if (!doc || !path) return NULL;
+    
+    /* Create temp file */
+    char *dir = g_path_get_dirname(path);
+    char *temp_path = g_strdup_printf("%s/.vite_save_XXXXXX", dir);
+    g_free(dir);
+    
+    int fd = mkstemp(temp_path);
+    if (fd < 0) {
+        g_warning("Failed to create temp file: %s", strerror(errno));
+        g_free(temp_path);
+        return NULL;
+    }
+    
+    DocumentSaveTask *task = g_new0(DocumentSaveTask, 1);
+    task->doc = doc;
+    task->path = g_strdup(path);
+    task->temp_path = temp_path;
+    task->fd = fd;
+    task->pt_task = piece_table_save_async_start(doc->pt, fd);
+    task->cancelled = FALSE;
+    task->error = NULL;
+    
+    if (!task->pt_task) {
+        close(fd);
+        unlink(temp_path);
+        g_free(temp_path);
+        g_free(task->path);
+        g_free(task);
+        return NULL;
+    }
+    
+    return task;
+}
+
+gboolean
+document_save_async_step(DocumentSaveTask *task, gint64 budget_us, double *progress_out)
+{
+    if (!task || task->cancelled) {
+        if (progress_out) *progress_out = 1.0;
+        return TRUE;
+    }
+    
+    return piece_table_save_async_step(task->pt_task, budget_us, progress_out);
+}
+
+void
+document_save_async_finish(DocumentSaveTask *task, GError **error)
+{
+    if (!task) return;
+    
+    if (task->cancelled) {
+        /* Clean up temp file */
+        if (task->fd >= 0) close(task->fd);
+        if (task->temp_path) {
+            unlink(task->temp_path);
+            g_free(task->temp_path);
+        }
+        g_free(task->path);
+        if (task->pt_task) piece_table_save_async_cancel(task->pt_task);
+        g_free(task);
+        return;
+    }
+    
+    /* Finalize stream */
+    piece_table_save_async_finalize(task->pt_task);
+    
+    /* fsync and close */
+    if (task->fd >= 0) {
+        fsync(task->fd);
+        close(task->fd);
+    }
+    
+    /* Atomic rename */
+    if (rename(task->temp_path, task->path) < 0) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "Rename failed: %s", strerror(errno));
+        unlink(task->temp_path);
+    } else {
+        /* Success - update document state */
+        document_set_file_path(task->doc, task->path);
+        document_mark_saved(task->doc);
+    }
+    
+    g_free(task->temp_path);
+    g_free(task->path);
+    g_free(task);
+}
+
+void
+document_save_async_cancel(DocumentSaveTask *task)
+{
+    if (task) {
+        task->cancelled = TRUE;
+        if (task->pt_task) {
+            piece_table_save_async_cancel(task->pt_task);
+        }
+    }
+}

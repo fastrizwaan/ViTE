@@ -209,8 +209,14 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         char *text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024);
         // fprintf(stderr, "[DEBUG] snapshot loop: len=%zu\n", len);
 
+        /* Null check - document_get_line_truncated can return NULL */
+        if (!text) {
+            text = g_strdup("");
+            len = 0;
+        }
+        
         /* UTF-8 Validation and Cleanup */
-        if (!g_utf8_validate(text, len, NULL)) {
+        if (len > 0 && !g_utf8_validate(text, len, NULL)) {
              char *safe_text = g_utf8_make_valid(text, len);
              g_free(text);
              text = safe_text;

@@ -35,6 +35,25 @@ FileEncoding document_get_encoding(Document *doc);
 void document_add_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data);
 void document_remove_modification_callback(Document *doc, void (*func)(Document *doc, gboolean modified, void *user_data), void *user_data);
 
+/* ============================================================================
+ * Save API - File saving with atomic writes
+ * ============================================================================ */
+
+/* Save document to its current file path (returns FALSE if no path set) */
+gboolean document_save(Document *doc, GError **error);
+
+/* Save document to a new path (Save As) - Updates document's file_path on success */
+gboolean document_save_as(Document *doc, const char *path, GError **error);
+
+/* Async save with progress for huge files (>100MB) */
+typedef struct _DocumentSaveTask DocumentSaveTask;
+typedef void (*DocumentSaveProgressCallback)(double progress, gboolean finished, gpointer user_data);
+
+DocumentSaveTask *document_save_async_start(Document *doc, const char *path);
+gboolean document_save_async_step(DocumentSaveTask *task, gint64 budget_us, double *progress_out);
+void document_save_async_finish(DocumentSaveTask *task, GError **error);
+void document_save_async_cancel(DocumentSaveTask *task);
+
 /* Content Observation & Partial Invalidation */
 typedef void (*DocumentContentCallback)(Document *doc, void *user_data);
 /* start_line: where change began. line_delta: change in total lines (can be negative). */

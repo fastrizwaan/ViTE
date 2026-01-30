@@ -577,28 +577,148 @@ piece_table_new(const char *filename)
         detect_encoding(pt->orig_data, pt->orig_size, &pt->encoding, &pt->has_bom, &bom_len);
         
         if (pt->encoding != ENCODING_UTF8) {
+            /* Disk-backed UTF-16 to UTF-8 conversion for zero-RAM storage */
             const char *from_codeset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
-            gsize bytes_read, bytes_written;
-            GError *error = NULL;
-            char *utf8_data = g_convert(pt->orig_data + bom_len, pt->orig_size - bom_len, "UTF-8", from_codeset, &bytes_read, &bytes_written, &error);
-            if (utf8_data) {
-                pt->orig_data = utf8_data;
-                pt->orig_size = bytes_written;
-                pt->is_mmapped = FALSE;
+            
+            /* Create temp file for converted UTF-8 data */
+            char temp_template[] = "/tmp/vite-utf8-XXXXXX";
+            int temp_fd = mkstemp(temp_template);
+            if (temp_fd < 0) {
+                g_warning("Failed to create temp file for UTF-16 conversion: %s", strerror(errno));
+                /* Fall back to RAM-based conversion */
+                goto ram_fallback;
+            }
+            
+            pt->temp_path = g_strdup(temp_template);
+            
+            /* Stream-convert chunks from UTF-16 to UTF-8 */
+            const char *src = pt->orig_data + bom_len;
+            size_t src_remaining = pt->orig_size - bom_len;
+            size_t chunk_size = 64 * 1024; /* 64KB chunks (must be even for UTF-16) */
+            size_t total_written = 0;
+            
+            /* UTF-8 pending bytes buffer for incomplete sequences */
+            char pending[6];
+            size_t pending_len = 0;
+            
+            while (src_remaining > 0) {
+                size_t to_convert = (src_remaining < chunk_size) ? src_remaining : chunk_size;
+                /* For UTF-16, ensure we don't split a surrogate pair (4 bytes) */
+                if (to_convert < src_remaining && (to_convert % 2) != 0) {
+                    to_convert--;
+                }
+                
+                gsize bytes_read, bytes_written;
+                GError *conv_error = NULL;
+                char *utf8_chunk = g_convert(src, to_convert, "UTF-8", from_codeset,
+                                             &bytes_read, &bytes_written, &conv_error);
+                
+                if (!utf8_chunk) {
+                    g_warning("UTF-16 conversion failed: %s", conv_error ? conv_error->message : "Unknown");
+                    g_clear_error(&conv_error);
+                    close(temp_fd);
+                    unlink(pt->temp_path);
+                    g_free(pt->temp_path);
+                    pt->temp_path = NULL;
+                    goto ram_fallback;
+                }
+                
+                /* Write to temp file */
+                ssize_t written = write(temp_fd, utf8_chunk, bytes_written);
+                g_free(utf8_chunk);
+                
+                if (written != (ssize_t)bytes_written) {
+                    g_warning("Failed to write to temp file: %s", strerror(errno));
+                    close(temp_fd);
+                    unlink(pt->temp_path);
+                    g_free(pt->temp_path);
+                    pt->temp_path = NULL;
+                    goto ram_fallback;
+                }
+                
+                total_written += bytes_written;
+                src += bytes_read;
+                src_remaining -= bytes_read;
+            }
+            
+            /* Sync and get file size */
+            fsync(temp_fd);
+            
+            /* Munmap original UTF-16 file - no longer needed */
+            if (pt->mmap_base && pt->mmap_size > 0) {
+                munmap(pt->mmap_base, pt->mmap_size);
+            }
+            pt->mmap_base = NULL;
+            pt->mmap_size = 0;
+            
+            /* mmap the temp file */
+            if (total_written > 0) {
+                char *utf8_mmap = mmap(NULL, total_written, PROT_READ, MAP_PRIVATE, temp_fd, 0);
+                close(temp_fd);
+                
+                if (utf8_mmap == MAP_FAILED) {
+                    g_warning("Failed to mmap temp file: %s", strerror(errno));
+                    unlink(pt->temp_path);
+                    g_free(pt->temp_path);
+                    pt->temp_path = NULL;
+                    pt->orig_data = g_strdup("");
+                    pt->orig_size = 0;
+                    pt->is_mmapped = FALSE;
+                } else {
+                    pt->mmap_base = utf8_mmap;
+                    pt->mmap_size = total_written;
+                    pt->orig_data = utf8_mmap;
+                    pt->orig_size = total_written;
+                    pt->is_mmapped = TRUE;
+                }
             } else {
-                g_warning("Failed to convert file: %s", error->message);
-                g_clear_error(&error);
-                pt->orig_data = g_strdup("");
+                close(temp_fd);
+                pt->orig_data = NULL;
                 pt->orig_size = 0;
                 pt->is_mmapped = FALSE;
             }
         } else if (bom_len > 0) {
+            /* UTF-8 with BOM - just skip the BOM bytes */
             pt->orig_data += bom_len;
             pt->orig_size -= bom_len;
         }
+        /* UTF-8 without BOM: no changes needed, use mmap directly */
         
         detect_newline_style(pt->orig_data, pt->orig_size, &pt->newline_style);
     }
+
+    /* Skip to tree building - only UTF-16 conversion needs ram_fallback */
+    goto build_tree;
+        
+ram_fallback:
+    /* RAM-based fallback for when temp file fails (UTF-16 only) */
+    if (pt->encoding != ENCODING_UTF8) {
+        const char *from_codeset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
+        gsize bytes_read, bytes_written;
+        GError *error = NULL;
+        char *utf8_data = g_convert(pt->orig_data + bom_len, pt->orig_size - bom_len, 
+                                     "UTF-8", from_codeset, &bytes_read, &bytes_written, &error);
+        if (utf8_data) {
+            /* Munmap original since we're using RAM now */
+            if (pt->mmap_base && pt->mmap_size > 0) {
+                munmap(pt->mmap_base, pt->mmap_size);
+            }
+            pt->mmap_base = NULL;
+            pt->mmap_size = 0;
+            pt->orig_data = utf8_data;
+            pt->orig_size = bytes_written;
+            pt->is_mmapped = FALSE;
+        } else {
+            g_warning("Failed to convert file: %s", error->message);
+            g_clear_error(&error);
+            pt->orig_data = g_strdup("");
+            pt->orig_size = 0;
+            pt->is_mmapped = FALSE;
+        }
+        detect_newline_style(pt->orig_data, pt->orig_size, &pt->newline_style);
+    }
+        
+build_tree:
 
     pt->add_buffer = disk_buffer_new();
     pt->external_sources = g_ptr_array_new_full(0, g_free); /* We need custom free func, see piece_table_free */
@@ -646,6 +766,13 @@ piece_table_free(PieceTable *pt)
     } else {
         g_free(pt->orig_data);
     }
+    
+    /* Clean up temp file used for UTF-16 conversion */
+    if (pt->temp_path) {
+        unlink(pt->temp_path);
+        g_free(pt->temp_path);
+    }
+    
     disk_buffer_free(pt->add_buffer);
     
     /* Clean up external sources */
@@ -1967,6 +2094,7 @@ typedef struct {
     gboolean has_bom;
     char *mmap_base;
     size_t mmap_size;
+    char *temp_path;  /* Temp file for UTF-16 conversion */
     PieceNode *root;
     PieceNode **temp_nodes; /* Used during build */
     size_t node_count;
@@ -1988,6 +2116,12 @@ load_result_free(LoadResult *res)
     }
     
     if (res->temp_nodes) free(res->temp_nodes);
+    
+    /* Clean up temp file if present */
+    if (res->temp_path) {
+        unlink(res->temp_path);
+        g_free(res->temp_path);
+    }
     
     if (res->is_mmapped && res->mmap_base && res->mmap_size > 0) {
          munmap(res->mmap_base, res->mmap_size);
@@ -2022,6 +2156,10 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
 {
     PieceTableLoadData *data = task_data;
     const char *filename = data->filename;
+    
+    /* DEBUG: Timing start */
+    GTimer *timer = g_timer_new();
+    g_print("[LOAD DEBUG] Starting load: %s\n", filename);
     
     int fd = open(filename, O_RDONLY);
     if (fd == -1) {
@@ -2063,32 +2201,145 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
     if (res->data && res->size > 0) {
         detect_encoding(res->data, res->size, &res->encoding, &res->has_bom, &bom_len);
         
+        /* DEBUG: After encoding detection */
+        const char *enc_name = (res->encoding == ENCODING_UTF8) ? "UTF-8" : 
+                               (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
+        g_print("[LOAD DEBUG] %.3fs - Detected encoding: %s, Size: %.2f MB\n", 
+                g_timer_elapsed(timer, NULL), enc_name, (double)res->size / (1024*1024));
+        
         if (g_cancellable_is_cancelled(cancellable)) {
             load_result_free(res);
             g_task_return_error_if_cancelled(task);
+            g_timer_destroy(timer);
             return;
         }
 
         if (res->encoding != ENCODING_UTF8) {
+            /* Disk-backed UTF-16 to UTF-8 conversion for zero-RAM storage */
             const char *from_codeset = (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
-            gsize bytes_read, bytes_written;
-            GError *error = NULL;
-            char *utf8_data = g_convert(res->data + bom_len, res->size - bom_len, "UTF-8", from_codeset, &bytes_read, &bytes_written, &error);
             
-            if (utf8_data) {
-                if (res->is_mmapped) munmap(res->mmap_base, res->mmap_size);
+            /* Create temp file for converted UTF-8 data */
+            char temp_template[] = "/tmp/vite-utf8-XXXXXX";
+            int temp_fd = mkstemp(temp_template);
+            if (temp_fd < 0) {
+                /* Fall back to RAM-based conversion */
+                goto ram_fallback;
+            }
+            
+            res->temp_path = g_strdup(temp_template);
+            
+            /* Stream-convert chunks from UTF-16 to UTF-8 */
+            const char *src = res->data + bom_len;
+            size_t src_remaining = res->size - bom_len;
+            size_t conv_chunk_size = 64 * 1024; /* 64KB chunks */
+            size_t total_written = 0;
+            
+            while (src_remaining > 0) {
+                if (g_cancellable_is_cancelled(cancellable)) {
+                    close(temp_fd);
+                    load_result_free(res);
+                    g_task_return_error_if_cancelled(task);
+                    return;
+                }
+                
+                size_t to_convert = (src_remaining < conv_chunk_size) ? src_remaining : conv_chunk_size;
+                /* For UTF-16, ensure we don't split a code unit */
+                if (to_convert < src_remaining && (to_convert % 2) != 0) {
+                    to_convert--;
+                }
+                
+                gsize bytes_read, bytes_written;
+                GError *conv_error = NULL;
+                char *utf8_chunk = g_convert(src, to_convert, "UTF-8", from_codeset,
+                                             &bytes_read, &bytes_written, &conv_error);
+                
+                if (!utf8_chunk) {
+                    close(temp_fd);
+                    unlink(res->temp_path);
+                    g_free(res->temp_path);
+                    res->temp_path = NULL;
+                    g_clear_error(&conv_error);
+                    goto ram_fallback;
+                }
+                
+                /* Write to temp file */
+                ssize_t written = write(temp_fd, utf8_chunk, bytes_written);
+                g_free(utf8_chunk);
+                
+                if (written != (ssize_t)bytes_written) {
+                    close(temp_fd);
+                    unlink(res->temp_path);
+                    g_free(res->temp_path);
+                    res->temp_path = NULL;
+                    goto ram_fallback;
+                }
+                
+                total_written += bytes_written;
+                src += bytes_read;
+                src_remaining -= bytes_read;
+            }
+            
+            fsync(temp_fd);
+            
+            /* Munmap original UTF-16 file */
+            if (res->mmap_base && res->mmap_size > 0) {
+                munmap(res->mmap_base, res->mmap_size);
+            }
+            
+            /* mmap the temp file */
+            if (total_written > 0) {
+                char *utf8_mmap = mmap(NULL, total_written, PROT_READ, MAP_PRIVATE, temp_fd, 0);
+                close(temp_fd);
+                
+                if (utf8_mmap == MAP_FAILED) {
+                    unlink(res->temp_path);
+                    g_free(res->temp_path);
+                    res->temp_path = NULL;
+                    res->mmap_base = NULL;
+                    res->mmap_size = 0;
+                    res->data = g_strdup("");
+                    res->size = 0;
+                    res->is_mmapped = FALSE;
+                } else {
+                    res->mmap_base = utf8_mmap;
+                    res->mmap_size = total_written;
+                    res->data = utf8_mmap;
+                    res->size = total_written;
+                    res->is_mmapped = TRUE;
+                }
+            } else {
+                close(temp_fd);
                 res->mmap_base = NULL;
                 res->mmap_size = 0;
+                res->data = NULL;
+                res->size = 0;
                 res->is_mmapped = FALSE;
-                
-                res->data = utf8_data;
-                res->size = bytes_written;
-            } else {
-                 load_result_free(res);
-                 g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "Encoding conversion failed: %s", error->message);
-                 g_error_free(error);
-                 return;
             }
+            goto conversion_done;
+            
+ram_fallback:
+            /* RAM-based fallback */
+            {
+                gsize bytes_read, bytes_written;
+                GError *error = NULL;
+                char *utf8_data = g_convert(res->data + bom_len, res->size - bom_len, "UTF-8", from_codeset, &bytes_read, &bytes_written, &error);
+                
+                if (utf8_data) {
+                    if (res->is_mmapped) munmap(res->mmap_base, res->mmap_size);
+                    res->mmap_base = NULL;
+                    res->mmap_size = 0;
+                    res->is_mmapped = FALSE;
+                    res->data = utf8_data;
+                    res->size = bytes_written;
+                } else {
+                    load_result_free(res);
+                    g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "Encoding conversion failed: %s", error->message);
+                    g_error_free(error);
+                    return;
+                }
+            }
+conversion_done:
+            (void)0; /* Empty statement for label */
         } else if (bom_len > 0) {
             res->data += bom_len;
             res->size -= bom_len;
@@ -2154,6 +2405,11 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
         res->node_count = 0;
     }
     
+    /* DEBUG: Final timing */
+    g_print("[LOAD DEBUG] %.3fs - COMPLETE: %s (%.2f MB)\n", 
+            g_timer_elapsed(timer, NULL), filename, (double)res->size / (1024*1024));
+    g_timer_destroy(timer);
+    
     g_task_return_pointer(task, res, (GDestroyNotify)load_result_free);
 }
 
@@ -2197,6 +2453,11 @@ piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error)
     } else if (pt->orig_data) {
         g_free(pt->orig_data);
     }
+    if (pt->temp_path) {
+        unlink(pt->temp_path);
+        g_free(pt->temp_path);
+        pt->temp_path = NULL;
+    }
     free_tree(pt->root);
     
     /* Apply new state */
@@ -2209,11 +2470,13 @@ piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error)
     pt->encoding = lr->encoding;
     pt->newline_style = lr->newline_style;
     pt->has_bom = lr->has_bom;
+    pt->temp_path = lr->temp_path;  /* Transfer ownership of temp file */
     
     /* Clear from LR so they aren't freed */
     lr->mmap_base = NULL;
     lr->data = NULL;
     lr->root = NULL;
+    lr->temp_path = NULL;  /* Don't let load_result_free delete it */
     
     /* Reset add buffer */
     disk_buffer_free(pt->add_buffer);
@@ -2447,4 +2710,355 @@ FileEncoding
 piece_table_get_encoding(PieceTable *pt)
 {
     return pt ? pt->encoding : ENCODING_UTF8;
+}
+
+/* ============================================================================
+ * Streaming Save Implementation - Zero-RAM file saving
+ * ============================================================================ */
+
+gboolean
+piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
+{
+    if (!pt) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "NULL piece table");
+        return FALSE;
+    }
+    
+    PieceTableIter iter;
+    piece_table_iter_init(pt, &iter);
+    
+    gboolean need_crlf = (pt->newline_style == NEWLINE_CRLF);
+    gboolean need_utf16 = (pt->encoding == ENCODING_UTF16LE || pt->encoding == ENCODING_UTF16BE);
+    const char *target_charset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : 
+                                  (pt->encoding == ENCODING_UTF16BE) ? "UTF-16BE" : "UTF-8";
+    
+    /* Write BOM - for UTF-16 files, always write BOM; for UTF-8 only if original had it */
+    if (need_utf16 || pt->has_bom) {
+        if (pt->encoding == ENCODING_UTF8 && pt->has_bom) {
+            const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+            if (write(fd, bom, 3) != 3) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to write BOM: %s", strerror(errno));
+                return FALSE;
+            }
+        } else if (pt->encoding == ENCODING_UTF16LE) {
+            const unsigned char bom[] = { 0xFF, 0xFE };
+            if (write(fd, bom, 2) != 2) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to write BOM: %s", strerror(errno));
+                return FALSE;
+            }
+        } else if (pt->encoding == ENCODING_UTF16BE) {
+            const unsigned char bom[] = { 0xFE, 0xFF };
+            if (write(fd, bom, 2) != 2) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to write BOM: %s", strerror(errno));
+                return FALSE;
+            }
+        }
+    }
+    
+    /* Helper to write data with retry on EINTR */
+    #define WRITE_ALL(fd, buf, len) do { \
+        const char *_p = (buf); \
+        size_t _rem = (len); \
+        while (_rem > 0) { \
+            ssize_t _w = write((fd), _p, _rem); \
+            if (_w < 0) { \
+                if (errno == EINTR) continue; \
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Write failed: %s", strerror(errno)); \
+                return FALSE; \
+            } \
+            _p += _w; _rem -= _w; \
+        } \
+    } while(0)
+    
+    /* For UTF-16 conversion, we need to handle incomplete UTF-8 sequences at chunk boundaries.
+     * We use a small buffer to carry over incomplete bytes to the next chunk. */
+    char pending_bytes[6];  /* Max UTF-8 char is 4 bytes, but be safe */
+    size_t pending_len = 0;
+    
+    /* Stream chunks to file */
+    size_t chunk_len;
+    const char *chunk;
+    
+    while ((chunk = piece_table_iter_get_chunk(&iter, &chunk_len)) != NULL) {
+        if (chunk_len == 0) {
+            piece_table_iter_advance(&iter, 1);
+            continue;
+        }
+        
+        /* Combine pending bytes with current chunk */
+        char *combined = NULL;
+        const char *working_data = chunk;
+        size_t working_len = chunk_len;
+        
+        if (pending_len > 0) {
+            combined = g_malloc(pending_len + chunk_len);
+            memcpy(combined, pending_bytes, pending_len);
+            memcpy(combined + pending_len, chunk, chunk_len);
+            working_data = combined;
+            working_len = pending_len + chunk_len;
+            pending_len = 0;
+        }
+        
+        /* For UTF-16 conversion, find the last complete UTF-8 character */
+        size_t safe_len = working_len;
+        if (need_utf16) {
+            /* Check if the last few bytes form a complete UTF-8 sequence */
+            const char *p = working_data + working_len;
+            size_t trailing = 0;
+            
+            /* Scan backwards to find start of last UTF-8 character */
+            while (trailing < 4 && trailing < working_len) {
+                p--;
+                trailing++;
+                unsigned char c = (unsigned char)*p;
+                if ((c & 0x80) == 0) {
+                    /* ASCII - complete */
+                    trailing = 0;
+                    break;
+                } else if ((c & 0xC0) == 0xC0) {
+                    /* Start of multi-byte sequence - check if complete */
+                    size_t expected = 0;
+                    if ((c & 0xE0) == 0xC0) expected = 2;
+                    else if ((c & 0xF0) == 0xE0) expected = 3;
+                    else if ((c & 0xF8) == 0xF0) expected = 4;
+                    
+                    if (trailing < expected) {
+                        /* Incomplete sequence - save for next chunk */
+                        safe_len = working_len - trailing;
+                        memcpy(pending_bytes, working_data + safe_len, trailing);
+                        pending_len = trailing;
+                    } else {
+                        trailing = 0;  /* Complete */
+                    }
+                    break;
+                }
+                /* else continuation byte, keep scanning */
+            }
+        }
+        
+        /* Step 1: Handle CRLF conversion if needed (on UTF-8 data before encoding) */
+        char *crlf_data = NULL;
+        const char *data_to_encode = working_data;
+        size_t data_len = safe_len;
+        
+        if (need_crlf && safe_len > 0) {
+            /* Convert LF to CRLF */
+            GString *converted = g_string_sized_new(safe_len + 32);
+            const char *ptr = working_data;
+            const char *end = working_data + safe_len;
+            
+            while (ptr < end) {
+                if (*ptr == '\n' && (ptr == working_data || *(ptr - 1) != '\r')) {
+                    g_string_append(converted, "\r\n");
+                } else {
+                    g_string_append_c(converted, *ptr);
+                }
+                ptr++;
+            }
+            
+            crlf_data = g_string_free(converted, FALSE);
+            data_to_encode = crlf_data;
+            data_len = strlen(crlf_data);
+        }
+        
+        /* Step 2: Handle encoding conversion */
+        if (need_utf16 && data_len > 0) {
+            gsize bytes_written;
+            GError *conv_error = NULL;
+            char *utf16_data = g_convert(data_to_encode, data_len,
+                                          target_charset, "UTF-8",
+                                          NULL, &bytes_written, &conv_error);
+            g_free(crlf_data);
+            g_free(combined);
+            
+            if (!utf16_data) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                            "Encoding conversion failed: %s", 
+                            conv_error ? conv_error->message : "Unknown error");
+                g_clear_error(&conv_error);
+                return FALSE;
+            }
+            
+            WRITE_ALL(fd, utf16_data, bytes_written);
+            g_free(utf16_data);
+        } else if (data_len > 0) {
+            /* UTF-8: Direct write */
+            WRITE_ALL(fd, data_to_encode, data_len);
+            g_free(crlf_data);
+            g_free(combined);
+        } else {
+            g_free(crlf_data);
+            g_free(combined);
+        }
+        
+        piece_table_iter_advance(&iter, chunk_len);
+    }
+    
+    /* Handle any remaining pending bytes (should not happen with valid UTF-8) */
+    if (pending_len > 0) {
+        /* Invalid UTF-8 at end - write as-is for UTF-8, skip for UTF-16 */
+        if (!need_utf16) {
+            WRITE_ALL(fd, pending_bytes, pending_len);
+        }
+    }
+    
+    #undef WRITE_ALL
+    return TRUE;
+}
+
+/* Async Save Task */
+struct _PieceTableSaveTask {
+    PieceTable *pt;
+    int fd;
+    PieceTableIter iter;
+    size_t total_bytes;
+    size_t bytes_written;
+    gboolean need_crlf;
+    gboolean bom_written;
+    gboolean cancelled;
+    GError *error;
+};
+
+PieceTableSaveTask *
+piece_table_save_async_start(PieceTable *pt, int fd)
+{
+    if (!pt) return NULL;
+    
+    PieceTableSaveTask *task = g_new0(PieceTableSaveTask, 1);
+    task->pt = pt;
+    task->fd = fd;
+    task->total_bytes = piece_table_get_length(pt);
+    task->bytes_written = 0;
+    task->need_crlf = (pt->newline_style == NEWLINE_CRLF);
+    task->bom_written = !pt->has_bom; /* If no BOM needed, mark as written */
+    task->cancelled = FALSE;
+    task->error = NULL;
+    
+    piece_table_iter_init(pt, &task->iter);
+    
+    return task;
+}
+
+gboolean
+piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *progress_out)
+{
+    if (!task || task->cancelled) {
+        if (progress_out) *progress_out = 1.0;
+        return TRUE; /* Done */
+    }
+    
+    gint64 start_us = g_get_monotonic_time();
+    
+    /* Write BOM if needed */
+    if (!task->bom_written) {
+        if (task->pt->encoding == ENCODING_UTF8 && task->pt->has_bom) {
+            const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+            write(task->fd, bom, 3);
+        } else if (task->pt->encoding == ENCODING_UTF16LE) {
+            const unsigned char bom[] = { 0xFF, 0xFE };
+            write(task->fd, bom, 2);
+        } else if (task->pt->encoding == ENCODING_UTF16BE) {
+            const unsigned char bom[] = { 0xFE, 0xFF };
+            write(task->fd, bom, 2);
+        }
+        task->bom_written = TRUE;
+    }
+    
+    /* Process chunks within time budget */
+    size_t chunk_len;
+    const char *chunk;
+    
+    while ((chunk = piece_table_iter_get_chunk(&task->iter, &chunk_len)) != NULL) {
+        if (task->cancelled) break;
+        
+        /* Check time budget */
+        gint64 elapsed = g_get_monotonic_time() - start_us;
+        if (elapsed >= budget_us) break;
+        
+        if (chunk_len == 0) {
+            piece_table_iter_advance(&task->iter, 1);
+            continue;
+        }
+        
+        /* Write chunk */
+        if (task->need_crlf) {
+            /* Same CRLF conversion logic as sync version */
+            const char *ptr = chunk;
+            const char *end = chunk + chunk_len;
+            const char *segment_start = ptr;
+            
+            while (ptr < end) {
+                if (*ptr == '\n') {
+                    gboolean has_cr = (ptr > chunk && *(ptr - 1) == '\r');
+                    
+                    if (ptr > segment_start) {
+                        write(task->fd, segment_start, ptr - segment_start);
+                    }
+                    
+                    if (!has_cr) {
+                        write(task->fd, "\r\n", 2);
+                    } else {
+                        write(task->fd, "\n", 1);
+                    }
+                    
+                    segment_start = ptr + 1;
+                }
+                ptr++;
+            }
+            
+            if (segment_start < end) {
+                write(task->fd, segment_start, end - segment_start);
+            }
+        } else {
+            const char *to_write = chunk;
+            size_t remaining = chunk_len;
+            
+            while (remaining > 0) {
+                ssize_t written = write(task->fd, to_write, remaining);
+                if (written < 0) {
+                    if (errno == EINTR) continue;
+                    task->error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+                                              "Write failed: %s", strerror(errno));
+                    if (progress_out) *progress_out = 1.0;
+                    return TRUE; /* Done with error */
+                }
+                to_write += written;
+                remaining -= written;
+            }
+        }
+        
+        task->bytes_written += chunk_len;
+        piece_table_iter_advance(&task->iter, chunk_len);
+    }
+    
+    if (progress_out) {
+        *progress_out = task->total_bytes > 0 
+                        ? (double)task->bytes_written / task->total_bytes 
+                        : 1.0;
+    }
+    
+    /* Check if done */
+    return (piece_table_iter_get_chunk(&task->iter, NULL) == NULL);
+}
+
+void
+piece_table_save_async_finalize(PieceTableSaveTask *task)
+{
+    if (!task) return;
+    
+    /* fsync to ensure data is on disk */
+    fsync(task->fd);
+    
+    if (task->error) {
+        g_error_free(task->error);
+    }
+    g_free(task);
+}
+
+void
+piece_table_save_async_cancel(PieceTableSaveTask *task)
+{
+    if (task) {
+        task->cancelled = TRUE;
+    }
 }
