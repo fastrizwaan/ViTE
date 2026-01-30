@@ -1284,6 +1284,16 @@ load_css(void)
     ".header-progress {"
     "    padding: 0;"
     "    margin: 0;"
+    "}"
+    "scrollbar slider:hover, "
+    "scrollbar trough:hover > slider, "
+    "scrollbar:hover slider {"
+    "    background-color: rgb(73, 152, 248);"
+    "}"
+    "scrollbar slider:active, "
+    "scrollbar trough > slider:active, "
+    "scrollbar:active slider {"
+    "    background-color: rgb(53, 132, 228);"
     "}";
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, css);
