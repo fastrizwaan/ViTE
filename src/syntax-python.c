@@ -156,17 +156,41 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
 
                 /* Look ahead for '(': Function Call */
                 gboolean is_call = FALSE;
-                size_t peek = cur;
-                while (peek < len && g_ascii_isspace(text[peek])) peek++;
-                if (peek < len && text[peek] == '(') is_call = TRUE;
+                size_t pcall = cur;
+                while (pcall < len && g_ascii_isspace(text[pcall])) pcall++;
+                if (pcall < len && text[pcall] == '(') is_call = TRUE;
 
-                /* Look ahead for '=': Keyword Arg / Assignment */
+                /* Look ahead for '=' or ':=': Assignment LHS */
                 gboolean is_assignment = FALSE;
-                if (peek < len && text[peek] == '=') {
-                    if (peek + 1 < len && text[peek+1] == '=') {
-                        is_assignment = FALSE; /* It's == */
+                size_t p2 = cur;
+                int p2_depth = 0;
+                while (p2 < len) {
+                    if (g_ascii_isspace(text[p2])) {
+                        p2++;
+                    } else if (text[p2] == ',') {
+                        p2++;
+                    } else if (g_ascii_isalnum(text[p2]) || text[p2] == '_' || text[p2] == '.') {
+                        p2++;
+                    } else if (text[p2] == '(' || text[p2] == '[' || text[p2] == '{') {
+                        p2_depth++;
+                        p2++;
+                    } else if (text[p2] == ')' || text[p2] == ']' || text[p2] == '}') {
+                        if (p2_depth > 0) p2_depth--;
+                        else break;
+                        p2++;
+                    } else if (text[p2] == '*') {
+                        p2++;
+                    } else if (text[p2] == '=') {
+                        if (p2 + 1 < len && text[p2+1] == '=') break; /* == */
+                        if (p2_depth == 0) is_assignment = TRUE;
+                        break;
+                    } else if (text[p2] == ':' && p2 + 1 < len && text[p2+1] == '=') {
+                        if (p2_depth == 0) is_assignment = TRUE;
+                        break;
+                    } else if (text[p2] == '#') {
+                        break;
                     } else {
-                        is_assignment = TRUE;
+                        break;
                     }
                 }
 
