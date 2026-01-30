@@ -581,7 +581,7 @@ piece_table_new(const char *filename)
             const char *from_codeset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
             
             /* Create temp file for converted UTF-8 data */
-            char temp_template[] = "/tmp/vite-utf8-XXXXXX";
+            char temp_template[] = "/var/tmp/vite-utf8-XXXXXX";
             int temp_fd = mkstemp(temp_template);
             if (temp_fd < 0) {
                 g_warning("Failed to create temp file for UTF-16 conversion: %s", strerror(errno));
@@ -2219,7 +2219,7 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
             const char *from_codeset = (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
             
             /* Create temp file for converted UTF-8 data */
-            char temp_template[] = "/tmp/vite-utf8-XXXXXX";
+            char temp_template[] = "/var/tmp/vite-utf8-XXXXXX";
             int temp_fd = mkstemp(temp_template);
             if (temp_fd < 0) {
                 /* Fall back to RAM-based conversion */
@@ -2243,9 +2243,30 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
                 }
                 
                 size_t to_convert = (src_remaining < conv_chunk_size) ? src_remaining : conv_chunk_size;
-                /* For UTF-16, ensure we don't split a code unit */
-                if (to_convert < src_remaining && (to_convert % 2) != 0) {
-                    to_convert--;
+                
+                /* Ensure strictly even bytes for UTF-16 */
+                if ((to_convert % 2) != 0) {
+                     to_convert--;
+                }
+                
+                /* Check for split surrogate pair at end of chunk */
+                if (to_convert < src_remaining && to_convert >= 2) {
+                     guint16 last_unit;
+                     memcpy(&last_unit, src + to_convert - 2, 2);
+                     if (res->encoding == ENCODING_UTF16BE) {
+                         last_unit = GUINT16_FROM_BE(last_unit);
+                     } else {
+                         last_unit = GUINT16_FROM_LE(last_unit);
+                     }
+                     
+                     /* High surrogate range: 0xD800 - 0xDBFF */
+                     if (last_unit >= 0xD800 && last_unit <= 0xDBFF) {
+                          /* Last unit is a high surrogate, and we know we have more data 
+                             (because to_convert < src_remaining).
+                             The low surrogate is in the next chunk.
+                             We must exclude this high surrogate from this chunk. */
+                          to_convert -= 2;
+                     }
                 }
                 
                 gsize bytes_read, bytes_written;
