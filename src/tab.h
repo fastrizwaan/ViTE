@@ -27,6 +27,9 @@ void vite_tab_set_loading(ViteTab *self, gboolean loading);
 void vite_tab_set_progress(ViteTab *self, double progress);
 gboolean vite_tab_is_loading(ViteTab *self);
 void vite_tab_set_cancellable(ViteTab *self, GCancellable *cancellable);
+GCancellable *vite_tab_get_cancellable(ViteTab *self);
 void vite_tab_cancel_load(ViteTab *self);
+void vite_tab_set_close_when_done(ViteTab *self, gboolean close);
+gboolean vite_tab_get_close_when_done(ViteTab *self);
 
 G_END_DECLS

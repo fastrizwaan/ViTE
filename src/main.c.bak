@@ -22,7 +22,6 @@ struct _ViteWindow {
     GtkWidget *status_bar;
     GtkWidget *last_active_editor; /* Fallback when focus is lost (e.g. to a popover) */
     int loading_count;
-    gboolean close_when_done;
 };
 
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
@@ -99,7 +98,6 @@ static void on_save_action(GSimpleAction *action, GVariant *parameter, gpointer 
 static void on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_right(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_down(GSimpleAction *action, GVariant *parameter, gpointer user_data);
-static void check_close_when_done(ViteWindow *win);
 static void on_close_split_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 
 static void on_document_modified(Document *doc, gboolean modified, void *user_data);
@@ -253,8 +251,6 @@ update_header_spinner(ViteWindow *win)
             gtk_widget_set_visible(win->header_spinner, FALSE);
         }
     }
-    
-    check_close_when_done(win);
 }
 
 static void
@@ -1401,9 +1397,6 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
             gtk_widget_unparent(page);
         }
     }
-    
-    /* Clear data to prevent dangling pointers */
-    g_object_set_data(G_OBJECT(tab), "page", NULL);
     
     if (page) {
         g_object_unref(page);
@@ -2571,16 +2564,6 @@ on_toggle_insert_mode(GSimpleAction *action, GVariant *value, gpointer user_data
 }
 
 static void
-check_close_when_done(ViteWindow *win)
-{
-    if (win->close_when_done && win->loading_count == 0) {
-        if (win->window) {
-            gtk_window_close(win->window);
-        }
-    }
-}
-
-static void
 on_select_all_action(GSimpleAction *action, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
@@ -2590,72 +2573,11 @@ on_select_all_action(GSimpleAction *action, GVariant *value, gpointer user_data)
     }
 }
 
-static void
-on_window_close_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
-{
-    ViteWindow *win = (ViteWindow *)user_data;
-    
-    if (g_strcmp0(response, "cancel-close") == 0) {
-        win->close_when_done = TRUE;
-        if (win->tab_bar) {
-            GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
-            for (GList *l = tabs; l != NULL; l = l->next) {
-                ViteTab *tab = VITE_TAB(l->data);
-                if (vite_tab_is_loading(tab)) vite_tab_cancel_load(tab);
-            }
-            g_list_free(tabs);
-        }
-    } else if (g_strcmp0(response, "wait-close") == 0) {
-        win->close_when_done = TRUE;
-        /* If for some reason finished already (race), check now */
-        check_close_when_done(win);
-    } else if (g_strcmp0(response, "cancel-save") == 0) {
-        win->close_when_done = FALSE; /* User wants to stay open */
-        if (win->tab_bar) {
-            GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
-            for (GList *l = tabs; l != NULL; l = l->next) {
-                ViteTab *tab = VITE_TAB(l->data);
-                if (vite_tab_is_loading(tab)) vite_tab_cancel_load(tab);
-            }
-            g_list_free(tabs);
-        }
-    }
-    /* continue: do nothing */
-}
-
-static gboolean
-on_window_close_request(GtkWindow *window, gpointer user_data)
-{
-    ViteWindow *win = (ViteWindow *)user_data;
-    
-    if (win->loading_count > 0) {
-        GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(window));
-        AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save in Progress", 
-                                                                     "Choose how to proceed with the active operation."));
-        
-        adw_alert_dialog_add_response(dialog, "cancel-close", "Cancel & Close");
-        adw_alert_dialog_add_response(dialog, "wait-close", "Close after Save");
-        adw_alert_dialog_add_response(dialog, "cancel-save", "Cancel Saving");
-        adw_alert_dialog_add_response(dialog, "continue", "Continue Saving");
-        
-        adw_alert_dialog_set_response_appearance(dialog, "cancel-close", ADW_RESPONSE_DESTRUCTIVE);
-        adw_alert_dialog_set_default_response(dialog, "continue");
-        
-        g_signal_connect(dialog, "response", G_CALLBACK(on_window_close_response), win);
-        adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
-        
-        return TRUE; /* Prevent close */
-    }
-    
-    return FALSE; /* Allow close */
-}
-
 static ViteWindow *
 setup_window(GtkWindow *window)
 {
     ViteWindow *win = g_new0(ViteWindow, 1);
     win->window = window;
-    g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), win);
     g_object_set_data(G_OBJECT(window), "vite-window", win);
 
     load_css();
@@ -3480,7 +3402,7 @@ typedef struct {
     DocumentSaveTask *task;
     char *original_path;
     GWeakRef tab_ref; /* Weak ref to ViteTab to prevent crashes if tab is closed */
-    GWeakRef window_ref; /* Weak ref to GtkWindow to prevent crashes if window is closed */
+    ViteWindow *win; /* Helper to access header progress - Assumed valid or managed by window lifecycle */
     /* Progress Reporting */
     GMainContext *context;
     GSource *idle_source;
@@ -3506,26 +3428,9 @@ on_save_progress_idle(gpointer user_data)
          g_object_unref(tab);
     }
     
-    GtkWindow *window = g_weak_ref_get(&data->window_ref);
-    if (window) {
-        ViteWindow *win = g_object_get_data(G_OBJECT(window), "vite-window");
-        gboolean show_in_header = TRUE;
-        
-        if (win && win->tab_bar) {
-             if (vite_tab_bar_get_n_tabs(win->tab_bar) > 1) {
-                 show_in_header = FALSE;
-             }
-        }
-        
-        if (win && win->header_progress) {
-            if (show_in_header) {
-                gtk_widget_set_visible(win->header_progress, TRUE);
-                gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(win->header_progress), p->progress);
-            } else {
-                gtk_widget_set_visible(win->header_progress, FALSE);
-            }
-        }
-        g_object_unref(window);
+    if (data->win && data->win->header_progress) {
+        gtk_widget_set_visible(data->win->header_progress, TRUE);
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(data->win->header_progress), p->progress);
     }
     
     g_free(p);
@@ -3618,45 +3523,32 @@ on_save_complete(GObject *source, GAsyncResult *res, gpointer user_data)
                  }
              }
         }
-        
-         if (vite_tab_get_close_when_done(tab)) {
-             /* Use g_idle_add ensures we don't close while inside signal emission or similar? 
-                Signal emission is fine. But let's do it directly. */
-             g_signal_emit_by_name(tab, "close-clicked", NULL);
-         }
-         
         g_object_unref(tab);
     }
     
-    GtkWindow *window = g_weak_ref_get(&data->window_ref);
-    if (window) {
-         ViteWindow *win = g_object_get_data(G_OBJECT(window), "vite-window");
-         if (win) {
-             if (win->header_progress) {
-                 gtk_widget_set_visible(win->header_progress, FALSE);
-             }
-             if (win->loading_count > 0) {
-                 win->loading_count--;
-                 update_header_spinner(win);
-             }
-             
-             if (error && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-                 GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(win->window));
-                 if (root) {
-                     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save Failed", error->message));
-                     adw_alert_dialog_add_response(dialog, "ok", "OK");
-                     adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
-                 }
+    if (data->win) {
+         if (data->win->header_progress) {
+             gtk_widget_set_visible(data->win->header_progress, FALSE);
+         }
+         if (data->win->loading_count > 0) {
+             data->win->loading_count--;
+             update_header_spinner(data->win);
+         }
+         
+         if (error && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+             GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(data->win->window));
+             if (root) {
+                 AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save Failed", error->message));
+                 adw_alert_dialog_add_response(dialog, "ok", "OK");
+                 adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
              }
          }
-         g_object_unref(window);
     }
     
     if (error) g_error_free(error);
     
     /* Clean up data */
     g_weak_ref_clear(&data->tab_ref);
-    g_weak_ref_clear(&data->window_ref);
     g_free(data->original_path);
     g_main_context_unref(data->context);
     g_free(data);
@@ -3695,17 +3587,11 @@ save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const cha
     SaveWorkerData *data = g_new0(SaveWorkerData, 1);
     data->task = stask;
     g_weak_ref_init(&data->tab_ref, tab);
-    g_weak_ref_init(&data->window_ref, win ? win->window : NULL);
+    data->win = win;
     data->original_path = g_strdup(path);
     data->context = g_main_context_ref(g_main_context_default());
     
-    GCancellable *cancellable = NULL;
-    if (tab) {
-        cancellable = vite_tab_get_cancellable(tab);
-        g_cancellable_reset(cancellable); /* Reset in case it was cancelled before */
-    }
-    
-    GTask *task = g_task_new(NULL, cancellable, on_save_complete, data);
+    GTask *task = g_task_new(G_OBJECT(doc), NULL, on_save_complete, data);
     g_task_set_task_data(task, data, NULL); 
     
     g_task_run_in_thread(task, save_worker_wrapper);

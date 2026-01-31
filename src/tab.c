@@ -22,6 +22,7 @@ struct _ViteTab {
     gboolean is_active;
     gboolean is_modified;
     gboolean loading;
+    gboolean close_when_done;
     double anim_offset_x; /* For smooth reorder animation */
     double drag_start_x;  /* Drag start position for ghost icon positioning */
     double drag_start_y;
@@ -161,12 +162,13 @@ vite_tab_finalize (GObject *object)
     ViteTab *self = VITE_TAB(object);
     /* Ensure any pending load is cancelled */
     if (self->cancellable) {
-        g_cancellable_cancel(self->cancellable);
-        g_object_unref(self->cancellable);
+    g_object_unref(self->cancellable);
     }
     g_free(self->title);
     G_OBJECT_CLASS(vite_tab_parent_class)->finalize(object);
 }
+
+static void on_close_clicked (GtkButton *btn, gpointer user_data);
 
 static GdkContentProvider *
 on_drag_prepare (GtkDragSource *source, double x, double y, ViteTab *self)
@@ -379,12 +381,7 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
     gtk_widget_remove_css_class(GTK_WIDGET(self), "dragging");
 }
 
-static void
-on_close_clicked (GtkButton *btn, ViteTab *self)
-{
-    /* If loading, we still allow close, which will trigger finalize and cancel the load */
-    g_signal_emit(self, signals[SIGNAL_CLOSE_CLICKED], 0);
-}
+
 
 static void
 on_click_pressed (GtkGestureClick *gesture, int n_press, double x, double y, ViteTab *self)
@@ -798,6 +795,55 @@ on_context_menu_close (GSimpleAction *action, GVariant *parameter, gpointer user
     g_signal_emit_by_name(self, "close-clicked");
 }
 
+static void
+on_close_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    g_object_ref(self); /* Ensure alive */
+    
+    if (g_strcmp0(response, "cancel-close") == 0) {
+        self->close_when_done = TRUE;
+        vite_tab_cancel_load(self);
+    } else if (g_strcmp0(response, "wait-close") == 0) {
+        self->close_when_done = TRUE;
+    } else if (g_strcmp0(response, "cancel-save") == 0) {
+        self->close_when_done = FALSE;
+        vite_tab_cancel_load(self);
+    } else if (g_strcmp0(response, "continue") == 0) {
+        self->close_when_done = FALSE;
+    }
+    
+    g_object_unref(self);
+}
+
+static void
+on_close_clicked (GtkButton *btn, gpointer user_data)
+{
+    ViteTab *self = VITE_TAB(user_data);
+    
+    if (self->loading) {
+        GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(self));
+        if (root) {
+            AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save in Progress", 
+                                                                         "Choose how to proceed with the active operation."));
+            
+            adw_alert_dialog_add_response(dialog, "cancel-close", "Cancel & Close");
+            adw_alert_dialog_add_response(dialog, "wait-close", "Close after Save");
+            adw_alert_dialog_add_response(dialog, "cancel-save", "Cancel Saving");
+            adw_alert_dialog_add_response(dialog, "continue", "Continue Saving");
+            
+            adw_alert_dialog_set_response_appearance(dialog, "cancel-close", ADW_RESPONSE_DESTRUCTIVE);
+            adw_alert_dialog_set_default_response(dialog, "continue");
+            
+            g_signal_connect(dialog, "response", G_CALLBACK(on_close_response), self);
+            adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
+            return;
+        }
+    }
+    
+    g_signal_emit(self, signals[SIGNAL_CLOSE_CLICKED], 0);
+}
+
 static void on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
 
 static void
@@ -1018,11 +1064,32 @@ vite_tab_set_cancellable(ViteTab *self, GCancellable *cancellable)
     self->cancellable = cancellable ? g_object_ref(cancellable) : NULL;
 }
 
+GCancellable *
+vite_tab_get_cancellable(ViteTab *self)
+{
+    if (!self->cancellable) {
+        self->cancellable = g_cancellable_new();
+    }
+    return self->cancellable;
+}
+
 void
 vite_tab_cancel_load(ViteTab *self)
 {
     if (self->cancellable) {
         g_cancellable_cancel(self->cancellable);
     }
+}
+
+void
+vite_tab_set_close_when_done(ViteTab *self, gboolean close)
+{
+    self->close_when_done = close;
+}
+
+gboolean
+vite_tab_get_close_when_done(ViteTab *self)
+{
+    return self->close_when_done;
 }
 

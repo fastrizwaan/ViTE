@@ -54,6 +54,8 @@ struct _Document {
     /* Async Loading */
     DocumentProgressCallback progress_cb;
     void *progress_user_data;
+    
+    int ref_count;
 };
 
 typedef struct {
@@ -95,6 +97,7 @@ document_new(const char *filename)
     doc->pt = piece_table_new(filename);
     doc->undo_stack = undo_stack_new();
     doc->file_path = filename ? g_strdup(filename) : NULL;
+    doc->ref_count = 1;
     return doc;
 }
 
@@ -104,13 +107,29 @@ document_new_empty(void)
     Document *doc = g_new0(Document, 1);
     doc->pt = piece_table_new_empty();
     doc->undo_stack = undo_stack_new();
+    doc->ref_count = 1;
     return doc;
 }
 
 
+Document *
+document_ref(Document *doc)
+{
+    if (doc) {
+        __atomic_add_fetch(&doc->ref_count, 1, __ATOMIC_SEQ_CST);
+    }
+    return doc;
+}
+
 void
 document_free(Document *doc)
 {
+    if (!doc) return;
+    
+    if (__atomic_sub_fetch(&doc->ref_count, 1, __ATOMIC_SEQ_CST) > 0) {
+        return;
+    }
+
     /* Invalidate any clipboard references to this document */
     vite_clipboard_invalidate_for_document(vite_clipboard_get_default(), doc);
 
@@ -3283,8 +3302,18 @@ document_save_async_start(Document *doc, const char *path)
 {
     if (!doc || !path) return NULL;
     
-    /* Create temp file */
+    /* Disk Space Check */
+    size_t total_size = document_get_length(doc);
+    size_t required = total_size + (total_size / 20) + (10 * 1024 * 1024);
+    
     char *dir = g_path_get_dirname(path);
+    /* Check disk space in the TARGET directory, not /tmp */
+    if (!check_disk_space(dir, required)) {
+        g_free(dir);
+        return NULL;
+    }
+    
+    /* Create temp file */
     char *temp_path = g_strdup_printf("%s/.vite_save_XXXXXX", dir);
     g_free(dir);
     
@@ -3296,7 +3325,7 @@ document_save_async_start(Document *doc, const char *path)
     }
     
     DocumentSaveTask *task = g_new0(DocumentSaveTask, 1);
-    task->doc = doc;
+    task->doc = document_ref(doc); /* Keep doc alive during async save */
     task->path = g_strdup(path);
     task->temp_path = temp_path;
     task->fd = fd;
@@ -3309,6 +3338,7 @@ document_save_async_start(Document *doc, const char *path)
         unlink(temp_path);
         g_free(temp_path);
         g_free(task->path);
+        document_free(task->doc); /* Cleanup ref if start fails */
         g_free(task);
         return NULL;
     }
@@ -3341,6 +3371,23 @@ document_save_async_finish(DocumentSaveTask *task, GError **error)
         }
         g_free(task->path);
         if (task->pt_task) piece_table_save_async_cancel(task->pt_task);
+        document_free(task->doc);
+        g_free(task);
+        return;
+    }
+    
+    /* Check for write errors */
+    GError *write_err = piece_table_save_async_get_error(task->pt_task);
+    if (write_err) {
+        g_propagate_error(error, write_err);
+        
+        piece_table_save_async_finalize(task->pt_task);
+        if (task->fd >= 0) close(task->fd);
+        unlink(task->temp_path); /* Delete partial file */
+        
+        g_free(task->temp_path);
+        g_free(task->path);
+        document_free(task->doc);
         g_free(task);
         return;
     }
@@ -3367,6 +3414,7 @@ document_save_async_finish(DocumentSaveTask *task, GError **error)
     
     g_free(task->temp_path);
     g_free(task->path);
+    document_free(task->doc);
     g_free(task);
 }
 

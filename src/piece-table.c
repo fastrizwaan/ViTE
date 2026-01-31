@@ -3001,11 +3001,31 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
             continue;
         }
         
+        /* Cap write size to 64KB to avoid blocking and allow throttling */
+        size_t bytes_to_process = chunk_len;
+        if (bytes_to_process > 65536) {
+            bytes_to_process = 65536;
+        }
+
         /* Write chunk */
         if (task->need_crlf) {
+            /* If we are splitting a chunk, avoid splitting between \r and \n */
+            if (bytes_to_process < chunk_len) {
+                /* Check if the last byte we would process is \r, and the next is \n (potentially) */
+                /* Actually, safer to just not end on \r if we are splitting, because the next chunk 
+                   will start with the character after. If we end on \r, the next chunk starts with \n.
+                   Our logic `ptr > chunk` checks strict inequality, so if next chunk starts with \n,
+                   ptr will equal chunk, and `ptr > chunk` fail.
+                   So we MUST NOT split between \r and \n.
+                */
+                if (chunk[bytes_to_process - 1] == '\r') {
+                     bytes_to_process--;
+                }
+            }
+            
             /* Same CRLF conversion logic as sync version */
             const char *ptr = chunk;
-            const char *end = chunk + chunk_len;
+            const char *end = chunk + bytes_to_process;
             const char *segment_start = ptr;
             
             while (ptr < end) {
@@ -3032,7 +3052,7 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
             }
         } else {
             const char *to_write = chunk;
-            size_t remaining = chunk_len;
+            size_t remaining = bytes_to_process;
             
             while (remaining > 0) {
                 ssize_t written = write(task->fd, to_write, remaining);
@@ -3048,8 +3068,8 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
             }
         }
         
-        task->bytes_written += chunk_len;
-        piece_table_iter_advance(&task->iter, chunk_len);
+        task->bytes_written += bytes_to_process;
+        piece_table_iter_advance(&task->iter, bytes_to_process);
     }
     
     if (progress_out) {
@@ -3060,6 +3080,15 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
     
     /* Check if done */
     return (piece_table_iter_get_chunk(&task->iter, NULL) == NULL);
+}
+
+GError *
+piece_table_save_async_get_error(PieceTableSaveTask *task)
+{
+    if (task && task->error) {
+        return g_error_copy(task->error);
+    }
+    return NULL;
 }
 
 void

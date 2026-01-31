@@ -139,6 +139,7 @@ typedef struct _PieceTableSaveTask PieceTableSaveTask;
 
 PieceTableSaveTask *piece_table_save_async_start(PieceTable *pt, int fd);
 gboolean piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *progress_out);
+GError *piece_table_save_async_get_error(PieceTableSaveTask *task);
 void piece_table_save_async_finalize(PieceTableSaveTask *task);
 void piece_table_save_async_cancel(PieceTableSaveTask *task);
 

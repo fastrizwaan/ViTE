@@ -21,7 +21,6 @@ typedef enum {
 
 Document *document_new(const char *filename);
 Document *document_new_empty(void);
-Document *document_ref(Document *doc);
 void document_load_file_async(Document *doc, const char *filename, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data);
 gboolean document_load_file_finish(Document *doc, GAsyncResult *res, GError **error);
 
