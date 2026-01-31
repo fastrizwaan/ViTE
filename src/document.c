@@ -431,6 +431,20 @@ document_undo(Document *doc)
     return info;
 }
 
+gboolean
+document_can_undo(Document *doc)
+{
+    if (!doc || !doc->undo_stack) return FALSE;
+    return undo_stack_peek(doc->undo_stack) != NULL;
+}
+
+gboolean
+document_can_redo(Document *doc)
+{
+    if (!doc || !doc->undo_stack) return FALSE;
+    return undo_stack_peek_redo(doc->undo_stack) != NULL;
+}
+
 UndoInfo
 document_redo(Document *doc)
 {
@@ -3001,14 +3015,14 @@ streaming_change_case_idle_step(gpointer user_data)
                 char c = buf[buf_off_start + i];
                 char r = c;
                 
-                if (task->type == 1) { /* Title Case */
+                if (task->type == CHANGE_CASE_TITLE) {
                     if (g_ascii_isalpha(c)) {
                         r = task->new_word ? g_ascii_toupper(c) : g_ascii_tolower(c);
                         task->new_word = FALSE;
                     } else if (g_ascii_isspace(c) || g_ascii_ispunct(c)) {
                         task->new_word = TRUE;
                     }
-                } else if (task->type == 2) { /* Invert Case */
+                } else if (task->type == CHANGE_CASE_INVERT) {
                     if (g_ascii_isupper(c)) r = g_ascii_tolower(c);
                     else if (g_ascii_islower(c)) r = g_ascii_toupper(c);
                 } else if (task->simple_func) {
@@ -3019,7 +3033,7 @@ streaming_change_case_idle_step(gpointer user_data)
             }
         } else {
              /* Outside selection */
-             if (task->type == 1) {
+             if (task->type == CHANGE_CASE_TITLE) {
                  if (chunk_end <= task->start) {
                      for (size_t i = 0; i < chunk_len; i++) {
                          char c = buf[i];

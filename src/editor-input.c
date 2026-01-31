@@ -147,42 +147,100 @@ static void right_click(GtkGestureClick *gesture,
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
 
-    GMenu *root = g_menu_new();
+    /* Determine Context State */
+    gboolean has_selection = FALSE;
+    if (self->cursors) {
+        for (guint c = 0; c < self->cursors->len; c++) {
+            EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+            size_t s = MIN(cur->cursor_offset, cur->selection_anchor);
+            size_t e = MAX(cur->cursor_offset, cur->selection_anchor);
+            if (s != e) {
+                has_selection = TRUE;
+                break;
+            }
+        }
+    }
     
-    /* Section 1: Edit Operations */
-    GMenu *sect_edit = g_menu_new();
-    g_menu_append(sect_edit, "Cut",    "app.cut");
-    g_menu_append(sect_edit, "Copy",   "app.copy");
-    g_menu_append(sect_edit, "Paste",  "app.paste");
-    g_menu_append(sect_edit, "Delete", "app.delete");
-    g_menu_append_section(root, NULL, G_MENU_MODEL(sect_edit));
-    g_object_unref(sect_edit);
+    gboolean can_undo = self->doc && document_can_undo(self->doc);
+    gboolean can_redo = self->doc && document_can_redo(self->doc);
+    /* For paste: System clipboard check is async, so we default to TRUE. 
+       We could check internal clipboard content if we wanted. */
+    gboolean can_paste = TRUE; 
+
+    GMenu *menu = g_menu_new();
+    GSimpleActionGroup *group = g_simple_action_group_new();
+
+    /* Section 1: Clipboard */
+    GMenu *s1 = g_menu_new();
+    g_menu_append(s1, "Cut", "ctx.cut");
+    g_menu_append(s1, "Copy", "ctx.copy");
+    g_menu_append(s1, "Paste", "ctx.paste");
+    g_menu_append(s1, "Delete", "ctx.delete");
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(s1));
+    g_object_unref(s1);
 
     /* Section 2: Undo/Redo */
-    GMenu *sect_undo = g_menu_new();
-    g_menu_append(sect_undo, "Undo",   "app.undo");
-    g_menu_append(sect_undo, "Redo",   "app.redo");
-    g_menu_append_section(root, NULL, G_MENU_MODEL(sect_undo));
-    g_object_unref(sect_undo);
+    GMenu *s2 = g_menu_new();
+    g_menu_append(s2, "Undo", "ctx.undo");
+    g_menu_append(s2, "Redo", "ctx.redo");
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(s2));
+    g_object_unref(s2);
 
-    /* Section 3: Selection & Special */
-    GMenu *sect_sel = g_menu_new();
-    g_menu_append(sect_sel, "Select All", "win.select-all");
+    /* Section 3: Selection */
+    GMenu *s3 = g_menu_new();
+    g_menu_append(s3, "Select All", "ctx.select-all");
 
+    /* Change Case Submenu */
     GMenu *case_menu = g_menu_new();
-    g_menu_append(case_menu, "ALL CAPS",       "app.upper");
-    g_menu_append(case_menu, "all lowercase", "app.lower");
-    g_menu_append(case_menu, "Title Case",    "app.title");
-    g_menu_append(case_menu, "Invert Case",   "app.invert");
-    g_menu_append_submenu(sect_sel, "Change Case", G_MENU_MODEL(case_menu));
+    g_menu_append(case_menu, "lower case", "ctx.change-case(0)");
+    g_menu_append(case_menu, "UPPER CASE", "ctx.change-case(1)");
+    g_menu_append(case_menu, "Title Case", "ctx.change-case(2)");
+    g_menu_append(case_menu, "iNVERT cASE", "ctx.change-case(3)");
+    g_menu_append_submenu(s3, "Change Case", G_MENU_MODEL(case_menu));
     g_object_unref(case_menu);
+
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(s3));
+    g_object_unref(s3);
+
+    /* Actions */
+    const GActionEntry ctx_entries[] = {
+        { "cut", on_ctx_cut, NULL, NULL, NULL },
+        { "copy", on_ctx_copy, NULL, NULL, NULL },
+        { "paste", on_ctx_paste, NULL, NULL, NULL },
+        { "delete", on_ctx_delete, NULL, NULL, NULL },
+        { "undo", on_ctx_undo, NULL, NULL, NULL },
+        { "redo", on_ctx_redo, NULL, NULL, NULL },
+        { "select-all", on_ctx_select_all, NULL, NULL, NULL },
+        { "change-case", on_ctx_change_case, "i", NULL, NULL }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(group), ctx_entries, G_N_ELEMENTS(ctx_entries), self);
+
+    /* Set Enabled States */
+    GAction *act;
     
-    g_menu_append_section(root, NULL, G_MENU_MODEL(sect_sel));
-    g_object_unref(sect_sel);
+    act = g_action_map_lookup_action(G_ACTION_MAP(group), "cut");
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(act), has_selection);
+    
+    act = g_action_map_lookup_action(G_ACTION_MAP(group), "copy");
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(act), has_selection);
+    
+    act = g_action_map_lookup_action(G_ACTION_MAP(group), "delete");
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(act), has_selection);
+    
+    act = g_action_map_lookup_action(G_ACTION_MAP(group), "change-case");
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(act), has_selection);
+    
+    act = g_action_map_lookup_action(G_ACTION_MAP(group), "undo");
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(act), can_undo);
+    
+    act = g_action_map_lookup_action(G_ACTION_MAP(group), "redo");
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(act), can_redo);
+    
+    /* Paste always enabled for now */
 
     GtkWidget *popover =
         gtk_popover_menu_new_from_model_full(
-            G_MENU_MODEL(root),
+            G_MENU_MODEL(menu),
             GTK_POPOVER_MENU_NESTED
         );
 
@@ -195,9 +253,13 @@ static void right_click(GtkGestureClick *gesture,
         &(GdkRectangle){ (int)x, (int)y, 1, 1 });
     
     gtk_widget_add_css_class(popover, "editor-context-menu");
+
+    /* Insert Action Group */
+    gtk_widget_insert_action_group(popover, "ctx", G_ACTION_GROUP(group));
     gtk_popover_popup(GTK_POPOVER(popover));
-    
-    g_object_unref(root);
+
+    g_object_unref(menu);
+    g_object_unref(group);
 }
 
 static void

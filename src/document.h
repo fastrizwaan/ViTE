@@ -12,6 +12,13 @@ void document_resume_callbacks(Document *doc);
 
 typedef char (*CharTransformFunc)(char c);
 
+typedef enum {
+    CHANGE_CASE_LOWER = 0,
+    CHANGE_CASE_UPPER = 1,
+    CHANGE_CASE_TITLE = 2,
+    CHANGE_CASE_INVERT = 3
+} ChangeCaseType;
+
 Document *document_new(const char *filename);
 Document *document_new_empty(void);
 void document_load_file_async(Document *doc, const char *filename, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data);
@@ -95,6 +102,8 @@ void document_delete(Document *doc, size_t offset, size_t len);
 /* Undo/Redo */
 UndoInfo document_undo(Document *doc);
 UndoInfo document_redo(Document *doc);
+gboolean document_can_undo(Document *doc);
+gboolean document_can_redo(Document *doc);
 void document_begin_undo_group(Document *doc);
 void document_end_undo_group(Document *doc);
 

@@ -751,8 +751,8 @@ editor_widget_change_case(EditorWidget *self, int type)
     if (start == end) return;
     
     CharTransformFunc func = NULL;
-    if (type == 0) func = g_ascii_tolower;
-    else if (type == 1) func = g_ascii_toupper;
+    if (type == CHANGE_CASE_LOWER) func = g_ascii_tolower;
+    else if (type == CHANGE_CASE_UPPER) func = g_ascii_toupper;
     
     document_change_case_streaming_start(self->doc, start, end, func, type, 
                                           (ReplaceProgressCallback)editor_widget_on_change_case_progress, self);
