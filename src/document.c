@@ -11,9 +11,29 @@
 #include "vite-clipboard.h"
 #include "resource-check.h"
 #include <ctype.h>
+#include <sys/statvfs.h>
 
 /* Forward declarations */
 static char *document_snapshot_to_file(Document *doc);
+
+static gboolean
+check_disk_space(const char *dir, size_t required_bytes)
+{
+    struct statvfs stat;
+    if (statvfs(dir, &stat) != 0) {
+        g_warning("Failed to check disk space for %s: %s", dir, strerror(errno));
+        return TRUE; /* Assume yes on error to avoid blocking benign cases */
+    }
+    
+    unsigned long long available = (unsigned long long)stat.f_bavail * stat.f_frsize;
+    if (available < required_bytes) {
+        g_warning("Insufficient disk space in %s. Required: %zu, Available: %llu", 
+                  dir, required_bytes, available);
+        return FALSE;
+    }
+    
+    return TRUE;
+}
 
 struct _Document {
     PieceTable *pt;
@@ -3098,6 +3118,15 @@ document_change_case_streaming_start(Document *doc,
                                      ReplaceProgressCallback callback, void *user_data)
 {
     if (!doc) return NULL;
+    
+    /* Disk Space Check: Ensure we have enough space for the temp file copy */
+    size_t total_size = document_get_length(doc);
+    /* Require 5% margin or at least 10MB extra */
+    size_t required = total_size + (total_size / 20) + (10 * 1024 * 1024);
+    
+    if (!check_disk_space("/tmp", required)) {
+        return NULL;
+    }
     
     StreamingChangeCaseTask *task = g_new0(StreamingChangeCaseTask, 1);
     task->doc = doc;

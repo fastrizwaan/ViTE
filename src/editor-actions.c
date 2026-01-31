@@ -1,6 +1,7 @@
 #include "editor-internal.h"
 #include <string.h>
 #include <math.h>
+#include <adwaita.h>
 
 static int compare_size_t(gconstpointer a, gconstpointer b) {
     size_t sa = *(const size_t*)a;
@@ -813,6 +814,13 @@ void editor_widget_change_case(EditorWidget *self, int type)
     if (type == CHANGE_CASE_LOWER) func = g_ascii_tolower;
     else if (type == CHANGE_CASE_UPPER) func = g_ascii_toupper;
     
-    document_change_case_streaming_start(self->doc, start, end, func, type, 
+    StreamingChangeCaseTask *task = document_change_case_streaming_start(self->doc, start, end, func, type, 
                                           (ReplaceProgressCallback)editor_widget_on_change_case_progress, self);
+                                          
+    if (!task) {
+        /* If task is NULL, likely due to disk space check failure */
+        AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Operation Failed", "Insufficient disk space to perform this operation safely."));
+        adw_alert_dialog_add_response(dialog, "ok", "OK");
+        adw_alert_dialog_choose(dialog, GTK_WIDGET(self), NULL, NULL, NULL);
+    }
 }
