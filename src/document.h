@@ -25,7 +25,7 @@ Document *document_ref(Document *doc);
 void document_load_file_async(Document *doc, const char *filename, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data);
 gboolean document_load_file_finish(Document *doc, GAsyncResult *res, GError **error);
 
-typedef void (*DocumentProgressCallback)(double progress, void *user_data);
+typedef void (*DocumentProgressCallback)(double progress, FileEncoding encoding, NewlineType newline, void *user_data);
 void document_set_progress_callback(Document *doc, DocumentProgressCallback callback, void *user_data);
 
 void document_free(Document *doc);

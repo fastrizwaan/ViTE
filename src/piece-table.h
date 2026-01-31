@@ -76,7 +76,7 @@ PieceTable *piece_table_new_empty(void);
 void piece_table_free(PieceTable *pt);
 
 /* Async Loading */
-typedef void (*PieceTableLoadProgressCallback)(double progress, gpointer user_data);
+typedef void (*PieceTableLoadProgressCallback)(double progress, FileEncoding encoding, NewlineType newline, gpointer user_data);
 
 typedef struct {
     PieceTable *pt;

@@ -2553,11 +2553,11 @@ void document_replace_streaming_cancel(StreamingReplaceTask *task) {
 /* Async Loading Wrapper */
 
 static void
-on_pt_progress(double progress, gpointer user_data)
+on_pt_progress(double progress, FileEncoding encoding, NewlineType newline, gpointer user_data)
 {
     Document *doc = user_data;
     if (doc->progress_cb) {
-        doc->progress_cb(progress, doc->progress_user_data);
+        doc->progress_cb(progress, encoding, newline, doc->progress_user_data);
     }
 }
 

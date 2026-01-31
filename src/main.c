@@ -3050,6 +3050,9 @@ typedef struct {
     GtkWidget *header_progress; /* Weak Ref */
     GtkWidget *header_spinner; /* Weak Ref */
     char *filename;
+    ViteWindow *window; /* Raw Pointer - Valid only if gtkw_ref is valid */
+    GtkWindow *gtkw_ref; /* Weak Ref to actual GtkWindow */
+    Document *doc; /* Reference to document being loaded */
 } LoadContext;
 
 static gboolean
@@ -3060,9 +3063,35 @@ free_load_context_idle(gpointer user_data)
 }
 
 static void
-on_load_progress(double progress, void *user_data)
+on_load_progress(double progress, FileEncoding encoding, NewlineType newline, void *user_data)
 {
     LoadContext *ctx = user_data;
+    
+    /* Update Status Bar immediately if we have valid window context */
+    if (ctx->gtkw_ref && ctx->window && ctx->window->status_bar) {
+        const char *enc_id = "utf-8";
+        switch (encoding) {
+            case ENCODING_UTF16LE: enc_id = "utf-16le"; break;
+            case ENCODING_UTF16BE: enc_id = "utf-16be"; break;
+            default: break;
+        }
+        vite_status_bar_set_encoding(VITE_STATUS_BAR(ctx->window->status_bar), enc_id);
+        
+        const char *nl_id = "lf";
+        switch (newline) {
+            case NEWLINE_CRLF: nl_id = "crlf"; break;
+            case NEWLINE_CR: nl_id = "cr"; break;
+            default: break;
+        }
+        vite_status_bar_set_line_ending(VITE_STATUS_BAR(ctx->window->status_bar), nl_id);
+    }
+    
+    /* Update Document State so that any other UI updates (e.g. on_cursor_moved) 
+       don't overwrite our status bar with stale default values */
+    if (ctx->doc) {
+        document_set_encoding(ctx->doc, encoding);
+        document_set_newline_type(ctx->doc, newline);
+    }
     /* Determine visibility based on tab count */
     gboolean show_in_header = FALSE;
     if (ctx->tab_bar) {
@@ -3140,6 +3169,17 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
                  /* Revert title on cancellation */
                  vite_tab_restore_original_title(ctx->tab);
                  update_window_title_for_tab(ctx->tab);
+                 
+                 /* Revert Encoding/Newline to defaults (since load failed/cancelled) */
+                 if (ctx->doc) {
+                     document_set_encoding(ctx->doc, ENCODING_UTF8);
+                     document_set_newline_type(ctx->doc, NEWLINE_LF);
+                 }
+                 
+                 /* Refresh status bar to show UTF-8 again */
+                 if (vite_tab_is_active(ctx->tab)) {
+                     on_tab_clicked(ctx->tab, NULL);
+                 }
              } else {
                  /* Show error dialog */
                  GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(ctx->tab));
@@ -3185,6 +3225,11 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     if (ctx->tab) {
         g_object_remove_weak_pointer(G_OBJECT(ctx->tab), (gpointer *)&ctx->tab);
         ctx->tab = NULL;
+    }
+    
+    if (ctx->doc) {
+        document_free(ctx->doc);
+        ctx->doc = NULL;
     }
     
     if (ctx->tab_bar) {
@@ -3383,8 +3428,12 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
        BUT on_load_progress uses it. Let's keep it for progress bar, 
        but for Spinner we use window logic. */
     ctx->header_progress = target_window->header_progress;
+     ctx->header_progress = target_window->header_progress;
     ctx->header_spinner = target_window->header_spinner; /* Still keep weak ref for safety in callback? */
     ctx->filename = g_strdup(path);
+    ctx->window = target_window;
+    ctx->gtkw_ref = target_window->window;
+    ctx->doc = document_ref(doc);
     
     /* Weak references for safety */
     g_object_add_weak_pointer(G_OBJECT(tab_to_use), (gpointer *)&ctx->tab);
@@ -3394,8 +3443,11 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
     if (ctx->header_progress) {
         g_object_add_weak_pointer(G_OBJECT(ctx->header_progress), (gpointer *)&ctx->header_progress);
     }
-    if (ctx->header_spinner) {
+     if (ctx->header_spinner) {
         g_object_add_weak_pointer(G_OBJECT(ctx->header_spinner), (gpointer *)&ctx->header_spinner);
+    }
+    if (ctx->gtkw_ref) {
+        g_object_add_weak_pointer(G_OBJECT(ctx->gtkw_ref), (gpointer *)&ctx->gtkw_ref);
     }
     
     document_set_progress_callback(doc, on_load_progress, ctx);

@@ -2136,6 +2136,8 @@ typedef struct {
     PieceTableLoadProgressCallback cb;
     gpointer data;
     double progress;
+    FileEncoding encoding;
+    NewlineType newline;
 } IdleProgressData;
 
 static gboolean
@@ -2143,7 +2145,7 @@ dispatch_progress_idle(gpointer user_data)
 {
     IdleProgressData *info = user_data;
     if (info->cb) {
-        info->cb(info->progress, info->data);
+        info->cb(info->progress, info->encoding, info->newline, info->data);
     }
     g_free(info);
     return G_SOURCE_REMOVE; 
@@ -2200,6 +2202,17 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
     size_t bom_len = 0;
     if (res->data && res->size > 0) {
         detect_encoding(res->data, res->size, &res->encoding, &res->has_bom, &bom_len);
+
+        /* 0. Send immediate progress to update Status Bar with Encoding info */
+        if (data->progress_cb) {
+             IdleProgressData *info = g_new0(IdleProgressData, 1);
+             info->cb = data->progress_cb;
+             info->data = data->progress_data;
+             info->progress = 0.0;
+             info->encoding = res->encoding;
+             info->newline = res->newline_style;
+             g_idle_add_full(G_PRIORITY_HIGH_IDLE, dispatch_progress_idle, info, NULL);
+        }
         
         /* DEBUG: After encoding detection */
         const char *enc_name = (res->encoding == ENCODING_UTF8) ? "UTF-8" : 
@@ -2399,7 +2412,11 @@ conversion_done:
                      info->cb = data->progress_cb;
                      info->data = data->progress_data;
                      info->progress = p;
-                     g_idle_add(dispatch_progress_idle, info);
+                     info->encoding = res->encoding;
+                     info->newline = res->newline_style;
+                     info->encoding = res->encoding;
+                     info->newline = res->newline_style;
+                     g_idle_add_full(G_PRIORITY_HIGH_IDLE, dispatch_progress_idle, info, NULL);
                  }
             }
 
