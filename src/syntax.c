@@ -381,8 +381,12 @@ syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta)
     if (ctx->line_cache) {
         if (line_delta > 0) {
             /* Insertion: insert NULL entries */
-            for (int i = 0; i < line_delta; i++) {
-                g_ptr_array_insert(ctx->line_cache, start_line, NULL);
+            /* Guard: Only insert if start_line is within the currently cached range.
+               If we are inserting beyond the cache, we don't need to shift anything. */
+            if (start_line <= ctx->line_cache->len) {
+                for (int i = 0; i < line_delta; i++) {
+                    g_ptr_array_insert(ctx->line_cache, start_line, NULL);
+                }
             }
         } else if (line_delta < 0) {
             /* Deletion: remove entries */

@@ -737,8 +737,7 @@ editor_widget_select_all(EditorWidget *self)
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
-void
-editor_widget_change_case(EditorWidget *self, int type)
+void editor_widget_change_case(EditorWidget *self, int type)
 {
     if (!self->doc || self->undo_redo_task) return;
     
@@ -750,15 +749,70 @@ editor_widget_change_case(EditorWidget *self, int type)
     
     if (start == end) return;
     
+    size_t len = end - start;
+    
+    /* Optimization: For small selections (< 1MB), perform in-memory replacement 
+     * to avoid rewriting the entire file (which causes freezing on huge files). */
+    if (len < 1024 * 1024) {
+        char *text = document_get_text_range(self->doc, start, len);
+        if (!text) return;
+        
+        gboolean new_word = TRUE; /* For Title Case */
+        
+        for (size_t i = 0; i < len; i++) {
+            char c = text[i];
+            char r = c;
+            
+            if (type == CHANGE_CASE_TITLE) {
+                if (g_ascii_isalpha(c)) {
+                    r = new_word ? g_ascii_toupper(c) : g_ascii_tolower(c);
+                    new_word = FALSE;
+                } else if (g_ascii_isspace(c) || g_ascii_ispunct(c)) {
+                    new_word = TRUE;
+                }
+            } else if (type == CHANGE_CASE_INVERT) {
+                if (g_ascii_isupper(c)) r = g_ascii_tolower(c);
+                else if (g_ascii_islower(c)) r = g_ascii_toupper(c);
+            } else if (type == CHANGE_CASE_LOWER) {
+                r = g_ascii_tolower(c);
+            } else if (type == CHANGE_CASE_UPPER) {
+                r = g_ascii_toupper(c);
+            }
+            
+            text[i] = r;
+        }
+        
+        document_begin_undo_group(self->doc);
+        document_delete(self->doc, start, len);
+        document_insert(self->doc, start, text, len);
+        
+        /* Restore selection */
+        EditorCursor *cur = editor_widget_get_primary_cursor(self);
+        if (cur) {
+            /* If we were selecting forward (anchor < offset), restore that direction */
+            if (primary->selection_anchor <= primary->cursor_offset) {
+                cur->selection_anchor = start;
+                cur->cursor_offset = start + len;
+            } else {
+                cur->selection_anchor = start + len;
+                cur->cursor_offset = start;
+            }
+        }
+        
+        document_end_undo_group(self->doc);
+        g_free(text);
+        
+        editor_widget_update_adjustments(self, -1, -1);
+        scroll_to_cursor(self);
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        return;
+    }
+    
+    /* Fallback for huge selections: Streaming rewrite */
     CharTransformFunc func = NULL;
     if (type == CHANGE_CASE_LOWER) func = g_ascii_tolower;
     else if (type == CHANGE_CASE_UPPER) func = g_ascii_toupper;
     
     document_change_case_streaming_start(self->doc, start, end, func, type, 
                                           (ReplaceProgressCallback)editor_widget_on_change_case_progress, self);
-    /* Note: We reuse editor_widget_on_undo_redo_progress because it has the same signature 
-       and logic for updating UI after document operation. 
-       Wait, document_change_case_streaming_start takes ReplaceProgressCallback. 
-       Let's check ReplaceProgressCallback vs UndoRedoProgressCallback.
-    */
 }
