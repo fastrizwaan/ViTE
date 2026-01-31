@@ -247,6 +247,67 @@ detect_newline_style(const char *data, size_t size, NewlineType *style)
     }
 }
 
+static void
+detect_newline_style_raw(const char *data, size_t size, FileEncoding enc, NewlineType *style)
+{
+    *style = NEWLINE_LF; // Default
+    size_t check_len = (size > 4096) ? 4096 : size;
+    
+    if (enc == ENCODING_UTF8) {
+        detect_newline_style(data, check_len, style);
+        return;
+    }
+
+    if (check_len < 2) return;
+
+    if (enc == ENCODING_UTF16LE) {
+        /* LE: LF is 0A 00, CR is 0D 00 */
+        for (size_t i = 0; i < check_len - 1; i += 2) {
+             unsigned char c1 = (unsigned char)data[i];
+             unsigned char c2 = (unsigned char)data[i+1];
+             
+             if (c1 == 0x0A && c2 == 0x00) {
+                 *style = NEWLINE_LF;
+                 return;
+             } else if (c1 == 0x0D && c2 == 0x00) {
+                 /* Check for following LF */
+                 if (i + 3 < check_len) {
+                     unsigned char n1 = (unsigned char)data[i+2];
+                     unsigned char n2 = (unsigned char)data[i+3];
+                     if (n1 == 0x0A && n2 == 0x00) {
+                         *style = NEWLINE_CRLF;
+                         return;
+                     }
+                 }
+                 *style = NEWLINE_CR;
+                 return;
+             }
+        }
+    } else if (enc == ENCODING_UTF16BE) {
+         /* BE: LF is 00 0A, CR is 00 0D */
+         for (size_t i = 0; i < check_len - 1; i += 2) {
+             unsigned char c1 = (unsigned char)data[i];
+             unsigned char c2 = (unsigned char)data[i+1];
+             
+             if (c1 == 0x00 && c2 == 0x0A) {
+                 *style = NEWLINE_LF;
+                 return;
+             } else if (c1 == 0x00 && c2 == 0x0D) {
+                  if (i + 3 < check_len) {
+                      unsigned char n1 = (unsigned char)data[i+2];
+                      unsigned char n2 = (unsigned char)data[i+3];
+                      if (n1 == 0x00 && n2 == 0x0A) {
+                          *style = NEWLINE_CRLF;
+                          return;
+                      }
+                  }
+                  *style = NEWLINE_CR;
+                  return;
+             }
+         }
+    }
+}
+
 /* Robust newline finder that handles \n, \r\n, and \r */
 static const char *
 find_next_newline(const char *ptr, const char *end, int *nl_len)
@@ -2202,6 +2263,9 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
     size_t bom_len = 0;
     if (res->data && res->size > 0) {
         detect_encoding(res->data, res->size, &res->encoding, &res->has_bom, &bom_len);
+        
+        /* Detect newline style immediately (raw check) */
+        detect_newline_style_raw(res->data + bom_len, res->size - bom_len, res->encoding, &res->newline_style);
 
         /* 0. Send immediate progress to update Status Bar with Encoding info */
         if (data->progress_cb) {
