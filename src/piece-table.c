@@ -2955,6 +2955,13 @@ struct _PieceTableSaveTask {
     gboolean bom_written;
     gboolean cancelled;
     GError *error;
+    
+    /* Buffer for incomplete UTF-8 sequences at chunk boundaries */
+    char pending_bytes[6];
+    size_t pending_len;
+    
+    /* State for newline normalization */
+    gboolean saved_cr; 
 };
 
 PieceTableSaveTask *
@@ -2968,7 +2975,12 @@ piece_table_save_async_start(PieceTable *pt, int fd)
     task->total_bytes = piece_table_get_length(pt);
     task->bytes_written = 0;
     task->need_crlf = (pt->newline_style == NEWLINE_CRLF);
-    task->bom_written = !pt->has_bom; /* If no BOM needed, mark as written */
+    
+    /* Calculate if BOM write is needed */
+    gboolean need_utf16 = (pt->encoding == ENCODING_UTF16LE || pt->encoding == ENCODING_UTF16BE);
+    gboolean needs_bom = (need_utf16 || pt->has_bom);
+    
+    task->bom_written = !needs_bom; /* If no BOM needed, mark as written/skipped */
     task->cancelled = FALSE;
     task->error = NULL;
     
@@ -2987,6 +2999,10 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
     
     gint64 start_us = g_get_monotonic_time();
     
+    gboolean need_utf16 = (task->pt->encoding == ENCODING_UTF16LE || task->pt->encoding == ENCODING_UTF16BE);
+    const char *target_charset = (task->pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : 
+                                  (task->pt->encoding == ENCODING_UTF16BE) ? "UTF-16BE" : "UTF-8";
+
     /* Write BOM if needed */
     if (!task->bom_written) {
         if (task->pt->encoding == ENCODING_UTF8 && task->pt->has_bom) {
@@ -3024,66 +3040,176 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
             bytes_to_process = 65536;
         }
 
-        /* Write chunk */
-        if (task->need_crlf) {
-            /* If we are splitting a chunk, avoid splitting between \r and \n */
-            if (bytes_to_process < chunk_len) {
-                /* Check if the last byte we would process is \r, and the next is \n (potentially) */
-                /* Actually, safer to just not end on \r if we are splitting, because the next chunk 
-                   will start with the character after. If we end on \r, the next chunk starts with \n.
-                   Our logic `ptr > chunk` checks strict inequality, so if next chunk starts with \n,
-                   ptr will equal chunk, and `ptr > chunk` fail.
-                   So we MUST NOT split between \r and \n.
-                */
-                if (chunk[bytes_to_process - 1] == '\r') {
-                     bytes_to_process--;
-                }
-            }
+        /* Combine pending bytes with current chunk */
+        char *combined = NULL;
+        const char *working_data = chunk;
+        size_t working_len = bytes_to_process;
+        
+        if (task->pending_len > 0) {
+            combined = g_malloc(task->pending_len + bytes_to_process);
+            memcpy(combined, task->pending_bytes, task->pending_len);
+            memcpy(combined + task->pending_len, chunk, bytes_to_process);
+            working_data = combined;
+            working_len = task->pending_len + bytes_to_process;
+            task->pending_len = 0;
+        }
+        
+        /* For UTF-16 conversion, find the last complete UTF-8 character */
+        size_t safe_len = working_len;
+        if (need_utf16) {
+            /* Check if the last few bytes form a complete UTF-8 sequence */
+            const char *p = working_data + working_len;
+            size_t trailing = 0;
             
-            /* Same CRLF conversion logic as sync version */
-            const char *ptr = chunk;
-            const char *end = chunk + bytes_to_process;
-            const char *segment_start = ptr;
+            /* Scan backwards to find start of last UTF-8 character */
+            while (trailing < 4 && trailing < working_len) {
+                p--;
+                trailing++;
+                unsigned char c = (unsigned char)*p;
+                if ((c & 0x80) == 0) {
+                    /* ASCII - complete */
+                    trailing = 0;
+                    break;
+                } else if ((c & 0xC0) == 0xC0) {
+                    /* Start of multi-byte sequence - check if complete */
+                    size_t expected = 0;
+                    if ((c & 0xE0) == 0xC0) expected = 2;
+                    else if ((c & 0xF0) == 0xE0) expected = 3;
+                    else if ((c & 0xF8) == 0xF0) expected = 4;
+                    
+                    if (trailing < expected) {
+                        /* Incomplete sequence - save for next chunk */
+                        safe_len = working_len - trailing;
+                        memcpy(task->pending_bytes, working_data + safe_len, trailing);
+                        task->pending_len = trailing;
+                    } else {
+                        trailing = 0;  /* Complete */
+                    }
+                    break;
+                }
+                /* else continuation byte, keep scanning */
+            }
+        }
+        
+        /* 1. Newline Normalization */
+        /* Targets: LF (\n), CRLF (\r\n), CR (\r) */
+        char *normalized_data = NULL;
+        const char *data_to_encode = working_data;
+        size_t data_len = safe_len;
+        
+        /* We perform normalization if any newline conversion is needed.
+           Since we support arbitrary conversion, we essentially always run this
+           unless target is "As Is" (which isn't an option, we have a style).
+           We assume the user wants the file to correspond to pt->newline_style.
+        */
+        
+        if (safe_len > 0 || task->saved_cr) {
+            GString *converted = g_string_sized_new(safe_len + 128);
+            const char *ptr = working_data;
+            const char *end = working_data + safe_len;
+            
+            const char *nl_str = "\n";
+            if (task->pt->newline_style == NEWLINE_CRLF) nl_str = "\r\n";
+            else if (task->pt->newline_style == NEWLINE_CR) nl_str = "\r";
             
             while (ptr < end) {
-                if (*ptr == '\n') {
-                    gboolean has_cr = (ptr > chunk && *(ptr - 1) == '\r');
-                    
-                    if (ptr > segment_start) {
-                        write(task->fd, segment_start, ptr - segment_start);
-                    }
-                    
-                    if (!has_cr) {
-                        write(task->fd, "\r\n", 2);
+                char c = *ptr;
+                
+                if (task->saved_cr) {
+                    if (c == '\n') {
+                        /* Case: \r\n -> Newline */
+                        g_string_append(converted, nl_str);
+                        task->saved_cr = FALSE;
+                        ptr++;
+                        continue;
                     } else {
-                        write(task->fd, "\n", 1);
+                        /* Case: \r followed by non-\n -> Isolated \r -> Newline */
+                        g_string_append(converted, nl_str);
+                        task->saved_cr = FALSE;
+                        /* Fall through to process 'c' */
                     }
-                    
-                    segment_start = ptr + 1;
                 }
+                
+                if (c == '\r') {
+                    task->saved_cr = TRUE;
+                } else if (c == '\n') {
+                    /* Case: Isolated \n -> Newline */
+                    g_string_append(converted, nl_str);
+                } else {
+                    g_string_append_c(converted, c);
+                }
+                
                 ptr++;
             }
             
-            if (segment_start < end) {
-                write(task->fd, segment_start, end - segment_start);
-            }
-        } else {
-            const char *to_write = chunk;
-            size_t remaining = bytes_to_process;
+            normalized_data = g_string_free(converted, FALSE);
+            data_to_encode = normalized_data;
+            data_len = strlen(normalized_data);
+        }
+        
+        /* 2. Encoding Conversion */
+        if (need_utf16 && data_len > 0) {
+            gsize bytes_conv_written;
+            GError *conv_error = NULL;
+            char *utf16_data = g_convert(data_to_encode, data_len,
+                                          target_charset, "UTF-8",
+                                          NULL, &bytes_conv_written, &conv_error);
             
-            while (remaining > 0) {
-                ssize_t written = write(task->fd, to_write, remaining);
-                if (written < 0) {
+            if (!utf16_data) {
+                if (task->error) g_error_free(task->error);
+                task->error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+                            "Encoding conversion failed: %s", 
+                            conv_error ? conv_error->message : "Unknown error");
+                g_clear_error(&conv_error);
+                g_free(normalized_data);
+                if (combined) g_free(combined);
+                
+                if (progress_out) *progress_out = 1.0;
+                return TRUE; /* Error */
+            }
+            
+            /* Write to FD */
+            const char *p_write = utf16_data;
+            size_t rem = bytes_conv_written;
+            while (rem > 0) {
+                ssize_t w = write(task->fd, p_write, rem);
+                if (w < 0) {
                     if (errno == EINTR) continue;
                     task->error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
                                               "Write failed: %s", strerror(errno));
+                    g_free(utf16_data);
+                    g_free(normalized_data);
+                    if (combined) g_free(combined);
                     if (progress_out) *progress_out = 1.0;
-                    return TRUE; /* Done with error */
+                    return TRUE;
                 }
-                to_write += written;
-                remaining -= written;
+                p_write += w;
+                rem -= w;
+            }
+            g_free(utf16_data);
+            
+        } else if (data_len > 0) {
+            /* UTF-8 Direct Write */
+            const char *p_write = data_to_encode;
+            size_t rem = data_len;
+             while (rem > 0) {
+                ssize_t w = write(task->fd, p_write, rem);
+                if (w < 0) {
+                    if (errno == EINTR) continue;
+                    task->error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+                                              "Write failed: %s", strerror(errno));
+                    g_free(normalized_data);
+                    if (combined) g_free(combined);
+                    if (progress_out) *progress_out = 1.0;
+                    return TRUE;
+                }
+                p_write += w;
+                rem -= w;
             }
         }
+        
+        g_free(normalized_data);
+        if (combined) g_free(combined);
         
         task->bytes_written += bytes_to_process;
         piece_table_iter_advance(&task->iter, bytes_to_process);
@@ -3114,6 +3240,46 @@ piece_table_save_async_finalize(PieceTableSaveTask *task)
     if (!task) return;
     
     /* fsync to ensure data is on disk */
+    
+    /* Handle pending bytes (invalid UTF-8 at end of file) */
+    if (task->pending_len > 0) {
+        /* Write as-is if no conversion needed, or if we want to preserve invalid bytes.
+           If we are doing UTF-16, these bytes failed to form a char, so they are garbage?
+           Sync implementation: writes them if !need_utf16.
+        */
+        gboolean need_utf16 = (task->pt->encoding == ENCODING_UTF16LE || task->pt->encoding == ENCODING_UTF16BE);
+        if (!need_utf16) {
+             /* Before writing expected garbage, check saved_cr */
+             if (task->saved_cr) {
+                 const char *nl_str = "\n";
+                 if (task->pt->newline_style == NEWLINE_CRLF) nl_str = "\r\n";
+                 else if (task->pt->newline_style == NEWLINE_CR) nl_str = "\r";
+                 write(task->fd, nl_str, strlen(nl_str));
+                 task->saved_cr = FALSE;
+             }
+             
+             size_t rem = task->pending_len;
+             const char *p = task->pending_bytes;
+             while (rem > 0) {
+                 ssize_t w = write(task->fd, p, rem);
+                 if (w > 0) {
+                     p += w;
+                     rem -= w;
+                 } else if (w < 0 && errno != EINTR) {
+                     /* Ignore error at this late stage or log? */
+                     break;
+                 }
+             }
+        }
+    } else if (task->saved_cr) {
+        /* If we have a pending CR and no more data, it's a trailing byte */
+        const char *nl_str = "\n";
+        if (task->pt->newline_style == NEWLINE_CRLF) nl_str = "\r\n";
+        else if (task->pt->newline_style == NEWLINE_CR) nl_str = "\r";
+        write(task->fd, nl_str, strlen(nl_str));
+        task->saved_cr = FALSE;
+    }
+    
     fsync(task->fd);
     
     if (task->error) {
