@@ -32,4 +32,17 @@ void vite_tab_cancel_load(ViteTab *self);
 void vite_tab_set_close_when_done(ViteTab *self, gboolean close);
 gboolean vite_tab_get_close_when_done(ViteTab *self);
 
+typedef enum {
+    VITE_OP_NONE,
+    VITE_OP_LOADING,
+    VITE_OP_SAVING
+} ViteTabOperationType;
+
+void vite_tab_set_operation_type(ViteTab *self, ViteTabOperationType type);
+ViteTabOperationType vite_tab_get_operation_type(ViteTab *self);
+
+void vite_tab_set_active_dialog(ViteTab *self, AdwAlertDialog *dialog);
+void vite_tab_close_active_dialog(ViteTab *self);
+void vite_tab_restore_original_title(ViteTab *self);
+
 G_END_DECLS

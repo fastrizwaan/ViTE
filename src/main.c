@@ -23,6 +23,7 @@ struct _ViteWindow {
     GtkWidget *last_active_editor; /* Fallback when focus is lost (e.g. to a popover) */
     int loading_count;
     gboolean close_when_done;
+    GWeakRef active_dialog_ref;
 };
 
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
@@ -2573,9 +2574,19 @@ on_toggle_insert_mode(GSimpleAction *action, GVariant *value, gpointer user_data
 static void
 check_close_when_done(ViteWindow *win)
 {
-    if (win->close_when_done && win->loading_count == 0) {
-        if (win->window) {
-            gtk_window_close(win->window);
+    if (win->loading_count == 0) {
+        /* Auto-close any pending localized operation dialog */
+        AdwAlertDialog *dialog = g_weak_ref_get(&win->active_dialog_ref);
+        if (dialog) {
+            adw_dialog_close(ADW_DIALOG(dialog));
+            g_object_unref(dialog);
+            g_weak_ref_set(&win->active_dialog_ref, NULL);
+        }
+        
+        if (win->close_when_done) {
+            if (win->window) {
+                gtk_window_close(win->window);
+            }
         }
     }
 }
@@ -2595,6 +2606,9 @@ on_window_close_response(AdwAlertDialog *dialog, const char *response, gpointer 
 {
     ViteWindow *win = (ViteWindow *)user_data;
     
+    /* Clear active dialog ref */
+    g_weak_ref_set(&win->active_dialog_ref, NULL);
+    
     if (g_strcmp0(response, "cancel-close") == 0) {
         win->close_when_done = TRUE;
         if (win->tab_bar) {
@@ -2609,7 +2623,7 @@ on_window_close_response(AdwAlertDialog *dialog, const char *response, gpointer 
         win->close_when_done = TRUE;
         /* If for some reason finished already (race), check now */
         check_close_when_done(win);
-    } else if (g_strcmp0(response, "cancel-save") == 0) {
+    } else if (g_strcmp0(response, "cancel-save") == 0 || g_strcmp0(response, "cancel-load") == 0) {
         win->close_when_done = FALSE; /* User wants to stay open */
         if (win->tab_bar) {
             GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
@@ -2630,16 +2644,45 @@ on_window_close_request(GtkWindow *window, gpointer user_data)
     
     if (win->loading_count > 0) {
         GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(window));
-        AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save in Progress", 
-                                                                     "Choose how to proceed with the active operation."));
         
-        adw_alert_dialog_add_response(dialog, "cancel-close", "Cancel & Close");
-        adw_alert_dialog_add_response(dialog, "wait-close", "Close after Save");
-        adw_alert_dialog_add_response(dialog, "cancel-save", "Cancel Saving");
-        adw_alert_dialog_add_response(dialog, "continue", "Continue Saving");
+        gboolean any_saving = FALSE;
+        if (win->tab_bar) {
+             GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+             for (GList *l = tabs; l != NULL; l = l->next) {
+                 if (vite_tab_get_operation_type(VITE_TAB(l->data)) == VITE_OP_SAVING) {
+                     any_saving = TRUE;
+                     break;
+                 }
+             }
+             g_list_free(tabs);
+        }
         
-        adw_alert_dialog_set_response_appearance(dialog, "cancel-close", ADW_RESPONSE_DESTRUCTIVE);
+        AdwAlertDialog *dialog = NULL;
+        
+        if (any_saving) {
+            dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save in Progress", 
+                                                         "Choose how to proceed with the active operation."));
+            adw_alert_dialog_add_response(dialog, "cancel-close", "Cancel & Close");
+            adw_alert_dialog_add_response(dialog, "wait-close", "Close after Save");
+            adw_alert_dialog_add_response(dialog, "cancel-save", "Cancel Saving");
+            adw_alert_dialog_add_response(dialog, "continue", "Continue Saving");
+            
+            adw_alert_dialog_set_response_appearance(dialog, "cancel-close", ADW_RESPONSE_DESTRUCTIVE);
+        } else {
+            /* Loading */
+            dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Load in Progress", 
+                                                         "Choose how to proceed with the active operation."));
+            adw_alert_dialog_add_response(dialog, "cancel-close", "Cancel & Close");
+            adw_alert_dialog_add_response(dialog, "cancel-load", "Cancel Loading");
+            adw_alert_dialog_add_response(dialog, "continue", "Continue Loading");
+            
+            adw_alert_dialog_set_response_appearance(dialog, "cancel-close", ADW_RESPONSE_DESTRUCTIVE);
+        }
+        
         adw_alert_dialog_set_default_response(dialog, "continue");
+        
+        /* Track active dialog */
+        g_weak_ref_set(&win->active_dialog_ref, dialog);
         
         g_signal_connect(dialog, "response", G_CALLBACK(on_window_close_response), win);
         adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
@@ -2655,6 +2698,7 @@ setup_window(GtkWindow *window)
 {
     ViteWindow *win = g_new0(ViteWindow, 1);
     win->window = window;
+    g_weak_ref_init(&win->active_dialog_ref, NULL);
     g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), win);
     g_object_set_data(G_OBJECT(window), "vite-window", win);
 
@@ -3069,6 +3113,7 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     
     if (ctx->tab) {
         vite_tab_set_loading(ctx->tab, FALSE);
+        vite_tab_close_active_dialog(ctx->tab);
         
         GtkWidget *page = g_object_get_data(G_OBJECT(ctx->tab), "page");
         GtkWidget *editor = get_editor_from_page(page);
@@ -3091,7 +3136,11 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
              }
              
         } else {
-             if (!g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+             if (g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+                 /* Revert title on cancellation */
+                 vite_tab_restore_original_title(ctx->tab);
+                 update_window_title_for_tab(ctx->tab);
+             } else {
                  /* Show error dialog */
                  GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(ctx->tab));
                  if (root) {
@@ -3100,6 +3149,12 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
                      adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
                  }
              }
+        }
+        
+        vite_tab_set_operation_type(ctx->tab, VITE_OP_NONE);
+        
+        if (vite_tab_get_close_when_done(ctx->tab)) {
+            g_signal_emit_by_name(ctx->tab, "close-clicked");
         }
     }
     
@@ -3253,14 +3308,17 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
         document_add_content_callback(doc, on_document_content_changed, reused_tab);
         
         tab_to_use = reused_tab;
-        
-        vite_tab_set_title(tab_to_use, basename);
-        g_object_set_data_full(G_OBJECT(tab_to_use), "original_title", g_strdup(basename), g_free);
-        
     } else {
         doc = document_new_empty();
-        create_new_tab(target_window, basename, doc);
+        create_new_tab(target_window, "Untitled", doc);
         tab_to_use = vite_tab_bar_get_active_tab(target_window->tab_bar);
+    }
+    
+    /* Capture original title (Untitled X) before renaming */
+    if (tab_to_use) {
+        vite_tab_set_operation_type(tab_to_use, VITE_OP_LOADING);
+        vite_tab_set_loading(tab_to_use, TRUE);
+        vite_tab_set_title(tab_to_use, basename);
     }
     
     /* Set language based on extension immediately */
@@ -3307,7 +3365,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
 
     /* Setup Async Load */
     /* Setup Async Load */
-    vite_tab_set_loading(tab_to_use, TRUE);
+    /* Loading set earlier to capture title */
     if (EDITOR_IS_WIDGET(editor)) {
          gtk_widget_set_sensitive(editor, FALSE);
     }
@@ -3591,6 +3649,9 @@ on_save_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     ViteTab *tab = g_weak_ref_get(&data->tab_ref);
     if (tab) {
         vite_tab_set_loading(tab, FALSE);
+        vite_tab_set_operation_type(tab, VITE_OP_NONE);
+        vite_tab_close_active_dialog(tab);
+        
         vite_tab_set_progress(tab, 0.0);
         
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
@@ -3680,6 +3741,7 @@ save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const cha
     /* Setup UI */
     if (tab) {
         vite_tab_set_loading(tab, TRUE);
+        vite_tab_set_operation_type(tab, VITE_OP_SAVING);
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
         GtkWidget *editor = get_editor_from_page(page);
         if (EDITOR_IS_WIDGET(editor)) {

@@ -18,11 +18,15 @@ struct _ViteTab {
     GtkWidget *progress_bar;
     
     char *title;
+    char *original_title;
     gboolean is_hovered;
     gboolean is_active;
     gboolean is_modified;
     gboolean loading;
     gboolean close_when_done;
+    ViteTabOperationType op_type;
+    GWeakRef active_dialog_ref;
+    
     double anim_offset_x; /* For smooth reorder animation */
     double drag_start_x;  /* Drag start position for ghost icon positioning */
     double drag_start_y;
@@ -162,9 +166,11 @@ vite_tab_finalize (GObject *object)
     ViteTab *self = VITE_TAB(object);
     /* Ensure any pending load is cancelled */
     if (self->cancellable) {
-    g_object_unref(self->cancellable);
+        g_object_unref(self->cancellable);
     }
+    g_weak_ref_clear(&self->active_dialog_ref);
     g_free(self->title);
+    g_free(self->original_title);
     G_OBJECT_CLASS(vite_tab_parent_class)->finalize(object);
 }
 
@@ -599,6 +605,9 @@ vite_tab_init (ViteTab *self)
     
     /* Progress Bar */
     self->progress_bar = gtk_progress_bar_new();
+    
+    g_weak_ref_init(&self->active_dialog_ref, NULL);
+    
     gtk_widget_set_valign(self->progress_bar, GTK_ALIGN_END);
     gtk_widget_add_css_class(self->progress_bar, "progress-bar");
     gtk_widget_set_visible(self->progress_bar, FALSE);
@@ -801,12 +810,15 @@ on_close_response(AdwAlertDialog *dialog, const char *response, gpointer user_da
     ViteTab *self = VITE_TAB(user_data);
     g_object_ref(self); /* Ensure alive */
     
+    /* Clear active dialog ref since it's closing */
+    vite_tab_set_active_dialog(self, NULL);
+    
     if (g_strcmp0(response, "cancel-close") == 0) {
         self->close_when_done = TRUE;
         vite_tab_cancel_load(self);
     } else if (g_strcmp0(response, "wait-close") == 0) {
         self->close_when_done = TRUE;
-    } else if (g_strcmp0(response, "cancel-save") == 0) {
+    } else if (g_strcmp0(response, "cancel-save") == 0 || g_strcmp0(response, "cancel-load") == 0) {
         self->close_when_done = FALSE;
         vite_tab_cancel_load(self);
     } else if (g_strcmp0(response, "continue") == 0) {
@@ -824,16 +836,32 @@ on_close_clicked (GtkButton *btn, gpointer user_data)
     if (self->loading) {
         GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(self));
         if (root) {
-            AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save in Progress", 
-                                                                         "Choose how to proceed with the active operation."));
+            AdwAlertDialog *dialog = NULL;
             
-            adw_alert_dialog_add_response(dialog, "cancel-close", "Cancel & Close");
-            adw_alert_dialog_add_response(dialog, "wait-close", "Close after Save");
-            adw_alert_dialog_add_response(dialog, "cancel-save", "Cancel Saving");
-            adw_alert_dialog_add_response(dialog, "continue", "Continue Saving");
+            if (self->op_type == VITE_OP_LOADING) {
+                dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Load in Progress", 
+                                                              "Choose how to proceed with the active operation."));
+                adw_alert_dialog_add_response(dialog, "cancel-close", "Cancel & Close");
+                adw_alert_dialog_add_response(dialog, "cancel-load", "Cancel Loading");
+                adw_alert_dialog_add_response(dialog, "continue", "Continue Loading");
+                adw_alert_dialog_set_response_appearance(dialog, "cancel-close", ADW_RESPONSE_DESTRUCTIVE);
+            } else {
+                /* Default to Saving logic */
+                dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save in Progress", 
+                                                              "Choose how to proceed with the active operation."));
+                
+                adw_alert_dialog_add_response(dialog, "cancel-close", "Cancel & Close");
+                adw_alert_dialog_add_response(dialog, "wait-close", "Close after Save");
+                adw_alert_dialog_add_response(dialog, "cancel-save", "Cancel Saving");
+                adw_alert_dialog_add_response(dialog, "continue", "Continue Saving");
+                
+                adw_alert_dialog_set_response_appearance(dialog, "cancel-close", ADW_RESPONSE_DESTRUCTIVE);
+            }
             
-            adw_alert_dialog_set_response_appearance(dialog, "cancel-close", ADW_RESPONSE_DESTRUCTIVE);
             adw_alert_dialog_set_default_response(dialog, "continue");
+            
+            /* Track dialog for auto-close */
+            vite_tab_set_active_dialog(self, dialog);
             
             g_signal_connect(dialog, "response", G_CALLBACK(on_close_response), self);
             adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
@@ -841,7 +869,7 @@ on_close_clicked (GtkButton *btn, gpointer user_data)
         }
     }
     
-    g_signal_emit(self, signals[SIGNAL_CLOSE_CLICKED], 0);
+    g_signal_emit(self, g_signal_lookup("close-clicked", VITE_TYPE_TAB), 0);
 }
 
 static void on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
@@ -1091,5 +1119,64 @@ gboolean
 vite_tab_get_close_when_done(ViteTab *self)
 {
     return self->close_when_done;
+}
+
+void
+vite_tab_set_operation_type(ViteTab *self, ViteTabOperationType type)
+{
+    /* If starting load, save title */
+    if (type == VITE_OP_LOADING && self->op_type != VITE_OP_LOADING) {
+        g_free(self->original_title);
+        self->original_title = g_strdup(self->title);
+        g_print("DEBUG: set_op_type: LOADING. Captured original_title: '%s'\n", self->original_title);
+    } else {
+        g_print("DEBUG: set_op_type: %d (current: %d)\n", type, self->op_type);
+    }
+
+    self->op_type = type;
+    /* Map implicitly to loading bool for legacy checks */
+    self->loading = (type != VITE_OP_NONE);
+    
+    /* If op finished, clear original title (it should have been used if needed) */
+    if (type == VITE_OP_NONE) {
+        if (self->original_title) {
+             g_free(self->original_title);
+             self->original_title = NULL;
+        }
+    }
+}
+
+ViteTabOperationType
+vite_tab_get_operation_type(ViteTab *self)
+{
+    return self->op_type;
+}
+
+void
+vite_tab_set_active_dialog(ViteTab *self, AdwAlertDialog *dialog)
+{
+    g_weak_ref_set(&self->active_dialog_ref, dialog);
+}
+
+void
+vite_tab_close_active_dialog(ViteTab *self)
+{
+    AdwAlertDialog *dialog = g_weak_ref_get(&self->active_dialog_ref);
+    if (dialog) {
+        adw_dialog_close(ADW_DIALOG(dialog));
+        g_object_unref(dialog);
+    }
+    g_weak_ref_set(&self->active_dialog_ref, NULL);
+}
+
+void
+vite_tab_restore_original_title(ViteTab *self)
+{
+    g_print("DEBUG: restore_original: '%s'\n", self->original_title);
+    if (self->original_title) {
+        vite_tab_set_title(self, self->original_title);
+        /* We don't free here; let set_operation_type(None) or finalize do it, or free it to avoid dupes? 
+           set_operation_type(None) frees it. So safe. */
+    }
 }
 
