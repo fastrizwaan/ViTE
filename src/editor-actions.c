@@ -734,7 +734,6 @@ editor_widget_select_all(EditorWidget *self)
     self->selection_anchor = primary->selection_anchor;
     
     self->alt_word_mode = TRUE;
-    scroll_to_cursor(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
