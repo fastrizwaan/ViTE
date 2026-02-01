@@ -64,6 +64,7 @@ const char *syntax_detect_language(const char *content);
    If compute_attributes is FALSE, returns NULL. */
 PangoAttrList *syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text);
 PangoAttrList *syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gboolean compute_attributes);
+PangoAttrList *syntax_process_line_len(SyntaxContext *ctx, size_t line_index, const char *text, size_t len, gboolean compute_attributes);
 
 /* Get the number of lines that have been processed for state so far */
 size_t syntax_get_processed_line_count(SyntaxContext *ctx);

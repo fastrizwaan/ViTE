@@ -274,10 +274,18 @@ syntax_detect_language(const char *content)
     
     /* Shebang Check */
     if (g_str_has_prefix(content, "#!")) {
-        if (strstr(content, "bash") || strstr(content, "sh")) return "bash";
-        if (strstr(content, "python")) return "python";
-        if (strstr(content, "node")) return "javascript";
-        if (strstr(content, "perl")) return NULL; /* Not supported yet */
+        const char *newline = strchr(content, '\n');
+        size_t line_len = newline ? (size_t)(newline - content) : strlen(content);
+        char *first_line = g_strndup(content, line_len);
+        
+        const char *ret = NULL;
+        if (strstr(first_line, "bash") || strstr(first_line, "sh")) ret = "bash";
+        else if (strstr(first_line, "python")) ret = "python";
+        else if (strstr(first_line, "node")) ret = "javascript";
+        else if (strstr(first_line, "perl")) ret = NULL; /* Not supported yet */
+        
+        g_free(first_line);
+        if (ret) return ret;
     }
     
     /* XML / HTML */
@@ -538,24 +546,29 @@ syntax_get_processed_line_count(SyntaxContext *ctx)
 }
 
 PangoAttrList *
-syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gboolean compute_attributes)
+syntax_process_line_len(SyntaxContext *ctx, size_t line_index, const char *text, size_t len, gboolean compute_attributes)
 {
     if (ctx->lang == LANG_NONE) return compute_attributes ? pango_attr_list_new() : NULL;
     
     SyntaxState start_state = get_line_start_state(ctx, line_index);
-    guint content_hash = g_str_hash(text);
+    guint content_hash = 0;
     
     /* Cache lookup - Only if we need attributes */
-    if (compute_attributes && ctx->line_cache && line_index < ctx->line_cache->len) {
-        SyntaxCacheEntry *cached = g_ptr_array_index(ctx->line_cache, line_index);
-        if (cached && cached->content_hash == content_hash && cached->start_state == start_state) {
-            /* Cache hit - return a copy of the cached attrs */
-            return pango_attr_list_ref(cached->attrs);
+    /* Optimization: Don't compute hash if not computing attributes! */
+    if (compute_attributes) {
+        content_hash = g_str_hash(text); 
+        
+        if (ctx->line_cache && line_index < ctx->line_cache->len) {
+            SyntaxCacheEntry *cached = g_ptr_array_index(ctx->line_cache, line_index);
+            if (cached && cached->content_hash == content_hash && cached->start_state == start_state) {
+                /* Cache hit - return a copy of the cached attrs */
+                return pango_attr_list_ref(cached->attrs);
+            }
         }
     }
     
     PangoAttrList *attrs = compute_attributes ? pango_attr_list_new() : NULL;
-    size_t len = strlen(text);
+    /* len is provided, no strlen needed */
     
     /* Dispatch to language handlers */
     switch (ctx->lang) {
@@ -610,6 +623,12 @@ syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gbo
     }
     
     return attrs;
+}
+
+PangoAttrList *
+syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gboolean compute_attributes)
+{
+    return syntax_process_line_len(ctx, line_index, text, strlen(text), compute_attributes);
 }
 
 PangoAttrList *

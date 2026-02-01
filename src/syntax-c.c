@@ -31,6 +31,97 @@ static const char *std_types[] = {
 void 
 syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index)
 {
+    /* Fast Path: State computation only (no attributes) */
+    if (!attrs) {
+        size_t cur = 0;
+        int paren_depth = 0;
+        
+        while (cur < len) {
+            /* 1. Handling Multi-line Comment States */
+            if (state == STATE_IN_ML_COMMENT || state == STATE_C_ENUM_ML_COMMENT || state == STATE_C_PARAMS_ML_COMMENT) {
+                const char *found = strstr(text + cur, "*/");
+                if (found) {
+                     cur = (found - text) + 2;
+                     if (state == STATE_C_ENUM_ML_COMMENT) state = STATE_C_ENUM;
+                     else if (state == STATE_C_PARAMS_ML_COMMENT) state = STATE_C_PARAMS;
+                     else state = STATE_ROOT;
+                } else {
+                     cur = len;
+                }
+                continue;
+            }
+            
+            /* 2. Fast Scan for Triggers */
+            /* We can skip until we see interesting characters: / " ' { } ( ) ; */
+            /* Using strhpbrk or manual loop. Manual loop often faster for small sets. */
+            /* Optimization: Skip plain alphanumeric/space runs quickly */
+            /* But we need to catch 'enum' keyword if we want to maintain ENUM state. 
+               However, strictly solving the user's issue (ML comments/quotes) allows us to be lazier about ENUMs 
+               if we accept that jumping into a huge Enum might lose coloring initially. 
+               Let's try to maintain it if possible, but prioritize speed. 
+            */
+            
+            char c = text[cur];
+            
+            if (c == '/') {
+                if (cur + 1 < len) {
+                    if (text[cur+1] == '/') { cur = len; continue; }
+                    if (text[cur+1] == '*') {
+                        if (state == STATE_C_ENUM) state = STATE_C_ENUM_ML_COMMENT;
+                        else if (state == STATE_C_PARAMS) state = STATE_C_PARAMS_ML_COMMENT;
+                        else state = STATE_IN_ML_COMMENT;
+                        cur += 2;
+                        continue;
+                    }
+                }
+            } else if (c == '"' || c == '\'') {
+                char quote = c;
+                cur++;
+                while (cur < len) {
+                    if (text[cur] == quote && text[cur-1] != '\\') {
+                        cur++;
+                        break;
+                    }
+                    if (text[cur] == '\\') cur++; /* Skip escaped char */
+                    cur++;
+                }
+                continue;
+            } else if (state == STATE_ROOT) {
+                 /* Basic keyword detection for 'enum' */
+                 if (c == 'e' && strncmp(text + cur, "enum", 4) == 0) {
+                     /* check boundary */
+                     if (cur + 4 >= len || !g_ascii_isalnum(text[cur+4])) {
+                         state = STATE_C_ENUM_WAIT_LBRACE;
+                         cur += 4;
+                         continue;
+                     }
+                 }
+                 /* Detect function calls? Too complex for fast path, relies on parens */
+                 /* We'll skip entering PARAMS state in fast path for now. 
+                    This means function params might be less colorful after a massive jump, 
+                    but comments will be correct. */
+            } else if (state == STATE_C_ENUM_WAIT_LBRACE) {
+                if (c == '{') state = STATE_C_ENUM;
+                else if (c == ';') state = STATE_ROOT;
+            } else if (state == STATE_C_ENUM) {
+                if (c == '}') state = STATE_ROOT;
+            } else if (state == STATE_C_PARAMS) {
+                if (c == ')') {
+                    if (paren_depth == 0) state = STATE_ROOT;
+                    else paren_depth--;
+                } else if (c == '(') {
+                    paren_depth++;
+                }
+            }
+            
+            cur++;
+        }
+        
+        set_line_end_state(ctx, line_index, state);
+        return;
+    }
+
+
     size_t cur = 0;
     int paren_depth = 0;
     while (cur < len) {
@@ -494,6 +585,19 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
         }
         
         if (state == STATE_ROOT) {
+            /* Whitespace */
+            if (g_ascii_isspace(text[cur])) {
+                cur++;
+                continue;
+            }
+            
+            /* Punctuation (Braces, parens, semicolons, etc) */
+            if (strchr("{}()[].,;", text[cur])) {
+                add_attr(attrs, cur, cur + 1, &d_punctuation);
+                cur++;
+                continue;
+            }
+            
             /* Comments */
             if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
                 add_attr(attrs, cur, len, &d_comment);
@@ -835,6 +939,10 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
              state = STATE_ROOT;
              cur++;
         }
+        
+        /* IMPORTANT: Save the computed state! */
+        set_line_end_state(ctx, line_index, state);
+        return;
     }
     
     set_line_end_state(ctx, line_index, state);

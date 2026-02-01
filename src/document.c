@@ -3428,3 +3428,25 @@ document_save_async_cancel(DocumentSaveTask *task)
         }
     }
 }
+
+size_t
+document_get_line_into(Document *doc, size_t line_index, char *buf, size_t buf_len)
+{
+    return piece_table_get_line_into(doc->pt, line_index, buf, buf_len);
+}
+
+void
+document_iter_init(Document *doc, DocumentIter *iter, size_t line_index)
+{
+    if (line_index == 0) {
+        piece_table_iter_init(doc->pt, &iter->iter);
+    } else {
+        piece_table_iter_init_at_line(doc->pt, &iter->iter, line_index);
+    }
+}
+
+size_t
+document_iter_next_line(DocumentIter *iter, char *buf, size_t buf_len)
+{
+    return piece_table_iter_get_next_line(&iter->iter, buf, buf_len);
+}

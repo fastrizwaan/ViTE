@@ -33,11 +33,117 @@ static const char *py_special_vars[] = {
 void 
 syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, size_t len, SyntaxState state, size_t line_index)
 {
-    size_t cur = 0;
+    /* Fast Path: State computation only */
+    if (!attrs) {
+        size_t cur = 0;
+        
+        /* If continuation of multiline string, handle immediately */
+        if (state == STATE_IN_TRIPLE_DQ_STRING) {
+            while (cur + 2 < len) {
+                if (g_str_has_prefix(text + cur, "\"\"\"") && (cur == 0 || text[cur-1] != '\\')) {
+                    cur += 3;
+                    state = STATE_ROOT;
+                    break;
+                }
+                cur++;
+            }
+            if (state == STATE_IN_TRIPLE_DQ_STRING) cur = len;
+        }
+        else if (state == STATE_IN_TRIPLE_SQ_STRING) {
+            while (cur + 2 < len) {
+                if (g_str_has_prefix(text + cur, "'''") && (cur == 0 || text[cur-1] != '\\')) {
+                    cur += 3;
+                    state = STATE_ROOT;
+                    break;
+                }
+                cur++;
+            }
+            if (state == STATE_IN_TRIPLE_SQ_STRING) cur = len;
+        }
+        
+        while (cur < len) {
+             /* In ROOT, look for """ ''' " ' # */
+             /* Optimization: could use strpbrk but we need to check prefixes too */
+             
+             char c = text[cur];
+             
+             if (c == '#') {
+                 /* Comment - skip to end */
+                 cur = len;
+                 continue;
+             }
+             
+             if (c == '"') {
+                 if (cur + 2 < len && text[cur+1] == '"' && text[cur+2] == '"') {
+                     /* Start Triple DQ */
+                     state = STATE_IN_TRIPLE_DQ_STRING;
+                     cur += 3;
+                     /* Scan for end immediately */
+                     while (cur + 2 < len) {
+                        if (g_str_has_prefix(text + cur, "\"\"\"") && text[cur-1] != '\\') {
+                            cur += 3;
+                            state = STATE_ROOT;
+                            break;
+                        }
+                        cur++;
+                     }
+                     if (state == STATE_IN_TRIPLE_DQ_STRING) cur = len;
+                     continue;
+                 }
+                 /* Single string */
+                 cur++;
+                 while (cur < len) {
+                     if (text[cur] == '"' && text[cur-1] != '\\') {
+                         cur++;
+                         break;
+                     }
+                     cur++;
+                 }
+                 continue;
+             }
+             
+             if (c == '\'') {
+                 if (cur + 2 < len && text[cur+1] == '\'' && text[cur+2] == '\'') {
+                     /* Start Triple SQ */
+                     state = STATE_IN_TRIPLE_SQ_STRING;
+                     cur += 3;
+                     /* Scan for end immediately */
+                     while (cur + 2 < len) {
+                        if (g_str_has_prefix(text + cur, "'''") && text[cur-1] != '\\') {
+                            cur += 3;
+                            state = STATE_ROOT;
+                            break;
+                        }
+                        cur++;
+                     }
+                     if (state == STATE_IN_TRIPLE_SQ_STRING) cur = len;
+                     continue;
+                 }
+                 /* Single string */
+                 cur++;
+                 while (cur < len) {
+                     if (text[cur] == '\'' && text[cur-1] != '\\') {
+                         cur++;
+                         break;
+                     }
+                     cur++;
+                 }
+                 continue;
+             }
+             
+             cur++;
+        }
+        
+        set_line_end_state(ctx, line_index, state);
+        return;
+    }
+
     gboolean expect_func = FALSE;
     gboolean expect_class = FALSE;
     gboolean in_lambda_def = FALSE;
     int paren_depth = 0;
+    size_t cur = 0;
+
 
     /* If continuation of multiline string, handle immediately */
     if (state == STATE_IN_TRIPLE_DQ_STRING) {

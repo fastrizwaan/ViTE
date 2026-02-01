@@ -90,6 +90,13 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                 continue;
             }
 
+            /* Punctuation (Braces, parens, semicolons, etc) */
+            if (strchr("{}()[].,;", text[cur])) {
+                add_attr(attrs, cur, cur + 1, &d_punctuation);
+                cur++;
+                continue;
+            }
+
             /* Comments */
             if (text[cur] == '/' && cur+1 < len) {
                 if (text[cur+1] == '/') {

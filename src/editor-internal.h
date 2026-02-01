@@ -201,6 +201,7 @@ size_t get_physical_line_index(EditorWidget *self, size_t visual_line_idx);
 /* Helpers */
 size_t utf8_next_grapheme(EditorWidget *self, size_t offset);
 size_t utf8_prev_grapheme(EditorWidget *self, size_t offset);
+void editor_widget_ensure_syntax_state_up_to(EditorWidget *self, size_t target_line);
 
 /* Rendering */
 void editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot);

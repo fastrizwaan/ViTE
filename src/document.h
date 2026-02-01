@@ -81,7 +81,7 @@ void document_remove_edit_callback(Document *doc, DocumentEditCallback callback,
 
 /* Content Access */
 char *document_get_line(Document *doc, size_t line_index, size_t *len);
-char *document_get_line(Document *doc, size_t line_index, size_t *len);
+size_t document_get_line_into(Document *doc, size_t line_index, char *buf, size_t buf_len);
 char *document_get_line_truncated(Document *doc, size_t line_index, size_t *out_len, size_t max_len);
 size_t document_get_line_length(Document *doc, size_t line_index);
 void document_foreach_line(Document *doc, void (*func)(size_t line_len, void *user_data), void *user_data);
@@ -97,7 +97,16 @@ uint64_t document_get_version(Document *doc);
 /* Editing */
 void document_insert(Document *doc, size_t offset, const char *text, size_t len);
 void document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len);
+void document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len);
 void document_transfer_range(Document *dest, Document *src, size_t src_offset, size_t len, size_t dest_offset);
+
+/* Iterator for fast sequential access */
+typedef struct {
+    PieceTableIter iter;
+} DocumentIter;
+
+void document_iter_init(Document *doc, DocumentIter *iter, size_t line_index);
+size_t document_iter_next_line(DocumentIter *iter, char *buf, size_t buf_len);
 void document_delete(Document *doc, size_t offset, size_t len);
 
 /* Undo/Redo */
