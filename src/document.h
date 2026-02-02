@@ -121,7 +121,7 @@ void document_set_undo_group_selection(Document *doc, size_t start, size_t end);
 void document_set_redo_group_selection(Document *doc, size_t start, size_t end);
 
 /* Async Undo/Redo with Progress */
-typedef void (*UndoRedoProgressCallback)(double progress, gboolean finished, gpointer user_data);
+typedef void (*UndoRedoProgressCallback)(double progress, gboolean finished, UndoInfo *info, gpointer user_data);
 typedef struct _UndoRedoTask UndoRedoTask;
 typedef struct _StreamingChangeCaseTask StreamingChangeCaseTask;
 

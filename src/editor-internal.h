@@ -153,7 +153,7 @@ void editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_de
 /* Input */
 void editor_input_init_controllers(EditorWidget *self);
 void editor_widget_update_im_cursor_location(EditorWidget *self);
-void editor_widget_on_undo_redo_progress(double progress, gboolean finished, gpointer user_data);
+void editor_widget_on_undo_redo_progress(double progress, gboolean finished, UndoInfo *info, gpointer user_data);
 void editor_widget_on_change_case_progress(int processed, int total, gboolean finished, gpointer user_data);
 void move_cursor(EditorWidget *self, int visual_lines);
 

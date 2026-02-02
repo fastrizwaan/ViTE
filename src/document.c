@@ -574,13 +574,16 @@ undo_redo_idle_step(gpointer user_data)
     UndoRedoTask *task = user_data;
     Document *doc = task->doc;
     
+    UndoInfo info = {0};
+    gboolean operation_done = FALSE;
+
     /* If we have an active piece table replacement (massive file restore), continue it */
     if (task->pt_task) {
         double progress = 0;
         if (!piece_table_replace_async_step(task->pt_task, 10000, &progress)) {
             /* Still processing chunks, yield */
             if (task->callback) {
-                task->callback(progress, FALSE, task->user_data);
+                task->callback(progress, FALSE, NULL, task->user_data);
             }
             return G_SOURCE_CONTINUE;
         }
@@ -589,12 +592,6 @@ undo_redo_idle_step(gpointer user_data)
         piece_table_replace_async_finalize(task->pt_task);
         task->pt_task = NULL;
         
-        /* Now finalize the undo stack state without re-executing */
-        size_t old_lines = piece_table_get_line_count(doc->pt); /* This is the NEW line count now actually */
-        /* Wait, we need the OLD line count for delta calculation. 
-           But for RESTORE_FROM_PATH, old_lines isn't as critical as the final update. */
-           
-        UndoInfo info;
         if (task->is_undo) {
             info = undo_stack_undo_skip_execute(doc->undo_stack);
         } else {
@@ -602,14 +599,12 @@ undo_redo_idle_step(gpointer user_data)
         }
         
         check_modification_state(doc);
-        
-        /* For restorations, we just emit a full update */
-        document_emit_update(doc, 0, 0); /* 0, 0 triggers full refresh in renderer usually */
+        document_emit_update(doc, 0, 0);
+        operation_done = TRUE;
     } else {
         /* Standard operation (INSERT/DELETE) or small restore */
         size_t old_lines = piece_table_get_line_count(doc->pt);
         
-        UndoInfo info;
         if (task->is_undo) {
             info = undo_stack_undo(doc->undo_stack, doc->pt);
         } else {
@@ -634,11 +629,12 @@ undo_redo_idle_step(gpointer user_data)
             
             document_emit_update(doc, start_line, line_delta);
         }
+        operation_done = TRUE;
     }
     
     /* Operation complete */
     if (task->callback) {
-        task->callback(1.0, TRUE, task->user_data);
+        task->callback(1.0, TRUE, operation_done ? &info : NULL, task->user_data);
     }
     
     task->idle_id = 0;
@@ -650,7 +646,7 @@ UndoRedoTask *
 document_undo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data)
 {
     if (!doc->undo_stack || !undo_stack_peek(doc->undo_stack)) {
-        if (callback) callback(1.0, TRUE, user_data);
+        if (callback) callback(1.0, TRUE, NULL, user_data);
         return NULL;
     }
     
@@ -684,7 +680,7 @@ UndoRedoTask *
 document_redo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data)
 {
     if (!doc->undo_stack || !undo_stack_peek_redo(doc->undo_stack)) {
-        if (callback) callback(1.0, TRUE, user_data);
+        if (callback) callback(1.0, TRUE, NULL, user_data);
         return NULL;
     }
     

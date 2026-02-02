@@ -28,13 +28,46 @@ static void on_ctx_change_case(GSimpleAction *action, GVariant *param, gpointer 
 
 /* Undo/Redo Progress Callback */
 void
-editor_widget_on_undo_redo_progress(double progress, gboolean finished, gpointer user_data)
+editor_widget_on_undo_redo_progress(double progress, gboolean finished, UndoInfo *info, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     
     if (finished) {
         /* Operation complete - clear task and update UI */
         self->undo_redo_task = NULL;
+        
+        if (info) {
+            editor_widget_clear_cursors(self);
+            EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0); // Directly access since we cleared
+            
+            if (info->has_selection) {
+                primary->selection_anchor = info->selection_start;
+                primary->cursor_offset = info->selection_end;
+            } else {
+                if (info->is_insert) {
+                    /* Was insert (or redo insert) -> place at end */
+                    primary->cursor_offset = info->start + info->length;
+                    primary->selection_anchor = info->start + info->length;
+                } else {
+                    /* Was delete (or redo delete) -> place at start */
+                    primary->cursor_offset = info->start;
+                    primary->selection_anchor = info->start;
+                }
+            }
+            
+            /* Sync cache variables */
+            self->cursor_offset = primary->cursor_offset;
+            self->selection_anchor = primary->selection_anchor;
+            primary->target_x = -1;
+            self->target_x = -1;
+            
+            /* Ensure cursor is valid/clamped */
+            size_t len = document_get_length(self->doc);
+            if (self->cursor_offset > len) self->cursor_offset = len;
+            if (self->selection_anchor > len) self->selection_anchor = len;
+            primary->cursor_offset = self->cursor_offset;
+            primary->selection_anchor = self->selection_anchor;
+        }
         
         /* Refresh editor */
         editor_widget_reset_cursor_blink(self);
@@ -54,7 +87,7 @@ void
 editor_widget_on_change_case_progress(int processed, int total, gboolean finished, gpointer user_data)
 {
     double progress = (total > 0) ? (double)processed / (double)total : 1.0;
-    editor_widget_on_undo_redo_progress(progress, finished, user_data);
+    editor_widget_on_undo_redo_progress(progress, finished, NULL, user_data);
 }
 
 
