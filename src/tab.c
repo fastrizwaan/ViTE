@@ -90,6 +90,8 @@ static const char *TAB_CSS =
 "    background-color: mix(@headerbar_bg_color, @window_fg_color, 0.09);"
 "    color: @window_fg_color;"
 "}"
+
+
 "box.vite-tab.active:hover {"
 "    background-color: mix(@headerbar_bg_color, @window_fg_color, 0.12);"
 "    color: @window_fg_color;"
@@ -166,6 +168,17 @@ static const char *TAB_CSS =
 ".drag-ghost {"
 "    opacity: 0.9;"
 "    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);"
+"}"
+"box.vite-tab.pressed,"
+"box.vite-tab.pressed:hover {"
+"    background-color: mix(@headerbar_bg_color, @window_fg_color, 0.14);"
+"    color: @window_fg_color;"
+"}"
+"box.vite-tab.pressed .vite-tab-fade,"
+"box.vite-tab.pressed:hover .vite-tab-fade {"
+"    background-image: linear-gradient(to right, transparent 0%, "
+"        mix(@headerbar_bg_color, @window_fg_color, 0.14) 60%, "
+"        mix(@headerbar_bg_color, @window_fg_color, 0.14) 100%);"
 "}";
 
 static void
@@ -393,9 +406,32 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
 
     /* Remove the dragging CSS class */
     gtk_widget_remove_css_class(GTK_WIDGET(self), "dragging");
+    gtk_widget_remove_css_class(GTK_WIDGET(self), "pressed");
 }
 
 
+
+static void
+pressed_cb(GtkGestureClick *gesture,
+           int n_press,
+           double x,
+           double y,
+           gpointer user_data)
+{
+    GtkWidget *tab = user_data;
+    gtk_widget_add_css_class(tab, "pressed");
+}
+
+static void
+released_cb(GtkGestureClick *gesture,
+            int n_press,
+            double x,
+            double y,
+            gpointer user_data)
+{
+    GtkWidget *tab = user_data;
+    gtk_widget_remove_css_class(tab, "pressed");
+}
 
 static void
 on_click_pressed (GtkGestureClick *gesture, int n_press, double x, double y, ViteTab *self)
@@ -632,6 +668,8 @@ vite_tab_init (ViteTab *self)
     GtkGesture *click = gtk_gesture_click_new();
     gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
     g_signal_connect(click, "pressed", G_CALLBACK(on_click_pressed), self);
+    g_signal_connect(click, "pressed", G_CALLBACK(pressed_cb), self);
+    g_signal_connect(click, "released", G_CALLBACK(released_cb), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(click));
     
     GtkGesture *right_click = gtk_gesture_click_new();
