@@ -58,6 +58,18 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     if (self->hadjustment)
         scroll_x = gtk_adjustment_get_value(self->hadjustment);
 
+    /* Pre-calculate Tab Array for hit testing */
+    PangoTabArray *tab_array = NULL;
+    if (self->tab_width > 0) {
+        PangoFontMetrics *metrics = pango_context_get_metrics(context, self->font_desc, NULL);
+        int char_width = pango_font_metrics_get_approximate_char_width(metrics);
+        pango_font_metrics_unref(metrics);
+        
+        int tab_width_pango = char_width * self->tab_width;
+        tab_array = pango_tab_array_new(1, FALSE); /* Pango Units */
+        pango_tab_array_set_tab(tab_array, 0, PANGO_TAB_LEFT, tab_width_pango);
+    }
+
     size_t line_idx = start_line;
     
     /* Handle clicks above the visible content area */
@@ -97,6 +109,8 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
         }
         
+        if (tab_array) pango_layout_set_tabs(layout, tab_array);
+        
         int h;
         pango_layout_get_pixel_size(layout, NULL, &h);
         double line_h = (double)h;
@@ -129,6 +143,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             
             g_object_unref(layout);
             g_free(text);
+            if (tab_array) pango_tab_array_free(tab_array);
             return;
         }
         
@@ -148,6 +163,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     char *ltext = document_get_line(self->doc, line_idx, &last_len);
     g_free(ltext);
     *out_offset += last_len;
+    if (tab_array) pango_tab_array_free(tab_array);
 }
 
 void

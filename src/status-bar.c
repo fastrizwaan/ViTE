@@ -441,8 +441,11 @@ void
 vite_status_bar_set_insert_mode(ViteStatusBar *self, gboolean insert)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
-    gtk_label_set_text(GTK_LABEL(self->ins_label), insert ? "INS" : "OVR");
-    /* Optional: Style OVR differently? */
+    if (insert) {
+        gtk_label_set_markup(GTK_LABEL(self->ins_label), "<span font_weight='normal'>INS</span>");
+    } else {
+        gtk_label_set_markup(GTK_LABEL(self->ins_label), "<span font_weight='bold'>OVR</span>");
+    }
 }
 
 void

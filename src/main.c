@@ -2644,6 +2644,7 @@ on_toggle_insert_mode(GSimpleAction *action, GVariant *value, gpointer user_data
     if (editor && EDITOR_IS_WIDGET(editor)) {
          gboolean current = editor_widget_get_insert_mode(EDITOR_WIDGET(editor));
          editor_widget_set_insert_mode(EDITOR_WIDGET(editor), !current);
+         gtk_widget_grab_focus(editor);
     }
 }
 

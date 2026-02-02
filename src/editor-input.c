@@ -1308,6 +1308,27 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
             document_delete(self->doc, start, end - start);
             cur->cursor_offset = start;
             delta -= (long)(end - start);
+        } else if (!self->insert_mode && len > 0) {
+            /* Overwrite Mode: Delete next character if not EOL/Newline */
+            /* We only overwrite if we are inserting something that isn't a newline itself 
+               (though typically IM commit is just text). 
+               We simply delete the char at cursor to "replace" it. */
+            
+            size_t next_off = utf8_next_grapheme(self, cur->cursor_offset);
+            if (next_off > cur->cursor_offset) {
+                char *existing = document_get_text_range(self->doc, cur->cursor_offset, next_off - cur->cursor_offset);
+                gboolean safe_overwrite = TRUE;
+                if (existing) {
+                    if (existing[0] == '\n' || existing[0] == '\r') safe_overwrite = FALSE;
+                    g_free(existing);
+                }
+                
+                if (safe_overwrite) {
+                    document_delete(self->doc, cur->cursor_offset, next_off - cur->cursor_offset);
+                    /* Cursor stays at start, ready for insert */
+                    delta -= (long)(next_off - cur->cursor_offset);
+                }
+            }
         }
         
         document_insert(self->doc, cur->cursor_offset, str, len);

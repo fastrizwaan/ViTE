@@ -678,9 +678,102 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                      double cursor_h = MAX(pango_h, self->line_height);
                      double cursor_y = pango_y - (cursor_h - pango_h) / 2.0;
                      
-                     /* Draw 4 times to accumulate opacity and force "sharpness" on sub-pixels */
-                     for (int pass = 0; pass < 4; pass++) {
-                        gtk_snapshot_append_color(snapshot, &cursor_color, &GRAPHENE_RECT_INIT(cursor_x, (float)((int)(cursor_y + 0.5)), cursor_w, (float)((int)cursor_h)));
+                     if (self->insert_mode) {
+                         /* Insert Mode: I-Beam / Bar Cursor */
+                         /* Draw 4 times to accumulate opacity and force "sharpness" on sub-pixels */
+                         for (int pass = 0; pass < 4; pass++) {
+                            gtk_snapshot_append_color(snapshot, &cursor_color, &GRAPHENE_RECT_INIT(cursor_x, (float)((int)(cursor_y + 0.5)), cursor_w, (float)((int)cursor_h)));
+                         }
+                     } else {
+                         /* Overwrite Mode: Block Cursor with Inverted Text */
+                         
+                         /* 1. Determine block width */
+                         double block_w = 0;
+                         /* Need to fetch the character length in bytes for this grapheme */
+                         int char_len = 0;
+                         const char *char_text = NULL;
+                         
+                         if (index_in_line < effective_len && len > 0) {
+                             /* Find grapheme boundary */
+                             /* "text" is the line text available in this scope */
+                             const char *start_ptr = text + index_in_line;
+                             const char *end_ptr = g_utf8_next_char(start_ptr);
+                             char_len = (int)(end_ptr - start_ptr);
+                             char_text = start_ptr;
+                             
+                             /* Regular char width from existing layout */
+                             block_w = pango_units_to_double(strong_pos.width);
+                         } 
+                         
+                         /* Fallback width for EOL or zero-width chars */
+                         if (block_w <= 0.1) {
+                             PangoContext *pctx = gtk_widget_get_pango_context(widget);
+                             PangoFontMetrics *metrics = pango_context_get_metrics(pctx, self->font_desc, NULL);
+                             block_w = pango_units_to_double(pango_font_metrics_get_approximate_char_width(metrics));
+                             pango_font_metrics_unref(metrics);
+                         }
+                         
+                         /* 2. Draw Block (Cursor Color = Text Color) */
+                         /* Use opacity to handle blink, but relative to "On" state it absorbs the background */
+                         cursor_color.alpha = self->cursor_alpha;
+                         
+                         gtk_snapshot_append_color(snapshot, &cursor_color, 
+                             &GRAPHENE_RECT_INIT(cursor_x, (float)((int)(cursor_y + 0.5)), (float)block_w, (float)((int)cursor_h)));
+                             
+                         /* 3. Draw Inverted Text (Background Color) on top */
+                         if (char_len > 0 && char_text) {
+                             /* Create temp layout for the single character */
+                             PangoLayout *char_layout = pango_layout_new(context);
+                             pango_layout_set_font_description(char_layout, self->font_desc);
+                             if (tab_array) pango_layout_set_tabs(char_layout, tab_array);
+                             pango_layout_set_text(char_layout, char_text, char_len);
+                             
+                             GdkRGBA inv_text_color = bg_color;
+                             inv_text_color.alpha = self->cursor_alpha;
+                             
+                             /* Align positioning exactly */
+                             gtk_snapshot_save(snapshot);
+                             gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(cursor_x, (float)((int)(cursor_y + 0.5))));
+                             
+                             /* Adjust for baseline/centering diff inside the block? 
+                                strong_pos coordinates are layout relative. helper calculation:
+                                cursor_y = pango_y - (cursor_h - pango_h)/2.0
+                                We want to draw the text at the same relative position.
+                                pango_layout_draw starts at top-left of layout.
+                                We need to verify if pango_layout_new creates same vertical metrics.
+                                Usually yes.
+                                But we shifted cursor_y to center the cursor block if cursor_h > pango_h.
+                                We should draw the text at `pango_y` (offset from centering logic).
+                                
+                                x_pos = pango_units_to_double(strong_pos.x) -> already in cursor_x
+                                pango_y = pango_units_to_double(strong_pos.y) + centering_offset
+                                
+                                The cursor_x we use is floor(x_pos).
+                                We simply want to draw the char layout at (cursor_x, pango_y).
+                             */
+                             
+                             /* Translate back to root of this line's drawing context or just calc delta?
+                                We are currently translated to: (text_start_x - scroll_x, current_y_pos + padding_top)
+                                cursor_x is relative to this.
+                             */
+                             
+                             gtk_snapshot_restore(snapshot); /* Undo the block translation if I did any? No I didn't. */
+                             
+                             /* Actually, let's just append the layout at the correct coordinates */
+                             gtk_snapshot_save(snapshot);
+                             
+                             /* Calculate Y for text.  
+                                we have pango_y calculated above.
+                                pango_y includes centering_offset.
+                                We need to draw at (cursor_x, pango_y).
+                             */
+                             gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(cursor_x, (float)pango_y));
+                             
+                             gtk_snapshot_append_layout(snapshot, char_layout, &inv_text_color);
+                             
+                             gtk_snapshot_restore(snapshot);
+                             g_object_unref(char_layout);
+                         }
                      }
                 }
             }
