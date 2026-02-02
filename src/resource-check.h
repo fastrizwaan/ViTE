@@ -32,4 +32,7 @@ void *resource_safe_malloc(size_t size);
 /* Safe realloc with overflow checks */
 void *resource_safe_realloc(void *ptr, size_t old_size, size_t new_size);
 
+/* Safe GString allocator */
+GString *resource_safe_g_string_sized_new(size_t dfl_size);
+
 #endif /* RESOURCE_CHECK_H */

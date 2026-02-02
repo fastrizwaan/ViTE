@@ -124,6 +124,7 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
     
     /* Validate size */
     if (!resource_size_valid(len)) {
+        g_warning("undo_stack_push_insert: Invalid size %zu (possible overflow)", len);
         return;
     }
     
@@ -218,6 +219,11 @@ void
 undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text, size_t len)
 {
     if (stack->in_undo_redo) return;
+    
+    if (!resource_size_valid(len)) {
+         g_warning("undo_stack_push_delete: Invalid size %zu (possible overflow)", len);
+         return;
+    }
     
     UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_DELETE;

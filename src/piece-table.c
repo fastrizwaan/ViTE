@@ -101,6 +101,12 @@ disk_buffer_append(DiskBuffer *buf, const char *data, size_t len)
         return;
     }
     
+    /* Pre-check the size validity to catch sign extension */
+    if (!resource_size_valid(len)) {
+        g_warning("disk_buffer_append: Size invalid/overflow (len=%zu)", len);
+        return;
+    }
+    
     size_t new_len = buf->len + len;
     
     /* Sanity check for obviously corrupt/overflowed values */
@@ -878,6 +884,12 @@ void
 piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
 {
     if (len == 0) return;
+    
+    /* Validate length */
+    if (!resource_size_valid(len)) {
+         g_warning("piece_table_insert: Invalid length %zu (overflow)", len);
+         return;
+    }
     /* pt->change_count++ handled in insert_piece_at_offset or we do it here?
        insert_piece_at_offset increments it.
        But if we chunk, we increment 1100 times? 
@@ -1231,6 +1243,12 @@ void
 piece_table_delete(PieceTable *pt, size_t offset, size_t len)
 {
     if (len == 0 || !pt->root) return;
+    
+    if (!resource_size_valid(len)) {
+        g_warning("piece_table_delete: Invalid length %zu (overflow)", len);
+        return;
+    }
+    
     pt->change_count++;
     
     size_t total = piece_table_get_length(pt);
@@ -1396,7 +1414,7 @@ piece_table_get_text_range(PieceTable *pt, size_t offset, size_t len)
         return NULL;
     }
 
-    GString *res = g_string_sized_new(len);
+    GString *res = resource_safe_g_string_sized_new(len);
     if (!res) return NULL;
     
     /* Naive: iterate */

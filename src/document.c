@@ -398,6 +398,9 @@ document_delete(Document *doc, size_t offset, size_t len)
         document_delete_streaming(doc, offset, len);
         return;
     }
+    
+    /* Validate len again to be sure (resource_can_allocate checks it, but explicit check implies intention) */
+    if (!resource_size_valid(len)) return;
 
     size_t start_line = piece_table_get_line_of_offset(doc->pt, offset);
     size_t old_lines = piece_table_get_line_count(doc->pt);

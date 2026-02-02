@@ -3,6 +3,16 @@
 #include <adwaita.h>
 #include "resource-check.h"
 #include "vite-clipboard.h"
+#include "editor-widget.h" /* For compare_cursors definitions */
+
+/* Forward declare compare */
+static int compare_cursors(gconstpointer a, gconstpointer b) {
+    const EditorCursor *ca = a;
+    const EditorCursor *cb = b;
+    if (ca->cursor_offset < cb->cursor_offset) return -1;
+    if (ca->cursor_offset > cb->cursor_offset) return 1;
+    return 0;
+}
 
 /* For Zero-RAM system clipboard paste */
 #include <fcntl.h>
@@ -139,6 +149,7 @@ perform_copy_internal(EditorWidget *self)
     /* Create a temp array to sort ascending */
     GArray *sorted = g_array_sized_new(FALSE, FALSE, sizeof(EditorCursor), self->cursors->len);
     g_array_append_vals(sorted, self->cursors->data, self->cursors->len);
+    g_array_sort(sorted, compare_cursors); /* Ascending sort for clipboard order */
     
     for (guint c = 0; c < self->cursors->len; c++) {
          EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);

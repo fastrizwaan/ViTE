@@ -19,7 +19,10 @@
 /* #define ABSOLUTE_MAX_ALLOC (2ULL * 1024 * 1024 * 1024) */
 
 /* Threshold for "looks like integer overflow" - anything > 2^62 is suspicious */
+/* Threshold for "looks like integer overflow" - anything > 2^62 is suspicious.
+   Also catch 32-bit negative sign extension: 0xFFFFFFFFxxxxxxxx (approx 1.844e19) */
 #define OVERFLOW_THRESHOLD (1ULL << 62)
+#define SIGN_EXT_MASK 0xFFFFFFFF00000000ULL
 
 /* Minimum RAM to leave free (100MB) */
 #define MIN_FREE_RAM (100ULL * 1024 * 1024)
@@ -68,7 +71,16 @@ gboolean
 resource_size_valid(size_t size)
 {
     /* Detect obvious integer overflow - any value > 2^62 is suspicious */
-    return size < OVERFLOW_THRESHOLD;
+    if (size >= OVERFLOW_THRESHOLD) return FALSE;
+    
+    /* Detect 32-bit sign extension (0xFFFFFFFFxxxxxxxx) */
+    /* This happens when (size_t)(int)negative_val is done */
+    if ((size & SIGN_EXT_MASK) == SIGN_EXT_MASK) {
+         g_debug("resource_size_valid: Detected likely 32-bit sign extension overflow: %zx", size);
+         return FALSE;
+    }
+    
+    return TRUE;
 }
 
 gboolean
@@ -167,4 +179,19 @@ resource_safe_realloc(void *ptr, size_t old_size, size_t new_size)
     }
     
     return new_ptr;
+}
+
+GString *
+resource_safe_g_string_sized_new(size_t dfl_size)
+{
+    if (!resource_can_allocate(dfl_size + 16)) { /* +16 for struct overhead approx */
+        g_warning("resource_safe_g_string_sized_new: Refusing to allocate string of size %zu", dfl_size);
+        return NULL;
+    }
+    
+    GString *str = g_string_sized_new(dfl_size);
+    /* g_string_sized_new aborts on failure in older GLib, but modern GLib might return NULL or abort.
+       Since we checked can_allocate, we hope it succeeds. 
+       If it aborts, we at least tried to prevent it with can_allocate check. */
+    return str;
 }
