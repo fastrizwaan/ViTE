@@ -153,6 +153,10 @@ static void update_window_title_for_tab(ViteTab *tab);
  * These provide safe, consistent patterns for GtkStack widget manipulation.
  * ============================================================================ */
 
+/* Forward Declarations */
+static void on_editor_notify_indentation(GObject *editor, GParamSpec *pspec, gpointer user_data);
+static void update_status_bar_from_editor(ViteWindow *win, GtkWidget *editor);
+
 /**
  * Safely removes a child from a GtkStack with transition locking.
  * Prevents snapshot assertions by disabling transitions during removal.
@@ -922,6 +926,12 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
                  else if (nl == NEWLINE_CR) nl_key = "cr";
                  act = g_action_map_lookup_action(map, "set-line-ending");
                  if (act) g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(nl_key));
+                  
+                  /* Update Indentation Status */
+                  int tab_w = 4;
+                  int indent_s = 0;
+                  g_object_get(G_OBJECT(editor), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
+                  vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), tab_w, indent_s == 1);
              }
         }
     }
@@ -1116,6 +1126,11 @@ do_split(ViteWindow *win, GtkOrientation orientation)
     editor_widget_set_show_line_numbers(EDITOR_WIDGET(new_editor), editor_widget_get_show_line_numbers(EDITOR_WIDGET(old_editor)));
     editor_widget_set_word_wrap(EDITOR_WIDGET(new_editor), editor_widget_get_word_wrap(EDITOR_WIDGET(old_editor)));
     editor_widget_set_insert_mode(EDITOR_WIDGET(new_editor), editor_widget_get_insert_mode(EDITOR_WIDGET(old_editor)));
+    
+    /* Connect Indentation Sync Signals */
+    g_signal_connect(new_editor, "notify::tab-width", G_CALLBACK(on_editor_notify_indentation), win);
+    g_signal_connect(new_editor, "notify::indent-style", G_CALLBACK(on_editor_notify_indentation), win);
+    g_signal_connect(new_editor, "notify::indent-width", G_CALLBACK(on_editor_notify_indentation), win);
     
     /* SYNC: Scroll and Zoom (Optional, but good for split)
        For now, just copy the language if it was manually overridden (redundant if shared but safe)
@@ -2079,6 +2094,11 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     
     GtkWidget *scrolled = gtk_scrolled_window_new();
     GtkWidget *editor = editor_widget_new();
+    
+    /* Connect Indentation Sync Signals */
+    g_signal_connect(editor, "notify::tab-width", G_CALLBACK(on_editor_notify_indentation), win);
+    g_signal_connect(editor, "notify::indent-style", G_CALLBACK(on_editor_notify_indentation), win);
+    g_signal_connect(editor, "notify::indent-width", G_CALLBACK(on_editor_notify_indentation), win);
     editor_widget_set_document(EDITOR_WIDGET(editor), doc);
     
     g_signal_connect(editor, "cursor-moved", G_CALLBACK(on_cursor_moved), win);
@@ -2485,6 +2505,62 @@ on_status_bar_encoding_changed(ViteStatusBar *bar, const char *encoding_id, gpoi
     GAction *act = g_action_map_lookup_action(map, "set-encoding");
     if (act) {
         g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(encoding_id));
+    }
+}
+
+static void
+on_status_bar_indent_width_changed(ViteStatusBar *bar, int width, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         /* Update both tab width and indent width for consistency */
+         g_object_set(editor, "tab-width", width, "indent-width", width, NULL);
+         
+         /* Reflect back to status bar label */
+         int style = 0;
+         g_object_get(editor, "indent-style", &style, NULL);
+         vite_status_bar_set_indentation(bar, width, style == 1);
+    }
+}
+
+static void
+on_status_bar_indent_style_changed(ViteStatusBar *bar, int style, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         g_object_set(editor, "indent-style", style, NULL);
+         
+         /* Reflect back to status bar label */
+         int width = 4;
+         g_object_get(editor, "tab-width", &width, NULL);
+         vite_status_bar_set_indentation(bar, width, style == 1);
+    }
+}
+
+static void
+update_status_bar_from_editor(ViteWindow *win, GtkWidget *editor)
+{
+    if (!win || !win->status_bar || !editor || !EDITOR_IS_WIDGET(editor)) return;
+    
+    int tab_w = 4;
+    int indent_s = 0;
+    g_object_get(G_OBJECT(editor), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
+    vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), tab_w, indent_s == 1);
+}
+
+static void
+on_editor_notify_indentation(GObject *editor, GParamSpec *pspec, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    
+    /* Only update if this is the active editor */
+    GtkWidget *active = get_active_editor(win);
+    if (active == GTK_WIDGET(editor)) {
+        update_status_bar_from_editor(win, GTK_WIDGET(editor));
     }
 }
 
@@ -3013,6 +3089,8 @@ setup_window(GtkWindow *window)
     g_signal_connect(win->status_bar, "file-type-changed", G_CALLBACK(on_status_bar_file_type_changed), win);
     g_signal_connect(win->status_bar, "line-ending-changed", G_CALLBACK(on_status_bar_line_ending_changed), win);
     g_signal_connect(win->status_bar, "encoding-changed", G_CALLBACK(on_status_bar_encoding_changed), win);
+    g_signal_connect(win->status_bar, "indent-width-changed", G_CALLBACK(on_status_bar_indent_width_changed), win);
+    g_signal_connect(win->status_bar, "indent-style-changed", G_CALLBACK(on_status_bar_indent_style_changed), win);
     
     /* Create Initial Tab if needed? 
        Actually activate() might do nothing? 

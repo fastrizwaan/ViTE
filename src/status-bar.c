@@ -9,6 +9,7 @@ struct _ViteStatusBar {
     
     GtkWidget *tab_width_btn;
     GtkWidget *tab_width_label;
+    GSimpleActionGroup *indent_group;
     
     GtkWidget *encoding_btn;
     GtkWidget *encoding_label;
@@ -28,6 +29,8 @@ enum {
     FILE_TYPE_CHANGED,
     LINE_ENDING_CHANGED,
     ENCODING_CHANGED,
+    INDENT_WIDTH_CHANGED,
+    INDENT_STYLE_CHANGED,
     LAST_SIGNAL
 };
 
@@ -67,7 +70,7 @@ vite_status_bar_class_init(ViteStatusBarClass *klass)
                                  NULL, NULL,
                                  NULL,
                                  G_TYPE_NONE, 1, G_TYPE_STRING);
-                                 
+
     signals[ENCODING_CHANGED] = g_signal_new("encoding-changed",
                                  G_TYPE_FROM_CLASS(klass),
                                  G_SIGNAL_RUN_LAST,
@@ -75,6 +78,22 @@ vite_status_bar_class_init(ViteStatusBarClass *klass)
                                  NULL, NULL,
                                  NULL,
                                  G_TYPE_NONE, 1, G_TYPE_STRING);
+
+    signals[INDENT_WIDTH_CHANGED] = g_signal_new("indent-width-changed",
+                                 G_TYPE_FROM_CLASS(klass),
+                                 G_SIGNAL_RUN_LAST,
+                                 0,
+                                 NULL, NULL,
+                                 NULL,
+                                 G_TYPE_NONE, 1, G_TYPE_INT);
+
+    signals[INDENT_STYLE_CHANGED] = g_signal_new("indent-style-changed",
+                                 G_TYPE_FROM_CLASS(klass),
+                                 G_SIGNAL_RUN_LAST,
+                                 0,
+                                 NULL, NULL,
+                                 NULL,
+                                 G_TYPE_NONE, 1, G_TYPE_INT);
 }
 
 /* ... existing helper functions ... */
@@ -236,6 +255,66 @@ file_type_filter_func(GtkListBoxRow *row, gpointer user_data)
 }
 
 static void
+on_indent_width_chk(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteStatusBar *self = VITE_STATUS_BAR(user_data);
+    int width = g_variant_get_int32(parameter);
+    
+    /* Change state */
+    g_simple_action_set_state(action, parameter);
+    
+    /* Emit signal */
+    g_signal_emit(self, signals[INDENT_WIDTH_CHANGED], 0, width);
+}
+
+static void
+on_indent_style_chk(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteStatusBar *self = VITE_STATUS_BAR(user_data);
+    int style = g_variant_get_int32(parameter); /* 0=Spaces, 1=Tabs */
+    
+    /* Change state */
+    g_simple_action_set_state(action, parameter);
+    
+    /* Emit signal */
+    g_signal_emit(self, signals[INDENT_STYLE_CHANGED], 0, style);
+}
+
+static void
+create_indent_menu(ViteStatusBar *self)
+{
+    GMenu *menu = g_menu_new();
+    self->indent_group = g_simple_action_group_new();
+    
+    /* Width Action (Stateful INT) */
+    GActionEntry entries[] = {
+        { "set-width", NULL, "i", "4", on_indent_width_chk },
+        { "set-style", NULL, "i", "1", on_indent_style_chk }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(self->indent_group), entries, G_N_ELEMENTS(entries), self);
+    gtk_widget_insert_action_group(self->tab_width_btn, "indent", G_ACTION_GROUP(self->indent_group));
+    
+    /* Indent Type Section */
+    GMenu *s1 = g_menu_new();
+    g_menu_append(s1, "Tabs", "indent.set-style(1)");
+    g_menu_append(s1, "Spaces", "indent.set-style(0)");
+    g_menu_append_section(menu, "Indentation Mode", G_MENU_MODEL(s1));
+    g_object_unref(s1);
+    
+    /* Width Section */
+    GMenu *s2 = g_menu_new();
+    g_menu_append(s2, "2", "indent.set-width(2)");
+    g_menu_append(s2, "4", "indent.set-width(4)");
+    g_menu_append(s2, "8", "indent.set-width(8)");
+    g_menu_append_section(menu, "Tab Width", G_MENU_MODEL(s2));
+    g_object_unref(s2);
+    
+    GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->tab_width_btn), popover);
+    g_object_unref(menu);
+}
+
+static void
 on_search_changed(GtkEditable *entry, gpointer user_data)
 {
     GtkListBox *listbox = GTK_LIST_BOX(user_data);
@@ -307,8 +386,9 @@ vite_status_bar_init(ViteStatusBar *self)
     gtk_box_append(GTK_BOX(self->box), self->file_type_btn);
     gtk_box_append(GTK_BOX(self->box), create_separator());
     
-    /* Tab Width */
-    self->tab_width_btn = create_menu_button(self, &self->tab_width_label, "Tab Width", "Tab: 4");
+    /* Indentation (Tab Width) */
+    self->tab_width_btn = create_menu_button(self, &self->tab_width_label, "Indentation", "Tab: 4");
+    create_indent_menu(self);
     gtk_box_append(GTK_BOX(self->box), self->tab_width_btn);
     gtk_box_append(GTK_BOX(self->box), create_separator());
 
@@ -435,11 +515,30 @@ vite_status_bar_set_line_ending(ViteStatusBar *self, const char *line_ending_id)
 }
 
 void
-vite_status_bar_set_tab_width(ViteStatusBar *self, int width)
+vite_status_bar_set_indentation(ViteStatusBar *self, int width, gboolean use_tabs)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
-    char *markup = g_strdup_printf("<span font_weight='normal'>Tab: %d</span>", width);
+    
+    /* Update Label */
+    char *text;
+    if (use_tabs) {
+        text = g_strdup_printf("Tab: %d", width);
+    } else {
+        text = g_strdup_printf("Spaces: %d", width);
+    }
+    
+    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", text);
     gtk_label_set_markup(GTK_LABEL(self->tab_width_label), markup);
     g_free(markup);
+    g_free(text);
+    
+    /* Sync Action State */
+    if (self->indent_group) {
+        GAction *act = g_action_map_lookup_action(G_ACTION_MAP(self->indent_group), "set-width");
+        if (act) g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_int32(width));
+        
+        act = g_action_map_lookup_action(G_ACTION_MAP(self->indent_group), "set-style");
+        if (act) g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_int32(use_tabs ? 1 : 0));
+    }
 }
 

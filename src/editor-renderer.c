@@ -160,6 +160,18 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     double current_y_pos = -partial_y; /* Start with calculated offset */
     double text_start_x = gutter_w + self->padding_left;
 
+    /* Pre-calculate Tab Array (Performance optimization) */
+    PangoTabArray *tab_array = NULL;
+    if (self->tab_width > 0) {
+        PangoFontMetrics *metrics = pango_context_get_metrics(context, self->font_desc, NULL);
+        int char_width = pango_font_metrics_get_approximate_char_width(metrics);
+        pango_font_metrics_unref(metrics);
+        
+        int tab_width_pango = char_width * self->tab_width;
+        tab_array = pango_tab_array_new(1, FALSE); /* Pango Units */
+        pango_tab_array_set_tab(tab_array, 0, PANGO_TAB_LEFT, tab_width_pango);
+    }
+
     for (size_t i = 0; i < count_lines; ++i) {
         size_t visual_line_idx = start_line + i;
         if (visual_line_idx >= max_lines) break;
@@ -195,6 +207,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         pango_layout_set_font_description(layout, self->font_desc);
         int pango_len = (len > MAX_PANGO_LINE_LEN) ? MAX_PANGO_LINE_LEN : (int)len;
         pango_layout_set_text(layout, text, pango_len);
+        if (tab_array) pango_layout_set_tabs(layout, tab_array);
         
         /* Word Wrap - account for gutter and padding */
         if (self->wrap_lines) {
@@ -719,6 +732,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         }
     }
     // fprintf(stderr, "[DEBUG] snapshot: Loop finished\n");
+    if (tab_array) pango_tab_array_free(tab_array);
 
     /* Draw DnD Overlays */
     // fprintf(stderr, "[DEBUG] snapshot: Checking DnD\n");

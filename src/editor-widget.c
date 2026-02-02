@@ -474,13 +474,25 @@ editor_widget_set_property (GObject      *object,
             self->auto_indent = g_value_get_boolean(value);
             break;
         case PROP_INDENT_STYLE:
-            self->indent_style = g_value_get_int(value);
+            if (self->indent_style != g_value_get_int(value)) {
+                self->indent_style = g_value_get_int(value);
+                g_object_notify(G_OBJECT(self), "indent-style");
+            }
             break;
         case PROP_TAB_WIDTH:
-            self->tab_width = g_value_get_int(value);
+            if (self->tab_width != g_value_get_int(value)) {
+                self->tab_width = g_value_get_int(value);
+                /* Assuming metrics or layout might depend on tab width, force redraw */
+                gtk_widget_queue_draw(GTK_WIDGET(self));
+                g_object_notify(G_OBJECT(self), "tab-width");
+                /* If we controlled pango tabs, we'd update them here */
+            }
             break;
         case PROP_INDENT_WIDTH:
-            self->indent_width = g_value_get_int(value);
+            if (self->indent_width != g_value_get_int(value)) {
+                self->indent_width = g_value_get_int(value);
+                g_object_notify(G_OBJECT(self), "indent-width");
+            }
             break;
         case PROP_USE_CUSTOM_FONT:
             self->use_custom_font = g_value_get_boolean(value);
