@@ -5,8 +5,8 @@
 static size_t find_match_at_or_after_cursor(EditorWidget *self, size_t cursor_offset);
 
 /* Helper: Update viewport matches from active search around current scroll position */
-static void
-update_viewport_from_active_search(EditorWidget *self)
+void
+editor_widget_update_search_viewport(EditorWidget *self)
 {
     if (!self->active_search) return;
     
@@ -135,7 +135,7 @@ editor_widget_next_match(EditorWidget *self)
     scroll_to_cursor(self);
     
     /* Update viewport matches to include new position */
-    update_viewport_from_active_search(self);
+    editor_widget_update_search_viewport(self);
 }
 
 void 
@@ -213,7 +213,7 @@ editor_widget_prev_match(EditorWidget *self)
     scroll_to_cursor(self);
     
     /* Update viewport matches to include new position */
-    update_viewport_from_active_search(self);
+    editor_widget_update_search_viewport(self);
 }
 
 void

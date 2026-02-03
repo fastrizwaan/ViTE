@@ -72,6 +72,10 @@ static void vite_find_replace_bar_dispose(GObject *object) {
         document_search_async_cancel(self->current_search);
         self->current_search = NULL;
     }
+    if (self->editor) {
+        editor_widget_set_active_search(self->editor, NULL);
+        editor_widget_set_search_results(self->editor, NULL);
+    }
     
     if (self->current_replace_task) {
         document_replace_async_cancel(self->current_replace_task);
@@ -847,7 +851,7 @@ static void set_filter_mode(ViteFindReplaceBar *bar, gboolean enabled) {
             document_search_async_cancel(bar->current_search);
             bar->current_search = NULL;
         }
-        editor_widget_set_search_results(bar->editor, NULL);
+        editor_widget_clear_search(bar->editor);
         gtk_widget_set_visible(bar->replace_box, FALSE);
         
         /* Update UI for Filter */
@@ -907,13 +911,14 @@ void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
          }
          editor_widget_scroll_to_cursor(bar->editor);
     } else {
-         editor_widget_set_search_results(bar->editor, NULL);
-         editor_widget_set_active_search(bar->editor, NULL);
          if (bar->current_search) {
              document_search_async_cancel(bar->current_search);
              bar->current_search = NULL;
          }
     }
+    
+    /* Always clear any search state to avoid stale/dangling pointers */
+    editor_widget_clear_search(bar->editor);
     
     gtk_widget_grab_focus(GTK_WIDGET(bar->editor));
 }

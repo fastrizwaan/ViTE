@@ -189,6 +189,7 @@ void editor_widget_select_all(EditorWidget *self);
 void editor_widget_change_case(EditorWidget *self, int type);
 
 void editor_widget_update_adjustments(EditorWidget *self, int width, int height);
+void editor_widget_update_search_viewport(EditorWidget *self);
 
 void editor_widget_reset_cursor_blink(EditorWidget *self);
 int compare_cursors_desc(gconstpointer a, gconstpointer b);

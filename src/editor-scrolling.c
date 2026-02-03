@@ -449,10 +449,24 @@ editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *
         }
         s = low;
     } else {
-        s = (size_t)(val / self->line_height);
+        double effective_line_h = self->line_height;
+        if (self->wrap_lines) {
+            double avg = self->avg_visual_lines;
+            if (avg < 1.0) avg = 1.0;
+            effective_line_h = self->line_height * avg;
+        }
+        if (effective_line_h < 1.0) effective_line_h = self->line_height;
+        s = (size_t)(val / effective_line_h);
     }
 
-    size_t lines_visible = (size_t)(page_size / self->line_height) + 5; 
+    double effective_line_h = self->line_height;
+    if (self->wrap_lines) {
+        double avg = self->avg_visual_lines;
+        if (avg < 1.0) avg = 1.0;
+        effective_line_h = self->line_height * avg;
+    }
+    if (effective_line_h < 1.0) effective_line_h = self->line_height;
+    size_t lines_visible = (size_t)(page_size / effective_line_h) + 5; 
     size_t e = s + lines_visible;
     
     size_t total = get_visual_line_count(self);

@@ -416,6 +416,7 @@ editor_widget_size_allocate (GtkWidget *widget,
 {
     EditorWidget *self = EDITOR_WIDGET(widget);
     editor_widget_update_adjustments(self, width, height);
+    editor_widget_update_search_viewport(self);
 }
 
 
@@ -1023,4 +1024,3 @@ editor_widget_get_word_wrap(EditorWidget *self)
     g_return_val_if_fail(EDITOR_IS_WIDGET(self), FALSE);
     return self->wrap_lines;
 }
-

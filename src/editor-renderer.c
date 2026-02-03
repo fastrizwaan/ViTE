@@ -367,9 +367,16 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         */
 
         /* Draws Search Matches (Manual Drawing) */
+        size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
+        size_t line_end_off = 0;
+        size_t total_lines = document_get_line_count(self->doc);
+        if (phys_line + 1 < total_lines) {
+            line_end_off = document_get_offset_of_line(self->doc, phys_line + 1);
+        } else {
+            line_end_off = document_get_length(self->doc);
+        }
+
         if (self->search_matches && self->search_matches->len > 0) {
-            size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
-            size_t raw_line_end = line_start_off + len + 1; /* Match selection logic */
             
             int low = 0;
             int high = (int)self->search_matches->len - 1;
@@ -389,13 +396,13 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             if (first_candidate >= 0) {
                 for (int m = first_candidate; m < (int)self->search_matches->len; m++) {
                     SearchMatch match = g_array_index(self->search_matches, SearchMatch, m);
-                    if (match.start >= raw_line_end) break;
+                    if (match.start >= line_end_off) break;
                     
                     /* Calculate intersection */
                     size_t match_start = match.start;
                     size_t match_end = match.end;
                     
-                    if (match_start < raw_line_end && match_end > line_start_off) {
+                    if (match_start < line_end_off && match_end > line_start_off) {
                         int i_start = (int)(MAX(match_start, line_start_off) - line_start_off);
                         int i_end = (int)(MIN(match_end, (line_start_off + len)) - line_start_off);
                         
@@ -474,16 +481,13 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             }
         }
 
-        size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
-        size_t raw_line_end = line_start_off + len + 1;
-
         for (guint c = 0; c < self->cursors->len; c++) {
             EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
             
             size_t start_sel = MIN(cur->cursor_offset, cur->selection_anchor);
             size_t end_sel = MAX(cur->cursor_offset, cur->selection_anchor);
             
-            if (start_sel < raw_line_end && end_sel > line_start_off && start_sel != end_sel) {
+            if (start_sel < line_end_off && end_sel > line_start_off && start_sel != end_sel) {
                 size_t sel_in_line_start = MAX(start_sel, line_start_off) - line_start_off;
                 size_t sel_in_line_end = MIN(end_sel, (line_start_off + len)) - line_start_off;
                 
