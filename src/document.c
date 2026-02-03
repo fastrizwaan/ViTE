@@ -541,6 +541,18 @@ document_set_redo_group_selection(Document *doc, size_t start, size_t end)
     undo_stack_set_group_selection_after(doc->undo_stack, start, end);
 }
 
+void
+document_clear_undo_redo(Document *doc)
+{
+    if (!doc) return;
+    if (doc->undo_stack) {
+        undo_stack_free(doc->undo_stack);
+    }
+    doc->undo_stack = undo_stack_new();
+    doc->saved_command = undo_stack_peek(doc->undo_stack);
+    check_modification_state(doc);
+}
+
 /* Async Undo/Redo Implementation */
 
 struct _UndoRedoTask {

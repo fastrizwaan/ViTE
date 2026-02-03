@@ -154,88 +154,20 @@ on_discard_all_response(AdwAlertDialog *dialog, const char *response, gpointer u
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (g_strcmp0(response, "discard") == 0) {
-        GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
-        /* Reload ALL modified tabs? Or just active? 
-           "Discard Changes (with Reload File dialog, should clean up undo/redo, etc. as if file is opened afresh)"
-           Usually implies active document.
-        */
         ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
         if (tab) {
              GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
              GtkWidget *editor = get_editor_from_page(page);
              if (editor && EDITOR_IS_WIDGET(editor)) {
                  Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
-                 const char *path = document_get_file_path(doc);
-                 
-                 if (path) {
-                     /* Reload from disk */
-                     /* We need to re-read file. 
-                        Best way: Create new document from file and replace? 
-                        Or clear and load into existing?
-                        Existing load_file_async might be best.
-                     */
-                     
-                     /* Reset undo history happens automatically on new load if we do it right? 
-                        document_load_file_async should handle it or we clear it.
-                     */
-                      
-                     /* Trigger async load */
-                     /* Note: We need a way to reload. */
-
-                     /* For now, let's implement a direct reload helper or re-use open logic 
-                        but targeting the specific document.
-                     */
-                     
-                     /* Using a helper to reload in place */
-                     GFile *file = g_file_new_for_path(path);
-                     
-                     /* show loading state on tab */
-                     vite_tab_set_loading(tab, TRUE);
-                     
-                     /* We can use the SAME callback as open_file? 
-                        No, that creates a NEW tab. 
-                        We need to load INTO existing doc.
-                     */
-                      
-                     /* Create a context for the reload */
-                     
-                     /* Create a context for the reload */
-                     LoadContext *ctx = g_new0(LoadContext, 1);
-                     ctx->tab = tab; 
-                     ctx->tab_bar = win->tab_bar; 
-                     ctx->filename = g_strdup(path);
-                     ctx->window = win;
-                     ctx->gtkw_ref = win->window;
-                     ctx->header_progress = win->header_progress;
-                     ctx->header_spinner = win->header_spinner;
-                     ctx->doc = document_ref(doc);
-
-                     /* Weak references for safety */
-                     g_object_add_weak_pointer(G_OBJECT(tab), (gpointer *)&ctx->tab);
-                     if (ctx->tab_bar) g_object_add_weak_pointer(G_OBJECT(ctx->tab_bar), (gpointer *)&ctx->tab_bar);
-                     if (ctx->header_progress) g_object_add_weak_pointer(G_OBJECT(ctx->header_progress), (gpointer *)&ctx->header_progress);
-                     if (ctx->header_spinner) g_object_add_weak_pointer(G_OBJECT(ctx->header_spinner), (gpointer *)&ctx->header_spinner);
-                     if (ctx->gtkw_ref) g_object_add_weak_pointer(G_OBJECT(ctx->gtkw_ref), (gpointer *)&ctx->gtkw_ref);
-                     
-                     document_set_progress_callback(doc, on_load_progress, ctx);
-                                                     
-                     /* Use the standard load callback which handles Document* source and restoring context */
-                     GCancellable *cancellable = g_cancellable_new();
-                     vite_tab_set_cancellable(tab, cancellable);
-                     
-                     document_load_file_async(doc, path, cancellable, (GAsyncReadyCallback)on_load_complete, ctx); 
-                     g_object_unref(cancellable);
-
-                     /* Actually, open_file uses a background worker. 
-                        Let's just use document_load_file_async directly. 
-                        But we need to clear the document first? 
-                        document_load_file_async replaces content.
-                     */
-                     
+                 if (doc) {
+                     while (document_can_undo(doc)) {
+                         document_undo(doc);
+                     }
+                     document_clear_undo_redo(doc);
                  }
              }
         }
-        g_list_free(tabs);
     }
 }
 
@@ -255,17 +187,13 @@ on_discard_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_
     if (!editor) return;
     
     Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
-    if (!document_get_file_path(doc)) {
-        /* If unsaved (Untitled) and modified, 'Discard' means clear? 
-           Or just nothing to reload from. */
-           return;
-    }
+    if (!document_can_undo(doc)) return;
     
     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Discard Changes?", 
-                                                 "This will reload the file from disk. All unsaved changes will be lost permanently."));
+                                                 "This will undo all changes and clear undo/redo history. The document will return to its last saved (or opened) state."));
     
     adw_alert_dialog_add_response(dialog, "cancel", "Cancel");
-    adw_alert_dialog_add_response(dialog, "discard", "Discard & Reload");
+    adw_alert_dialog_add_response(dialog, "discard", "Discard Changes");
     adw_alert_dialog_set_response_appearance(dialog, "discard", ADW_RESPONSE_DESTRUCTIVE);
     
     adw_alert_dialog_set_default_response(dialog, "cancel");
