@@ -4354,11 +4354,11 @@ save_worker_wrapper(GTask *task, gpointer source_object, gpointer task_data, GCa
     
     while (!done && !g_cancellable_is_cancelled(cancellable)) {
         double progress = 0.0;
-        /* Step for 5ms - Tiny chunks for maximum smoothness */
-        done = document_save_async_step(save_task, 5 * 1000, &progress);
+        /* Step for 18ms - Slightly larger chunks for faster saves */
+        done = document_save_async_step(save_task, 20 * 1000, &progress);
         
-        /* Throttle: Sleep 45ms (90% sleep, 10% work) */
-        g_usleep(45000); 
+        /* Throttle: Sleep 45ms (work:idle ~ 4:10) */
+        g_usleep(500); 
         
         gint64 now = g_get_monotonic_time();
         if (now - last_report > 100 * 1000) { /* 100ms updates */

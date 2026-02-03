@@ -20,6 +20,21 @@ typedef struct {
 
 #define DISK_BUFFER_INITIAL_SIZE 4096  /* 4KB initial, page-aligned */
 
+#define UTF16_CONVERT_CHUNK_SIZE (512 * 1024)
+#define UTF16_CONVERT_THROTTLE_WORK_US 20000
+#define UTF16_CONVERT_THROTTLE_SLEEP_US 6000
+#define UTF16_CONVERT_THROTTLE_MIN_BYTES (8 * 1024 * 1024)
+
+static inline void
+utf16_convert_throttle(size_t total_size, gint64 *work_budget_us)
+{
+    if (total_size < UTF16_CONVERT_THROTTLE_MIN_BYTES) return;
+    if (*work_budget_us >= UTF16_CONVERT_THROTTLE_WORK_US) {
+        g_usleep(UTF16_CONVERT_THROTTLE_SLEEP_US);
+        *work_budget_us = 0;
+    }
+}
+
 static DiskBuffer *
 disk_buffer_new(void)
 {
@@ -30,16 +45,19 @@ disk_buffer_new(void)
     buf->len = 0;
     buf->capacity = DISK_BUFFER_INITIAL_SIZE;
     
+    const char *tmp_dir = g_get_tmp_dir();
+    if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
+
     /* Try O_TMPFILE first (anonymous temp file, no path needed) */
 #ifdef O_TMPFILE
-    buf->fd = open("/tmp", O_TMPFILE | O_RDWR | O_EXCL, 0600);
+    buf->fd = open(tmp_dir, O_TMPFILE | O_RDWR | O_EXCL, 0600);
     if (buf->fd != -1) {
         buf->path = NULL;  /* No path needed for O_TMPFILE */
     } else
 #endif
     {
         /* Fallback to mkstemp */
-        buf->path = g_strdup("/tmp/vite_add_buf_XXXXXX");
+        buf->path = g_strdup_printf("%s/vite_add_buf_XXXXXX", tmp_dir);
         buf->fd = mkstemp(buf->path);
         if (buf->fd == -1) {
             g_warning("disk_buffer_new: Failed to create temp file: %s", strerror(errno));
@@ -648,27 +666,33 @@ piece_table_new(const char *filename)
             const char *from_codeset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
             
             /* Create temp file for converted UTF-8 data */
-            char temp_template[] = "/var/tmp/vite-utf8-XXXXXX";
+            const char *tmp_dir = g_get_tmp_dir();
+            if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
+            char *temp_template = g_strdup_printf("%s/vite-utf8-XXXXXX", tmp_dir);
             int temp_fd = mkstemp(temp_template);
             if (temp_fd < 0) {
                 g_warning("Failed to create temp file for UTF-16 conversion: %s", strerror(errno));
                 /* Fall back to RAM-based conversion */
+                g_free(temp_template);
                 goto ram_fallback;
             }
             
             pt->temp_path = g_strdup(temp_template);
+            g_free(temp_template);
             
             /* Stream-convert chunks from UTF-16 to UTF-8 */
             const char *src = pt->orig_data + bom_len;
             size_t src_remaining = pt->orig_size - bom_len;
-            size_t chunk_size = 64 * 1024; /* 64KB chunks (must be even for UTF-16) */
+            size_t chunk_size = UTF16_CONVERT_CHUNK_SIZE; /* 64KB chunks (must be even for UTF-16) */
             size_t total_written = 0;
             
             /* UTF-8 pending bytes buffer for incomplete sequences */
             char pending[6];
             size_t pending_len = 0;
             
+            gint64 work_budget_us = 0;
             while (src_remaining > 0) {
+                gint64 chunk_start = g_get_monotonic_time();
                 size_t to_convert = (src_remaining < chunk_size) ? src_remaining : chunk_size;
                 /* For UTF-16, ensure we don't split a surrogate pair (4 bytes) */
                 if (to_convert < src_remaining && (to_convert % 2) != 0) {
@@ -706,11 +730,11 @@ piece_table_new(const char *filename)
                 total_written += bytes_written;
                 src += bytes_read;
                 src_remaining -= bytes_read;
+                work_budget_us += (g_get_monotonic_time() - chunk_start);
+                utf16_convert_throttle(pt->orig_size, &work_budget_us);
             }
             
             /* Sync and get file size */
-            fsync(temp_fd);
-            
             /* Munmap original UTF-16 file - no longer needed */
             if (pt->mmap_base && pt->mmap_size > 0) {
                 munmap(pt->mmap_base, pt->mmap_size);
@@ -2230,6 +2254,18 @@ dispatch_progress_idle(gpointer user_data)
     return G_SOURCE_REMOVE; 
 }
 
+static void
+queue_load_progress(PieceTableLoadData *data, double progress, FileEncoding encoding, NewlineType newline)
+{
+    if (!data || !data->progress_cb) return;
+    IdleProgressData *info = g_new0(IdleProgressData, 1);
+    info->cb = data->progress_cb;
+    info->data = data->progress_data;
+    info->progress = progress;
+    info->encoding = encoding;
+    info->newline = newline;
+    g_idle_add_full(G_PRIORITY_HIGH_IDLE, dispatch_progress_idle, info, NULL);
+}
 
 /* Thread worker */
 static void
@@ -2279,6 +2315,8 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
 
     /* Detect Encoding */
     size_t bom_len = 0;
+    gboolean did_conversion = FALSE;
+    const double conversion_share = 0.2;
     if (res->data && res->size > 0) {
         detect_encoding(res->data, res->size, &res->encoding, &res->has_bom, &bom_len);
         
@@ -2286,15 +2324,7 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
         detect_newline_style_raw(res->data + bom_len, res->size - bom_len, res->encoding, &res->newline_style);
 
         /* 0. Send immediate progress to update Status Bar with Encoding info */
-        if (data->progress_cb) {
-             IdleProgressData *info = g_new0(IdleProgressData, 1);
-             info->cb = data->progress_cb;
-             info->data = data->progress_data;
-             info->progress = 0.0;
-             info->encoding = res->encoding;
-             info->newline = res->newline_style;
-             g_idle_add_full(G_PRIORITY_HIGH_IDLE, dispatch_progress_idle, info, NULL);
-        }
+        queue_load_progress(data, 0.0, res->encoding, res->newline_style);
         
         /* DEBUG: After encoding detection */
         const char *enc_name = (res->encoding == ENCODING_UTF8) ? "UTF-8" : 
@@ -2310,26 +2340,35 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
         }
 
         if (res->encoding != ENCODING_UTF8) {
+            did_conversion = TRUE;
             /* Disk-backed UTF-16 to UTF-8 conversion for zero-RAM storage */
             const char *from_codeset = (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
             
             /* Create temp file for converted UTF-8 data */
-            char temp_template[] = "/var/tmp/vite-utf8-XXXXXX";
+            const char *tmp_dir = g_get_tmp_dir();
+            if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
+            char *temp_template = g_strdup_printf("%s/vite-utf8-XXXXXX", tmp_dir);
             int temp_fd = mkstemp(temp_template);
             if (temp_fd < 0) {
                 /* Fall back to RAM-based conversion */
+                g_free(temp_template);
                 goto ram_fallback;
             }
             
             res->temp_path = g_strdup(temp_template);
+            g_free(temp_template);
             
             /* Stream-convert chunks from UTF-16 to UTF-8 */
             const char *src = res->data + bom_len;
             size_t src_remaining = res->size - bom_len;
-            size_t conv_chunk_size = 64 * 1024; /* 64KB chunks */
+            size_t conv_chunk_size = UTF16_CONVERT_CHUNK_SIZE; /* 64KB chunks */
             size_t total_written = 0;
+            const size_t convert_total = res->size > bom_len ? (res->size - bom_len) : 0;
+            gint64 last_progress = 0;
             
+            gint64 work_budget_us = 0;
             while (src_remaining > 0) {
+                gint64 chunk_start = g_get_monotonic_time();
                 if (g_cancellable_is_cancelled(cancellable)) {
                     close(temp_fd);
                     load_result_free(res);
@@ -2393,9 +2432,21 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
                 total_written += bytes_written;
                 src += bytes_read;
                 src_remaining -= bytes_read;
+                work_budget_us += (g_get_monotonic_time() - chunk_start);
+                utf16_convert_throttle(res->size, &work_budget_us);
+
+                if (data->progress_cb && convert_total > 0) {
+                    gint64 now = g_get_monotonic_time();
+                    if (now - last_progress > 100 * 1000) {
+                        double p = (double)(convert_total - src_remaining) / (double)convert_total;
+                        queue_load_progress(data, conversion_share * p, res->encoding, res->newline_style);
+                        last_progress = now;
+                    }
+                }
             }
-            
-            fsync(temp_fd);
+            if (data->progress_cb) {
+                queue_load_progress(data, conversion_share, res->encoding, res->newline_style);
+            }
             
             /* Munmap original UTF-16 file */
             if (res->mmap_base && res->mmap_size > 0) {
@@ -2447,6 +2498,7 @@ ram_fallback:
                     res->is_mmapped = FALSE;
                     res->data = utf8_data;
                     res->size = bytes_written;
+                    queue_load_progress(data, conversion_share, res->encoding, res->newline_style);
                 } else {
                     load_result_free(res);
                     g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "Encoding conversion failed: %s", error->message);
@@ -2490,15 +2542,9 @@ conversion_done:
                  
                  if (data->progress_cb) {
                      double p = (double)i / count;
-                     IdleProgressData *info = g_new0(IdleProgressData, 1);
-                     info->cb = data->progress_cb;
-                     info->data = data->progress_data;
-                     info->progress = p;
-                     info->encoding = res->encoding;
-                     info->newline = res->newline_style;
-                     info->encoding = res->encoding;
-                     info->newline = res->newline_style;
-                     g_idle_add_full(G_PRIORITY_HIGH_IDLE, dispatch_progress_idle, info, NULL);
+                     double base = did_conversion ? conversion_share : 0.0;
+                     double scale = did_conversion ? (1.0 - conversion_share) : 1.0;
+                     queue_load_progress(data, base + (scale * p), res->encoding, res->newline_style);
                  }
             }
 
