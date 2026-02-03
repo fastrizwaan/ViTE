@@ -960,8 +960,10 @@ on_key_pressed(GtkEventControllerKey *controller,
                      }
                      if (!(state & GDK_SHIFT_MASK)) cur->selection_anchor = cur->cursor_offset;
                  }
+                 if (state & GDK_SHIFT_MASK) self->alt_word_mode = FALSE;
                  update_target_x(self);
             }
+            editor_widget_update_im_cursor_location(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;
@@ -979,8 +981,10 @@ on_key_pressed(GtkEventControllerKey *controller,
                      }
                      if (!(state & GDK_SHIFT_MASK)) cur->selection_anchor = cur->cursor_offset;
                  }
+                 if (state & GDK_SHIFT_MASK) self->alt_word_mode = FALSE;
                  update_target_x(self);
             }
+            editor_widget_update_im_cursor_location(self);
             scroll_to_cursor(self);
             gtk_widget_queue_draw(GTK_WIDGET(self));
             break;

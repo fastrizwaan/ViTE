@@ -114,6 +114,23 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
 }
 
 
+static gboolean
+selection_is_whole_word(EditorWidget *self, size_t start, size_t end, size_t total)
+{
+    if (start >= end || end > total) return FALSE;
+    if (start > 0 && is_alt_word_char_at(self->doc, utf8_prev_grapheme(self, start))) return FALSE;
+    if (end < total && is_alt_word_char_at(self->doc, end)) return FALSE;
+
+    size_t off = start;
+    while (off < end) {
+        if (!is_alt_word_char_at(self->doc, off)) return FALSE;
+        size_t next = utf8_next_grapheme(self, off);
+        if (next <= off) return FALSE;
+        off = next;
+    }
+    return TRUE;
+}
+
 void
 editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
 {
@@ -140,7 +157,15 @@ editor_widget_move_selection_horizontally(EditorWidget *self, int delta)
         e = off;
         while (e < total && is_alt_word_char_at(self->doc, e))
             e = utf8_next_grapheme(self, e);
-    } else if (!self->alt_word_mode) {
+    } else {
+        if (selection_is_whole_word(self, s, e, total)) {
+            self->alt_word_mode = TRUE;
+        } else {
+            self->alt_word_mode = FALSE;
+        }
+    }
+
+    if (!self->alt_word_mode) {
         /* Manual selection: move by exactly one character (shift) */
         char *sel_text = document_get_text_range(self->doc, s, e - s);
         if (delta > 0) {
