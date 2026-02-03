@@ -57,7 +57,7 @@ static int untitled_count = 1;
 
 #define MAX_RECENT_FILES 10000
 
-static void open_file(GtkApplication *app, ViteWindow *target_window, GFile *file);
+static void open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean allow_reuse);
 static void create_new_tab (ViteWindow *win, const char *title, Document *doc);
 static ViteWindow *setup_window(GtkWindow *window);
 static void activate(GtkApplication *app, gpointer user_data);
@@ -81,7 +81,7 @@ on_file_opened (GObject* source_object, GAsyncResult* res, gpointer user_data)
     GtkApplication *app = GTK_APPLICATION(user_data);
     GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
     if (file) {
-        open_file(app, NULL, file);
+        open_file(app, NULL, file, TRUE);
         g_object_unref(file);
     }
 }
@@ -134,6 +134,9 @@ static void on_split_right(GSimpleAction *action, GVariant *parameter, gpointer 
 static void on_split_down(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void check_close_when_done(ViteWindow *win);
 static void on_close_split_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_close_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_reopen_closed_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_quit_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 
 static void on_document_modified(Document *doc, gboolean modified, void *user_data);
 static void on_document_content_changed(Document *doc, void *user_data);
@@ -147,6 +150,72 @@ static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint k
 static GtkWidget *get_active_editor(ViteWindow *win);
 static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
+static void update_window_title_for_tab(ViteTab *tab);
+
+#define MAX_RECENTLY_CLOSED 20
+static GList *recently_closed_files = NULL;
+
+static void
+reset_tab_to_empty(ViteWindow *win, ViteTab *tab)
+{
+    if (!win || !tab || !VITE_IS_TAB(tab)) return;
+
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    GtkWidget *editor = get_editor_from_page(page);
+    if (EDITOR_IS_WIDGET(editor)) {
+        Document *old_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+        Document *doc = document_new(NULL);
+        editor_widget_set_document(EDITOR_WIDGET(editor), doc);
+        if (old_doc) document_free(old_doc);
+
+        document_add_modification_callback(doc, on_document_modified, tab);
+        document_add_content_callback(doc, on_document_content_changed, tab);
+    }
+
+    char *title = g_strdup_printf("Untitled %d", untitled_count++);
+    vite_tab_set_title(tab, title);
+    g_object_set_data_full(G_OBJECT(tab), "original_title", g_strdup(title), g_free);
+    g_free(title);
+
+    vite_tab_set_modified(tab, FALSE);
+    vite_tab_set_operation_type(tab, VITE_OP_NONE);
+    vite_tab_set_loading(tab, FALSE);
+
+    if (vite_tab_is_active(tab)) {
+        update_window_title_for_tab(tab);
+    }
+}
+
+static void
+remember_recently_closed_file(const char *path)
+{
+    if (!path || !*path) return;
+    for (GList *l = recently_closed_files; l; l = l->next) {
+        if (g_strcmp0((const char *)l->data, path) == 0) {
+            g_free(l->data);
+            recently_closed_files = g_list_delete_link(recently_closed_files, l);
+            break;
+        }
+    }
+    recently_closed_files = g_list_prepend(recently_closed_files, g_strdup(path));
+    if (g_list_length(recently_closed_files) > MAX_RECENTLY_CLOSED) {
+        GList *last = g_list_last(recently_closed_files);
+        if (last) {
+            g_free(last->data);
+            recently_closed_files = g_list_delete_link(recently_closed_files, last);
+        }
+    }
+}
+
+static char *
+pop_recently_closed_file(void)
+{
+    if (!recently_closed_files) return NULL;
+    GList *first = recently_closed_files;
+    char *path = first->data;
+    recently_closed_files = g_list_delete_link(recently_closed_files, first);
+    return path;
+}
 
 /* Discard Changes Implementation */
 static void
@@ -368,6 +437,12 @@ on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
     "            </child>"
     "            <child>"
     "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;&lt;shift&gt;T</property>"
+    "                <property name='title' translatable='yes'>Reopen Closed Tab</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
     "                <property name='accelerator'>&lt;ctrl&gt;P</property>"
     "                <property name='title' translatable='yes'>Print</property>"
     "              </object>"
@@ -513,7 +588,7 @@ on_open_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer us
         guint n = g_list_model_get_n_items(files);
         for (guint i = 0; i < n; i++) {
             GFile *file = g_list_model_get_item(files, i);
-            open_file(gtk_window_get_application(win->window), win, file);
+            open_file(gtk_window_get_application(win->window), win, file, TRUE);
             g_object_unref(file);
         }
         g_object_unref(files);
@@ -1777,6 +1852,7 @@ load_css(void)
 static void
 on_tab_close_clicked (ViteTab *tab, gpointer user_data)
 {
+    if (!tab || !VITE_IS_TAB(tab)) return;
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
     if (!root) return;
     
@@ -1800,6 +1876,25 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
         page = NULL;
     }
     
+    if (doc_to_free) {
+        const char *path = document_get_file_path(doc_to_free);
+        if (path) remember_recently_closed_file(path);
+    }
+
+    /* If this is the last tab, reset it instead of closing the app */
+    if (vite_tab_bar_get_n_tabs(win->tab_bar) == 1) {
+        reset_tab_to_empty(win, tab);
+        if (page) g_object_unref(page);
+        if (doc_to_free) {
+            /* reset_tab_to_empty already freed old doc */
+            doc_to_free = NULL;
+        }
+        return;
+    }
+
+    /* Clear data to prevent dangling pointers before tab removal */
+    g_object_set_data(G_OBJECT(tab), "page", NULL);
+
     /* Remove tab from tab bar (this triggers selection change) */
     vite_tab_bar_remove_tab(win->tab_bar, tab);
     
@@ -1812,9 +1907,6 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
         }
     }
     
-    /* Clear data to prevent dangling pointers */
-    g_object_set_data(G_OBJECT(tab), "page", NULL);
-    
     if (page) {
         g_object_unref(page);
     }
@@ -1824,11 +1916,10 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
         document_free(doc_to_free);
     }
     
-    /* Close window if no tabs remain */
-    if (vite_tab_bar_get_n_tabs(win->tab_bar) == 0) { 
-         if (win->window) {
-              gtk_window_close(win->window);
-         }
+    /* If no tabs remain, create a fresh empty tab instead of closing the app */
+    if (vite_tab_bar_get_n_tabs(win->tab_bar) == 0) {
+         Document *doc = document_new(NULL);
+         create_new_tab(win, "Untitled", doc);
     }
 }
 
@@ -1879,7 +1970,7 @@ on_recent_item_activated(GtkListBox *list_box, GtkListBoxRow *row, gpointer user
     const char *uri = g_object_get_data(G_OBJECT(row), "uri");
     if (uri) {
         GFile *file = g_file_new_for_uri(uri);
-        open_file(app, target_win, file);
+        open_file(app, target_win, file, TRUE);
         g_object_unref(file);
     }
     
@@ -2603,9 +2694,49 @@ on_close_curr_tab_clicked (GtkButton *btn, gpointer user_data)
     if (!win) return;
     
     ViteTab *active = vite_tab_bar_get_active_tab(win->tab_bar);
-    if (active) {
+    if (active && VITE_IS_TAB(active)) {
         on_tab_close_clicked(active, NULL);
     }
+}
+
+static void
+on_close_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win || !win->tab_bar) return;
+    ViteTab *active = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (active && VITE_IS_TAB(active)) {
+        on_tab_close_clicked(active, NULL);
+    }
+}
+
+static void
+on_reopen_closed_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win || !win->window) return;
+
+    char *path = pop_recently_closed_file();
+    if (!path) return;
+
+    GtkApplication *app = gtk_window_get_application(win->window);
+    if (!app) {
+        g_free(path);
+        return;
+    }
+
+    GFile *file = g_file_new_for_path(path);
+    open_file(app, win, file, FALSE);
+    g_object_unref(file);
+    g_free(path);
+}
+
+static void
+on_quit_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win || !win->window) return;
+    gtk_window_close(win->window);
 }
 
 
@@ -3279,6 +3410,9 @@ setup_window(GtkWindow *window)
         { "split-right", on_split_right, NULL, NULL, NULL },
         { "split-down", on_split_down, NULL, NULL, NULL },
         { "close-view", on_close_split_action, NULL, NULL, NULL },
+        { "close-tab", on_close_tab_action, NULL, NULL, NULL },
+        { "reopen-closed-tab", on_reopen_closed_tab_action, NULL, NULL, NULL },
+        { "quit-window", on_quit_window_action, NULL, NULL, NULL },
         { "preferences", on_preferences_action, NULL, NULL, NULL },
         { "goto-line", on_goto_line_action, NULL, NULL, NULL },
         { "find", on_find_action, NULL, NULL, NULL },
@@ -3317,6 +3451,9 @@ setup_window(GtkWindow *window)
         { GDK_KEY_g, GDK_CONTROL_MASK, "win.goto-line" },
         { GDK_KEY_f, GDK_CONTROL_MASK | GDK_SHIFT_MASK, "win.filter" },
         { GDK_KEY_p, GDK_CONTROL_MASK, "win.print" },
+        { GDK_KEY_w, GDK_CONTROL_MASK, "win.close-tab" },
+        { GDK_KEY_t, GDK_CONTROL_MASK | GDK_SHIFT_MASK, "win.reopen-closed-tab" },
+        { GDK_KEY_q, GDK_CONTROL_MASK, "win.quit-window" },
         { GDK_KEY_F5, 0, "win.discard-changes" },
         { GDK_KEY_F11, 0, "win.fullscreen" },
         { GDK_KEY_question, GDK_CONTROL_MASK, "win.shortcuts" },
@@ -3804,7 +3941,7 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
 }
 
 static void
-open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
+open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean allow_reuse)
 {
     char *path = g_file_get_path(file);
     if (!path) return;
@@ -3869,7 +4006,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
     gboolean reused = FALSE;
     ViteTab *reused_tab = NULL;
     
-    if (TRUE) {
+    if (allow_reuse) {
              ViteTab *tab = vite_tab_bar_get_active_tab(target_window->tab_bar);
              if (tab) {
                  GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
@@ -4027,7 +4164,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file)
 static void
 on_open(GtkApplication *app, GFile **files, int n_files, char *hint, gpointer user_data)
 {
-    for (int i = 0; i < n_files; i++) open_file(app, NULL, files[i]);
+    for (int i = 0; i < n_files; i++) open_file(app, NULL, files[i], TRUE);
 }
 
 int
