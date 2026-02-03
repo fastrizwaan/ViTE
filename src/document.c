@@ -2571,6 +2571,16 @@ static void
 on_pt_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
 {
     DocLoadCtx *ctx = user_data;
+    
+    /* CRITICAL FIX: Clear the progress callback from the document.
+       This prevents any late-arriving progress idles from calling 
+       into stale callbacks or using unreferenced document pointers. 
+       This is a second layer of safety in addition to the cleanup in main.c.
+    */
+    if (ctx->doc) {
+        document_set_progress_callback(ctx->doc, NULL, NULL);
+    }
+
     /* We don't finish here, we let document_load_file_finish do it given the res */
     
     /* We need to pass 'res' to the user callback, but the user callback expects 

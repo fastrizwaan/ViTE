@@ -24,7 +24,33 @@ struct _ViteWindow {
     int loading_count;
     gboolean close_when_done;
     GWeakRef active_dialog_ref;
+    
+    /* Fullscreen Support */
+    GtkOverlay *main_overlay;
+    GtkWidget *titlebar_container; 
+    GtkWidget *titlebar_overlay;
+    GtkWidget *titlebar_revealer;
+    GtkWidget *fullscreen_restore_btn;
+    AdwHeaderBar *header_bar;
 };
+
+typedef struct {
+    ViteTab *tab;
+    ViteTabBar *tab_bar; /* Weak Ref */
+    GtkWidget *header_progress; /* Weak Ref */
+    GtkWidget *header_spinner; /* Weak Ref */
+    char *filename;
+    ViteWindow *window; /* Raw Pointer - Valid only if gtkw_ref is valid */
+    GtkWindow *gtkw_ref; /* Weak Ref to actual GtkWindow */
+    Document *doc; /* Reference to document being loaded */
+} LoadContext;
+
+
+
+/* Forward declarations */
+static void on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data);
+static void on_load_progress(double progress, FileEncoding encoding, NewlineType newline, void *user_data);
+
 
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
 static int untitled_count = 1;
@@ -98,6 +124,12 @@ static void on_find_action(GSimpleAction *action, GVariant *parameter, gpointer 
 static void on_replace_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_save_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_discard_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_print_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_fullscreen_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_right(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_down(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void check_close_when_done(ViteWindow *win);
@@ -112,7 +144,437 @@ static void on_tab_move_to_new_window(ViteTab *tab, gpointer user_data);
 static void load_css(void);
 static GtkWidget *get_active_editor(ViteWindow *win);
 static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
+static GtkWidget *get_active_editor(ViteWindow *win);
+static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
+
+/* Discard Changes Implementation */
+static void
+on_discard_all_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (g_strcmp0(response, "discard") == 0) {
+        GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+        /* Reload ALL modified tabs? Or just active? 
+           "Discard Changes (with Reload File dialog, should clean up undo/redo, etc. as if file is opened afresh)"
+           Usually implies active document.
+        */
+        ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+        if (tab) {
+             GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+             GtkWidget *editor = get_editor_from_page(page);
+             if (editor && EDITOR_IS_WIDGET(editor)) {
+                 Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+                 const char *path = document_get_file_path(doc);
+                 
+                 if (path) {
+                     /* Reload from disk */
+                     /* We need to re-read file. 
+                        Best way: Create new document from file and replace? 
+                        Or clear and load into existing?
+                        Existing load_file_async might be best.
+                     */
+                     
+                     /* Reset undo history happens automatically on new load if we do it right? 
+                        document_load_file_async should handle it or we clear it.
+                     */
+                      
+                     /* Trigger async load */
+                     /* Note: We need a way to reload. */
+
+                     /* For now, let's implement a direct reload helper or re-use open logic 
+                        but targeting the specific document.
+                     */
+                     
+                     /* Using a helper to reload in place */
+                     GFile *file = g_file_new_for_path(path);
+                     
+                     /* show loading state on tab */
+                     vite_tab_set_loading(tab, TRUE);
+                     
+                     /* We can use the SAME callback as open_file? 
+                        No, that creates a NEW tab. 
+                        We need to load INTO existing doc.
+                     */
+                      
+                     /* Create a context for the reload */
+                     
+                     /* Create a context for the reload */
+                     LoadContext *ctx = g_new0(LoadContext, 1);
+                     ctx->tab = tab; 
+                     ctx->tab_bar = win->tab_bar; 
+                     ctx->filename = g_strdup(path);
+                     ctx->window = win;
+                     ctx->gtkw_ref = win->window;
+                     ctx->header_progress = win->header_progress;
+                     ctx->header_spinner = win->header_spinner;
+                     ctx->doc = document_ref(doc);
+
+                     /* Weak references for safety */
+                     g_object_add_weak_pointer(G_OBJECT(tab), (gpointer *)&ctx->tab);
+                     if (ctx->tab_bar) g_object_add_weak_pointer(G_OBJECT(ctx->tab_bar), (gpointer *)&ctx->tab_bar);
+                     if (ctx->header_progress) g_object_add_weak_pointer(G_OBJECT(ctx->header_progress), (gpointer *)&ctx->header_progress);
+                     if (ctx->header_spinner) g_object_add_weak_pointer(G_OBJECT(ctx->header_spinner), (gpointer *)&ctx->header_spinner);
+                     if (ctx->gtkw_ref) g_object_add_weak_pointer(G_OBJECT(ctx->gtkw_ref), (gpointer *)&ctx->gtkw_ref);
+                     
+                     document_set_progress_callback(doc, on_load_progress, ctx);
+                                                     
+                     /* Use the standard load callback which handles Document* source and restoring context */
+                     GCancellable *cancellable = g_cancellable_new();
+                     vite_tab_set_cancellable(tab, cancellable);
+                     
+                     document_load_file_async(doc, path, cancellable, (GAsyncReadyCallback)on_load_complete, ctx); 
+                     g_object_unref(cancellable);
+
+                     /* Actually, open_file uses a background worker. 
+                        Let's just use document_load_file_async directly. 
+                        But we need to clear the document first? 
+                        document_load_file_async replaces content.
+                     */
+                     
+                 }
+             }
+        }
+        g_list_free(tabs);
+    }
+}
+
+
+
+static void
+on_discard_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    
+    /* Check active tab */
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!tab) return;
+    
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    GtkWidget *editor = get_editor_from_page(page);
+    if (!editor) return;
+    
+    Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+    if (!document_get_file_path(doc)) {
+        /* If unsaved (Untitled) and modified, 'Discard' means clear? 
+           Or just nothing to reload from. */
+           return;
+    }
+    
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Discard Changes?", 
+                                                 "This will reload the file from disk. All unsaved changes will be lost permanently."));
+    
+    adw_alert_dialog_add_response(dialog, "cancel", "Cancel");
+    adw_alert_dialog_add_response(dialog, "discard", "Discard & Reload");
+    adw_alert_dialog_set_response_appearance(dialog, "discard", ADW_RESPONSE_DESTRUCTIVE);
+    
+    adw_alert_dialog_set_default_response(dialog, "cancel");
+    adw_alert_dialog_set_close_response(dialog, "cancel");
+    
+    /* Handled by helper to initiate the actual reload logic */
+    /* We need to pass win to identify the specific tab/doc later if we wanted to be robust, 
+       but for now we re-lookup active tab which is fine for modal dialog flow. */
+    
+    /* Wait, we need to actually implement the reload. pass win. */
+    g_signal_connect(dialog, "response", G_CALLBACK(on_discard_all_response), win);
+    
+    adw_alert_dialog_choose(dialog, GTK_WIDGET(win->window), NULL, NULL, NULL);
+}
+
+static void
+on_print_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    /* Placeholder for Print */
+    /* Future: GtkPrintOperation */
+}
+
+static gboolean
+auto_hide_header(gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (win && win->titlebar_revealer && gtk_window_is_fullscreen(win->window)) {
+         /* Only hide if mouse is NOT at the top? 
+            Or simple logic: hide it. If mouse is there, motion will reveal it back? 
+            Motion event only fires on motion. If mouse sits there, it might hide?
+            That matches "after 0.5 seconds later hide them".
+         */
+         gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), FALSE);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static void
+
+on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    gboolean is_fullscreen = gtk_window_is_fullscreen(window);
+    
+    if (is_fullscreen) {
+        /* ENTERING FULLSCREEN: Move titlebar REVEALER to main overlay */
+        if (win->titlebar_revealer && win->main_overlay && win->titlebar_overlay) {
+             if (gtk_widget_get_parent(win->titlebar_revealer) != GTK_WIDGET(win->main_overlay)) {
+                 g_object_ref(win->titlebar_revealer);
+                 
+                 /* Remove from titlebar_overlay */
+                 gtk_overlay_set_child(GTK_OVERLAY(win->titlebar_overlay), NULL);
+                 
+                 gtk_overlay_add_overlay(win->main_overlay, win->titlebar_revealer);
+                 g_object_unref(win->titlebar_revealer);
+                 
+                 /* Position at top */
+                 gtk_widget_set_valign(win->titlebar_revealer, GTK_ALIGN_START);
+                 /* Ensure visible but handle reveal */
+                 gtk_widget_set_visible(win->titlebar_revealer, TRUE);
+                 
+                 /* Slide Down initially */
+                 gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), TRUE);
+                 
+                 /* Schedule Auto-Hide after 500ms */
+                 g_timeout_add(500, auto_hide_header, win);
+                 
+                 if (win->status_bar) gtk_widget_set_visible(win->status_bar, TRUE); 
+                 
+                 /* Hide default window controls, show custom button */
+                 if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, FALSE);
+                 if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, TRUE);
+             }
+        }
+    } else {
+        /* EXITING FULLSCREEN: Restore UI to titlebar overlay */
+        if (win->titlebar_revealer && win->main_overlay && win->titlebar_overlay) {
+             if (gtk_widget_get_parent(win->titlebar_revealer) == GTK_WIDGET(win->main_overlay)) {
+                 g_object_ref(win->titlebar_revealer);
+                 gtk_overlay_remove_overlay(win->main_overlay, win->titlebar_revealer);
+                 
+                 gtk_overlay_set_child(GTK_OVERLAY(win->titlebar_overlay), win->titlebar_revealer);
+                 g_object_unref(win->titlebar_revealer);
+                 
+                 /* Always revealed in normal mode */
+                 gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), TRUE);
+                 gtk_widget_set_visible(win->titlebar_revealer, TRUE);
+                 
+                 if (win->status_bar) gtk_widget_set_visible(win->status_bar, TRUE);
+                 gtk_widget_set_valign(win->titlebar_revealer, GTK_ALIGN_FILL);
+                 
+                 /* Show default window controls, hide custom button */
+                 if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, TRUE);
+                 if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, FALSE);
+             }
+        }
+    }
+}
+
+static void
+on_fullscreen_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win || !win->window) return;
+    
+    /* Just toggle state; listener handles UI */
+    if (gtk_window_is_fullscreen(win->window)) {
+        gtk_window_unfullscreen(win->window);
+    } else {
+        gtk_window_fullscreen(win->window);
+    }
+}
+
+static void
+on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+
+    const char *shortcuts_ui = 
+    "<?xml version='1.0' encoding='UTF-8'?>"
+    "<interface>"
+    "  <object class='GtkShortcutsWindow' id='shortcuts_window'>"
+    "    <property name='modal'>1</property>"
+    "    <child>"
+    "      <object class='GtkShortcutsSection'>"
+    "        <property name='section-name'>shortcuts</property>"
+    "        <property name='max-height'>10</property>"
+    "        <child>"
+    "          <object class='GtkShortcutsGroup'>"
+    "            <property name='title' translatable='yes'>File Operations</property>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;T</property>"
+    "                <property name='title' translatable='yes'>New Tab</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;N</property>"
+    "                <property name='title' translatable='yes'>New Window</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;O</property>"
+    "                <property name='title' translatable='yes'>Open File</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;S</property>"
+    "                <property name='title' translatable='yes'>Save</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;&lt;shift&gt;S</property>"
+    "                <property name='title' translatable='yes'>Save As</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>F5</property>"
+    "                <property name='title' translatable='yes'>Discard Changes</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;W</property>"
+    "                <property name='title' translatable='yes'>Close Tab</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;P</property>"
+    "                <property name='title' translatable='yes'>Print</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;Q</property>"
+    "                <property name='title' translatable='yes'>Quit</property>"
+    "              </object>"
+    "            </child>"
+    "          </object>"
+    "        </child>"
+    "        <child>"
+    "          <object class='GtkShortcutsGroup'>"
+    "            <property name='title' translatable='yes'>Editor Actions</property>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;Z</property>"
+    "                <property name='title' translatable='yes'>Undo</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;Y</property>"
+    "                <property name='title' translatable='yes'>Redo</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;X</property>"
+    "                <property name='title' translatable='yes'>Cut</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;C</property>"
+    "                <property name='title' translatable='yes'>Copy</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;V</property>"
+    "                <property name='title' translatable='yes'>Paste</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;&lt;shift&gt;F</property>"
+    "                <property name='title' translatable='yes'>Filter Lines</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;F</property>"
+    "                <property name='title' translatable='yes'>Find</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;H</property>"
+    "                <property name='title' translatable='yes'>Replace</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;G</property>"
+    "                <property name='title' translatable='yes'>Go to Line</property>"
+    "              </object>"
+    "            </child>"
+    "          </object>"
+    "        </child>"
+    "        <child>"
+    "          <object class='GtkShortcutsGroup'>"
+    "            <property name='title' translatable='yes'>View Options</property>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>F11</property>"
+    "                <property name='title' translatable='yes'>Fullscreen</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;plus</property>"
+    "                <property name='title' translatable='yes'>Zoom In</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;minus</property>"
+    "                <property name='title' translatable='yes'>Zoom Out</property>"
+    "              </object>"
+    "            </child>"
+    "            <child>"
+    "              <object class='GtkShortcutsShortcut'>"
+    "                <property name='accelerator'>&lt;ctrl&gt;0</property>"
+    "                <property name='title' translatable='yes'>Reset Zoom</property>"
+    "              </object>"
+    "            </child>"
+    "          </object>"
+    "        </child>"
+    "      </object>"
+    "    </child>"
+    "  </object>"
+    "</interface>";
+
+    GtkBuilder *builder = gtk_builder_new_from_string(shortcuts_ui, -1);
+    GtkWidget *win_shortcuts = GTK_WIDGET(gtk_builder_get_object(builder, "shortcuts_window"));
+    
+    if (win_shortcuts) {
+        gtk_window_set_default_size(GTK_WINDOW(win_shortcuts), 400, 500);
+        gtk_window_set_transient_for(GTK_WINDOW(win_shortcuts), win->window);
+        gtk_window_present(GTK_WINDOW(win_shortcuts));
+    }
+
+    g_object_unref(builder);
+}
+
+static void
+on_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    
+    AdwAboutDialog *about = ADW_ABOUT_DIALOG(adw_about_dialog_new());
+    adw_about_dialog_set_application_name(about, "ViTE");
+    adw_about_dialog_set_version(about, "1.0");
+    adw_about_dialog_set_developer_name(about, "Rizvan");
+    adw_about_dialog_set_license_type(about, GTK_LICENSE_GPL_3_0);
+    adw_about_dialog_set_comments(about, "A Virtual Text Editor built with GTK4 and Libadwaita.");
+    adw_about_dialog_set_website(about, "https://github.com/fastrizwaan/ViTE");
+    adw_about_dialog_set_issue_url(about, "https://github.com/fastrizwaan/ViTE/issues");
+    
+    adw_about_dialog_add_credit_section(about, "Created By", (const char *[]) { "Rizvan", NULL });
+    
+    adw_dialog_present(ADW_DIALOG(about), GTK_WIDGET(win->window));
+}
 
 static void
 on_open_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer user_data)
@@ -1189,7 +1651,11 @@ static void
 load_css(void)
 {
     const char *css = 
-    "findbar {"
+    "label {"
+    "    min-width: 20px;"
+    "}"
+    ".titlebar-box { background: @headerbar_bg_color; }"
+    "findbar { "
     "    background: @headerbar_bg_color;" 
     "    color: @headerbar_fg_color;"
     "    border-top: 1px solid alpha(@window_fg_color, 0.1);"
@@ -1968,6 +2434,14 @@ on_new_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_d
     GtkApplication *app = gtk_window_get_application(win->window);
     activate(app, NULL);
 }
+
+static void
+on_new_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    Document *doc = document_new(NULL);
+    create_new_tab(win, "Untitled", doc);
+}
 static void
 on_tab_move_to_new_window (ViteTab *tab, gpointer user_data)
 {
@@ -2565,6 +3039,31 @@ on_editor_notify_indentation(GObject *editor, GParamSpec *pspec, gpointer user_d
 }
 
 static void
+on_fullscreen_hover_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win || !win->window) return;
+    
+    if (gtk_window_is_fullscreen(win->window)) {
+        /* In fullscreen, titlebar_revealer is a child of main_overlay */
+        if (win->titlebar_revealer && gtk_widget_get_parent(win->titlebar_revealer) == GTK_WIDGET(win->main_overlay)) {
+            if (y < 10) { 
+                 if (!gtk_revealer_get_reveal_child(GTK_REVEALER(win->titlebar_revealer))) {
+                     gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), TRUE);
+                 }
+                 if (win->status_bar) gtk_widget_set_visible(win->status_bar, TRUE);
+            } else if (y > 80 && gtk_revealer_get_reveal_child(GTK_REVEALER(win->titlebar_revealer))) {
+                 gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), FALSE);
+                 /* TODO: Status bar hiding might be abrupt. 
+                    But prompt requested "hide them" which implies synced visibility. */
+                 if (win->status_bar) gtk_widget_set_visible(win->status_bar, FALSE);
+            }
+        }
+    }
+}
+
+
+static void
 on_set_encoding(GSimpleAction *action, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
@@ -2777,16 +3276,27 @@ setup_window(GtkWindow *window)
     win->window = window;
     g_weak_ref_init(&win->active_dialog_ref, NULL);
     g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), win);
+    g_signal_connect(window, "notify::fullscreened", G_CALLBACK(on_window_fullscreen_state_changed), win);
     g_object_set_data(G_OBJECT(window), "vite-window", win);
 
     load_css();
 
     /* Create overlay for titlebar to support drag ghosts */
     GtkWidget *titlebar_overlay = gtk_overlay_new();
+    win->titlebar_overlay = titlebar_overlay;
+    
+    GtkWidget *titlebar_revealer = gtk_revealer_new();
+    win->titlebar_revealer = titlebar_revealer;
+    gtk_revealer_set_transition_type(GTK_REVEALER(titlebar_revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(titlebar_revealer), TRUE);
     
     GtkWidget *titlebar_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    win->titlebar_container = titlebar_container;
+    
     gtk_widget_add_css_class(titlebar_container, "titlebar-box");
-    gtk_overlay_set_child(GTK_OVERLAY(titlebar_overlay), titlebar_container);
+    
+    gtk_revealer_set_child(GTK_REVEALER(titlebar_revealer), titlebar_container);
+    gtk_overlay_set_child(GTK_OVERLAY(titlebar_overlay), titlebar_revealer);
     
     gtk_window_set_titlebar(window, titlebar_overlay);
     
@@ -2796,8 +3306,17 @@ setup_window(GtkWindow *window)
     gtk_widget_add_controller(GTK_WIDGET(window), GTK_EVENT_CONTROLLER(window_drop));
     
     GtkWidget *header = adw_header_bar_new();
-    gtk_widget_add_css_class(header, "flat");
+    win->header_bar = ADW_HEADER_BAR(header);
+    /* gtk_widget_add_css_class(header, "flat"); Removed to ensure background visibility in overlay */
     gtk_box_append(GTK_BOX(titlebar_container), header);
+    
+    /* Fullscreen Restore Button */
+    GtkWidget *btn_restore = gtk_button_new_from_icon_name("view-restore-symbolic");
+    gtk_widget_set_tooltip_text(btn_restore, "Leave Fullscreen");
+    gtk_widget_set_visible(btn_restore, FALSE); /* Hidden initially */
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(btn_restore), "win.fullscreen");
+    win->fullscreen_restore_btn = btn_restore;
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_restore);
     
     /* Progress Bar (positioned below header area, outside titlebar) */
     GtkWidget *prog = gtk_progress_bar_new();
@@ -2809,6 +3328,7 @@ setup_window(GtkWindow *window)
     GtkWidget *title = adw_window_title_new("ViTE", NULL);
     win->window_title = ADW_WINDOW_TITLE(title);
     
+    /* Header Spinner (initially hidden) */
     /* Header Spinner (initially hidden) */
     win->header_spinner = gtk_spinner_new();
     gtk_widget_set_visible(win->header_spinner, FALSE);
@@ -2823,43 +3343,73 @@ setup_window(GtkWindow *window)
     
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title_box);
     
-    GSimpleAction *pref_act = g_simple_action_new("preferences", NULL);
-    g_signal_connect(pref_act, "activate", G_CALLBACK(on_preferences_action), win);
-    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(pref_act));
-
-    GSimpleAction *find_act = g_simple_action_new("find", NULL);
-    g_signal_connect(find_act, "activate", G_CALLBACK(on_find_action), win);
-    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(find_act));
-
-    GSimpleAction *replace_act = g_simple_action_new("replace", NULL);
-    g_signal_connect(replace_act, "activate", G_CALLBACK(on_replace_action), win);
-    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(replace_act));
+    /* ACTIONS REGISTRATION */
+    /* Map of all window actions including new ones */
+    const GActionEntry win_entries[] = {
+        { "new-window", on_new_window_action, NULL, NULL, NULL },
+        { "new-tab", on_new_tab_action, NULL, NULL, NULL },
+        { "split-right", on_split_right, NULL, NULL, NULL },
+        { "split-down", on_split_down, NULL, NULL, NULL },
+        { "close-view", on_close_split_action, NULL, NULL, NULL },
+        { "preferences", on_preferences_action, NULL, NULL, NULL },
+        { "goto-line", on_goto_line_action, NULL, NULL, NULL },
+        { "find", on_find_action, NULL, NULL, NULL },
+        { "replace", on_replace_action, NULL, NULL, NULL },
+        { "save", on_save_action, NULL, NULL, NULL },
+        { "save-as", on_save_as_action, NULL, NULL, NULL },
+        { "discard-changes", on_discard_all_action, NULL, NULL, NULL },
+        { "filter", on_filter_action, NULL, NULL, NULL },
+        { "print", on_print_action, NULL, NULL, NULL },
+        { "fullscreen", on_fullscreen_action, NULL, NULL, NULL },
+        { "shortcuts", on_shortcuts_action, NULL, NULL, NULL },
+        { "about", on_about_action, NULL, NULL, NULL },
+        
+        /* Stateful Actions */
+        { "set-encoding", NULL, "s", "'utf-8'", on_set_encoding },
+        { "set-line-ending", NULL, "s", "'lf'", on_set_line_ending },
+        { "show-line-numbers", NULL, NULL, "true", on_show_line_numbers_toggled },
+        { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled },
+        { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled },
+        { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL },
+        { "select-all", on_select_all_action, NULL, NULL, NULL }
+    };
+    g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
     
-    GSimpleAction *save_act = g_simple_action_new("save", NULL);
-    g_signal_connect(save_act, "activate", G_CALLBACK(on_save_action), win);
-    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(save_act));
-    
-    GSimpleAction *save_as_act = g_simple_action_new("save-as", NULL);
-    g_signal_connect(save_as_act, "activate", G_CALLBACK(on_save_as_action), win);
-    g_action_map_add_action(G_ACTION_MAP(window), G_ACTION(save_as_act));
-    
-    /* Shortcuts */
+    /* KEYBOARD SHORTCUTS */
     GtkShortcutController *shortcuts = GTK_SHORTCUT_CONTROLLER(gtk_shortcut_controller_new());
     gtk_shortcut_controller_set_scope(shortcuts, GTK_SHORTCUT_SCOPE_GLOBAL);
 
-    GtkShortcut *find_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_f, GDK_CONTROL_MASK), gtk_named_action_new("win.find"));
-    gtk_shortcut_controller_add_shortcut(shortcuts, find_sc);
+    struct { guint key; GdkModifierType mods; const char *action; } keys[] = {
+        { GDK_KEY_n, GDK_CONTROL_MASK, "win.new-window" },
+        { GDK_KEY_t, GDK_CONTROL_MASK, "win.new-tab" },
+        { GDK_KEY_s, GDK_CONTROL_MASK, "win.save" },
+        { GDK_KEY_s, GDK_CONTROL_MASK | GDK_SHIFT_MASK, "win.save-as" },
+        { GDK_KEY_f, GDK_CONTROL_MASK, "win.find" },
+        { GDK_KEY_h, GDK_CONTROL_MASK, "win.replace" },
+        { GDK_KEY_g, GDK_CONTROL_MASK, "win.goto-line" },
+        { GDK_KEY_f, GDK_CONTROL_MASK | GDK_SHIFT_MASK, "win.filter" },
+        { GDK_KEY_p, GDK_CONTROL_MASK, "win.print" },
+        { GDK_KEY_F5, 0, "win.discard-changes" },
+        { GDK_KEY_F11, 0, "win.fullscreen" },
+        { GDK_KEY_question, GDK_CONTROL_MASK, "win.shortcuts" },
+        { GDK_KEY_comma, GDK_CONTROL_MASK, "win.preferences" }
+    };
 
-    GtkShortcut *repl_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_h, GDK_CONTROL_MASK), gtk_named_action_new("win.replace"));
-    gtk_shortcut_controller_add_shortcut(shortcuts, repl_sc);
-    
-    GtkShortcut *save_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_s, GDK_CONTROL_MASK), gtk_named_action_new("win.save"));
-    gtk_shortcut_controller_add_shortcut(shortcuts, save_sc);
-    
-    GtkShortcut *save_as_sc = gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_s, GDK_CONTROL_MASK | GDK_SHIFT_MASK), gtk_named_action_new("win.save-as"));
-    gtk_shortcut_controller_add_shortcut(shortcuts, save_as_sc);
-    
+    for (int i = 0; i < G_N_ELEMENTS(keys); i++) {
+        GtkShortcut *sc = gtk_shortcut_new(gtk_keyval_trigger_new(keys[i].key, keys[i].mods), 
+                                           gtk_named_action_new(keys[i].action));
+        gtk_shortcut_controller_add_shortcut(shortcuts, sc);
+    }
     gtk_widget_add_controller(GTK_WIDGET(window), GTK_EVENT_CONTROLLER(shortcuts));
+     
+    /* FULLSCREEN MOTION CONTROLLER */
+    /* Add motion controller to main_box (not created yet) or better, to the window itself? 
+       Window captures all events. 
+    */
+    GtkEventController *motion = gtk_event_controller_motion_new();
+    g_signal_connect(motion, "motion", G_CALLBACK(on_fullscreen_hover_motion), win);
+    gtk_widget_add_controller(GTK_WIDGET(window), motion);
+
     
     /* Open Split Button */
     GtkWidget *split_btn = adw_split_button_new();
@@ -2945,16 +3495,33 @@ setup_window(GtkWindow *window)
     
     win->loading_count = 0;
     
-    /* Main Menu */
+    /* Main Menu Construction */
     GMenu *main_menu = g_menu_new();
     
-    /* Section 1: Window Actions (View, etc) */
-    GMenu *s1 = g_menu_new();
-    g_menu_append(s1, "New Window", "win.new-window");
+    /* Group 1: New Window, etc. */
+    g_menu_append(main_menu, "New Window", "win.new-window");
+    
+    /* Group 2: File Actions */
+    GMenu *s_file = g_menu_new();
+    g_menu_append(s_file, "Save", "win.save");
+    g_menu_append(s_file, "Save As…", "win.save-as");
+    g_menu_append(s_file, "Discard Changes", "win.discard-changes");
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_file));
+    g_object_unref(s_file);
+    
+    /* Group 3: Search Actions */
+    GMenu *s_search = g_menu_new();
+    g_menu_append(s_search, "Filter Lines", "win.filter");
+    g_menu_append(s_search, "Find/Replace", "win.find");
+    g_menu_append(s_search, "Go to Line…", "win.goto-line");
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_search));
+    g_object_unref(s_search);
+    
+    /* Group 4: Submenus */
+    GMenu *s_subs = g_menu_new();
     
     /* View Submenu */
     GMenu *view_menu = g_menu_new();
-    
     g_menu_append(view_menu, "Show Line Numbers", "win.show-line-numbers");
     g_menu_append(view_menu, "Word Wrap", "win.enable-word-wrap");
     g_menu_append(view_menu, "Show Status Bar", "win.show-status-bar");
@@ -2965,25 +3532,12 @@ setup_window(GtkWindow *window)
     g_menu_append(split_menu, "Close View", "win.close-view");
     g_menu_append_section(view_menu, NULL, G_MENU_MODEL(split_menu));
     g_object_unref(split_menu);
-    
-    g_menu_append_submenu(s1, "View", G_MENU_MODEL(view_menu));
+    g_menu_append_submenu(s_subs, "View", G_MENU_MODEL(view_menu));
     g_object_unref(view_menu);
     
-    g_menu_append(s1, "Go to Line...", "win.goto-line");
-    
-    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s1));
-    g_object_unref(s1);
-    
-    /* Section 2: App Actions */
-    GMenu *s2 = g_menu_new();
-    g_menu_append(s2, "Preferences", "win.preferences");
-    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s2));
-    g_object_unref(s2);
-
     /* Document Submenu */
     GMenu *doc_menu = g_menu_new();
     
-    /* Encoding Submenu */
     GMenu *enc_menu = g_menu_new();
     g_menu_append(enc_menu, "UTF-8", "win.set-encoding::utf-8");
     g_menu_append(enc_menu, "UTF-16 LE", "win.set-encoding::utf-16le");
@@ -2991,7 +3545,6 @@ setup_window(GtkWindow *window)
     g_menu_append_submenu(doc_menu, "Encoding", G_MENU_MODEL(enc_menu));
     g_object_unref(enc_menu);
     
-    /* Line Ending Submenu */
     GMenu *le_menu = g_menu_new();
     g_menu_append(le_menu, "Unix/Linux (LF)", "win.set-line-ending::lf");
     g_menu_append(le_menu, "Windows (CRLF)", "win.set-line-ending::crlf");
@@ -2999,37 +3552,30 @@ setup_window(GtkWindow *window)
     g_menu_append_submenu(doc_menu, "Line Ending", G_MENU_MODEL(le_menu));
     g_object_unref(le_menu);
     
-    g_menu_append_submenu(s1, "Document", G_MENU_MODEL(doc_menu));
+    g_menu_append_submenu(s_subs, "Document", G_MENU_MODEL(doc_menu));
     g_object_unref(doc_menu);
     
-    /* Actions */
-    const GActionEntry win_entries[] = {
-        { "new-window", on_new_window_action, NULL, NULL, NULL },
-        { "split-right", on_split_right, NULL, NULL, NULL },
-        { "split-down", on_split_down, NULL, NULL, NULL },
-        { "close-view", on_close_split_action, NULL, NULL, NULL },
-        { "preferences", on_preferences_action, NULL, NULL, NULL },
-        { "goto-line", on_goto_line_action, NULL, NULL, NULL },
-        /* Stateful Actions: { name, activate, param, state, change_state } */
-        { "set-encoding", NULL, "s", "'utf-8'", on_set_encoding },
-        { "set-line-ending", NULL, "s", "'lf'", on_set_line_ending },
-        { "show-line-numbers", NULL, NULL, "true", on_show_line_numbers_toggled },
-        { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled },
-        { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled },
-        { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL },
-        { "select-all", on_select_all_action, NULL, NULL, NULL },
-        { "filter", on_filter_action, NULL, NULL, NULL }
-    };
-    g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_subs));
+    g_object_unref(s_subs);
     
-    /* Accelerators */
-    if (app) {
-        const char *accels_goto[] = {"<Ctrl>g", NULL};
-        gtk_application_set_accels_for_action(app, "win.goto-line", accels_goto);
-        
-        const char *accels_filter[] = {"<Ctrl><Alt>f", NULL};
-        gtk_application_set_accels_for_action(app, "win.filter", accels_filter);
-    }
+    /* Group 5: Print, Fullscreen */
+    GMenu *s_extra = g_menu_new();
+    g_menu_append(s_extra, "Print", "win.print");
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_extra));
+    g_object_unref(s_extra);
+    
+    GMenu *s_fs = g_menu_new();
+    g_menu_append(s_fs, "Fullscreen", "win.fullscreen");
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_fs));
+    g_object_unref(s_fs);
+    
+    /* Group 6: App Info */
+    GMenu *s_app = g_menu_new();
+    g_menu_append(s_app, "Keyboard Shortcuts", "win.shortcuts");
+    g_menu_append(s_app, "About Virtual Text Editor", "win.about");
+    g_menu_append(s_app, "Preferences", "win.preferences");
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_app));
+    g_object_unref(s_app);
     
     GtkWidget *btn_menu = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(btn_menu), "open-menu-symbolic");
@@ -3070,9 +3616,14 @@ setup_window(GtkWindow *window)
     /* Monitor tab bar visibility to update header spinner */
     g_signal_connect(win->tab_bar, "notify::visible", G_CALLBACK(on_tab_bar_visible_changed), win);
     
+    /* Main Overlay as Root */
+    GtkOverlay *main_overlay = GTK_OVERLAY(gtk_overlay_new());
+    win->main_overlay = main_overlay;
+    gtk_window_set_child(window, GTK_WIDGET(main_overlay));
+    
     /* Main Content Area (outside titlebar) */
     GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_window_set_child(window, main_box);
+    gtk_overlay_set_child(main_overlay, main_box);
     
     /* Progress bar at the top of content (below titlebar area) */
     gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->header_progress));
@@ -3123,16 +3674,7 @@ activate(GtkApplication *app, gpointer user_data)
 
 
 
-typedef struct {
-    ViteTab *tab;
-    ViteTabBar *tab_bar; /* Weak Ref */
-    GtkWidget *header_progress; /* Weak Ref */
-    GtkWidget *header_spinner; /* Weak Ref */
-    char *filename;
-    ViteWindow *window; /* Raw Pointer - Valid only if gtkw_ref is valid */
-    GtkWindow *gtkw_ref; /* Weak Ref to actual GtkWindow */
-    Document *doc; /* Reference to document being loaded */
-} LoadContext;
+
 
 static gboolean
 free_load_context_idle(gpointer user_data)
@@ -3217,6 +3759,14 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     Document *doc = (Document*)source;
     GError *err = NULL;
     
+    /* CRITICAL FIX: Clear the progress callback immediately. 
+       This prevents any pending progress idles (scheduled at G_PRIORITY_HIGH_IDLE) 
+       from running and accessing the 'ctx' pointer which we are about to free. 
+       G_PRIORITY_DEFAULT (where this callback runs) is HIGHER priority (0) 
+       than G_PRIORITY_HIGH_IDLE (100).
+    */
+    document_set_progress_callback(doc, NULL, NULL);
+
     gboolean success = document_load_file_finish(doc, res, &err);
     
     if (ctx->tab) {
