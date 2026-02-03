@@ -109,6 +109,137 @@ show_allocation_error_dialog(EditorWidget *self)
     adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(root));
 }
 
+static gboolean
+filtered_lines_active(EditorWidget *self)
+{
+    return self->filtered_lines && self->filtered_lines->data && compact_matches_count(self->filtered_lines) > 0;
+}
+
+static gboolean
+get_filtered_bounds(EditorWidget *self, size_t start_line, size_t end_line, size_t *out_start_idx, size_t *out_end_idx)
+{
+    size_t count = compact_matches_count(self->filtered_lines);
+    size_t *data = self->filtered_lines->data;
+
+    size_t low = 0, high = count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (data[mid] < start_line) low = mid + 1;
+        else high = mid;
+    }
+    size_t lb = low;
+
+    low = 0; high = count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (data[mid] <= end_line) low = mid + 1;
+        else high = mid;
+    }
+    if (low == 0) return FALSE;
+    size_t ub = low - 1;
+
+    if (lb > ub) return FALSE;
+    if (out_start_idx) *out_start_idx = lb;
+    if (out_end_idx) *out_end_idx = ub;
+    return TRUE;
+}
+
+static void
+get_line_bounds(Document *doc, size_t line_idx, size_t *line_start, size_t *line_end)
+{
+    *line_start = document_get_offset_of_line(doc, line_idx);
+    size_t len = 0;
+    char *text = document_get_line(doc, line_idx, &len);
+    if (text && len > 0 && text[len - 1] == '\n') {
+        len--;
+    }
+    g_free(text);
+    *line_end = *line_start + len;
+}
+
+static size_t
+filtered_selection_size(EditorWidget *self, size_t start, size_t end)
+{
+    if (!filtered_lines_active(self) || start >= end) return 0;
+
+    size_t start_line = document_get_line_of_offset(self->doc, start);
+    size_t end_line = document_get_line_of_offset(self->doc, end);
+
+    size_t start_idx = 0, end_idx = 0;
+    if (!get_filtered_bounds(self, start_line, end_line, &start_idx, &end_idx)) return 0;
+
+    size_t total = 0;
+    size_t lines = 0;
+    size_t *data = self->filtered_lines->data;
+    for (size_t i = start_idx; i <= end_idx; i++) {
+        size_t phys_line = data[i];
+        size_t line_start = 0, line_end = 0;
+        get_line_bounds(self->doc, phys_line, &line_start, &line_end);
+
+        size_t seg_start = line_start;
+        size_t seg_end = line_end;
+        if (line_end > line_start) {
+            seg_start = MAX(line_start, start);
+            seg_end = MIN(line_end, end);
+        } else {
+            if (!(start <= line_start && line_start < end)) continue;
+        }
+
+        if (seg_end <= seg_start && line_end > line_start) continue;
+
+        total += (seg_end - seg_start);
+        lines++;
+    }
+
+    if (lines > 1) total += (lines - 1);
+    return total;
+}
+
+static gboolean
+append_filtered_selection(EditorWidget *self, size_t start, size_t end, GString *out)
+{
+    if (!filtered_lines_active(self) || start >= end) return FALSE;
+
+    size_t start_line = document_get_line_of_offset(self->doc, start);
+    size_t end_line = document_get_line_of_offset(self->doc, end);
+
+    size_t start_idx = 0, end_idx = 0;
+    if (!get_filtered_bounds(self, start_line, end_line, &start_idx, &end_idx)) return FALSE;
+
+    gboolean first_line = TRUE;
+    gboolean appended = FALSE;
+    size_t *data = self->filtered_lines->data;
+    for (size_t i = start_idx; i <= end_idx; i++) {
+        size_t phys_line = data[i];
+        size_t line_start = 0, line_end = 0;
+        get_line_bounds(self->doc, phys_line, &line_start, &line_end);
+
+        size_t seg_start = line_start;
+        size_t seg_end = line_end;
+        if (line_end > line_start) {
+            seg_start = MAX(line_start, start);
+            seg_end = MIN(line_end, end);
+        } else {
+            if (!(start <= line_start && line_start < end)) continue;
+        }
+
+        if (seg_end <= seg_start && line_end > line_start) continue;
+
+        if (!first_line) g_string_append_c(out, '\n');
+        first_line = FALSE;
+        appended = TRUE;
+
+        if (seg_end > seg_start) {
+            char *text = document_get_text_range(self->doc, seg_start, seg_end - seg_start);
+            if (text) {
+                g_string_append(out, text);
+                g_free(text);
+            }
+        }
+    }
+    return appended;
+}
+
 size_t
 editor_widget_delete_selection(EditorWidget *self)
 {
@@ -156,21 +287,30 @@ perform_copy_internal(EditorWidget *self)
          size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
          size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
          if (start == end) continue;
-         
-         char *text = document_get_text_range(self->doc, start, end - start);
-         
-         if (!text) {
-             /* Allocation failed */
-             g_string_free(clip_text, TRUE);
-             g_array_free(sorted, TRUE);
-             show_allocation_error_dialog(self);
-             return;
+
+         if (filtered_lines_active(self)) {
+             GString *tmp = g_string_new("");
+             gboolean appended = append_filtered_selection(self, start, end, tmp);
+             if (appended && tmp->len > 0) {
+                 if (clip_text->len > 0) g_string_append_c(clip_text, '\n');
+                 g_string_append_len(clip_text, tmp->str, tmp->len);
+             }
+             g_string_free(tmp, TRUE);
+         } else {
+             if (clip_text->len > 0) g_string_append_c(clip_text, '\n');
+             char *text = document_get_text_range(self->doc, start, end - start);
+             
+             if (!text) {
+                 /* Allocation failed */
+                 g_string_free(clip_text, TRUE);
+                 g_array_free(sorted, TRUE);
+                 show_allocation_error_dialog(self);
+                 return;
+             }
+             
+             g_string_append(clip_text, text);
+             g_free(text);
          }
-         
-         if (clip_text->len > 0) g_string_append_c(clip_text, '\n');
-         
-         g_string_append(clip_text, text);
-         g_free(text);
     }
     
     if (clip_text->len > 0) {
@@ -214,6 +354,10 @@ perform_copy_internal(EditorWidget *self)
 static void
 perform_copy_internal_reference(EditorWidget *self)
 {
+    if (filtered_lines_active(self)) {
+        perform_copy_internal(self);
+        return;
+    }
     /* Zero-RAM Copy: Set reference to document range */
     ViteClipboard *clip = vite_clipboard_get_default();
     
@@ -274,7 +418,11 @@ editor_widget_copy_full(EditorWidget *self, gboolean is_cut)
          EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
          size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
          size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
-         total_size += (end - start);
+         if (filtered_lines_active(self)) {
+             total_size += filtered_selection_size(self, start, end);
+         } else {
+             total_size += (end - start);
+         }
     }
     if (self->cursors->len > 1) total_size += (self->cursors->len - 1);
     

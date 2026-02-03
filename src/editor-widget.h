@@ -27,6 +27,7 @@ void editor_widget_set_active_search(EditorWidget *self, SearchTask *task);
 void editor_widget_clear_search(EditorWidget *self);
 void editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *end);
 void editor_widget_get_visible_offset_range(EditorWidget *self, size_t *start_offset, size_t *end_offset);
+void editor_widget_scroll_to_cursor(EditorWidget *self);
 GtkAdjustment *editor_widget_get_vadjustment(EditorWidget *self);
 void editor_widget_refresh_syntax(EditorWidget *self);
 void editor_widget_reset_cursor_to_start(EditorWidget *self);

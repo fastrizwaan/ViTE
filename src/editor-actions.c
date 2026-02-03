@@ -11,6 +11,63 @@ static int compare_size_t(gconstpointer a, gconstpointer b) {
     return 0;
 }
 
+static gboolean
+get_next_visible_line(EditorWidget *self, size_t phys_line, size_t *out_line)
+{
+    if (!self->filtered_lines || !self->filtered_lines->data) {
+        size_t next = phys_line + 1;
+        if (next >= document_get_line_count(self->doc)) return FALSE;
+        *out_line = next;
+        return TRUE;
+    }
+
+    size_t count = compact_matches_count(self->filtered_lines);
+    if (count == 0) return FALSE;
+    size_t *data = self->filtered_lines->data;
+
+    size_t low = 0;
+    size_t high = count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (data[mid] <= phys_line) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    if (low >= count) return FALSE;
+    *out_line = data[low];
+    return TRUE;
+}
+
+static gboolean
+get_prev_visible_line(EditorWidget *self, size_t phys_line, size_t *out_line)
+{
+    if (!self->filtered_lines || !self->filtered_lines->data) {
+        if (phys_line == 0) return FALSE;
+        *out_line = phys_line - 1;
+        return TRUE;
+    }
+
+    size_t count = compact_matches_count(self->filtered_lines);
+    if (count == 0) return FALSE;
+    size_t *data = self->filtered_lines->data;
+
+    size_t low = 0;
+    size_t high = count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (data[mid] < phys_line) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    if (low == 0) return FALSE;
+    *out_line = data[low - 1];
+    return TRUE;
+}
+
 void
 move_cursor(EditorWidget *self, int visual_lines_delta)
 {
@@ -78,8 +135,8 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
                 if (local_delta > 0) {
                      int lines_remaining = total_v_lines - current_v_line_idx - 1;
                      local_delta -= (lines_remaining + 1);
-                     size_t next_line = current_line_idx + 1;
-                     if (next_line >= document_get_line_count(self->doc)) {
+                     size_t next_line = current_line_idx;
+                     if (!get_next_visible_line(self, current_line_idx, &next_line)) {
                          // ... (End of file logic)
                          break;
                      }
@@ -90,11 +147,12 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
                 } else {
                      int lines_above = current_v_line_idx;
                      local_delta += (lines_above + 1);
-                     if (current_line_idx == 0) {
+                     size_t prev_line = current_line_idx;
+                     if (!get_prev_visible_line(self, current_line_idx, &prev_line)) {
                          // ... (Top of file logic)
                          break;
                      }
-                     current_line_idx--;
+                     current_line_idx = prev_line;
                      g_object_unref(layout); g_free(text);
                      layout = create_pango_layout_for_line(self, current_line_idx, &text, &len);
                      current_v_line_idx = pango_layout_get_line_count(layout) - 1; 

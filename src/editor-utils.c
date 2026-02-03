@@ -656,8 +656,23 @@ editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_delta)
             if (local_delta > 0) {
                  int lines_remaining = total_v_lines - current_v_line_idx - 1;
                  local_delta -= (lines_remaining + 1);
-                 size_t next_line = current_line_idx + 1;
-                 if (next_line >= document_get_line_count(self->doc)) {
+                 size_t next_line = current_line_idx;
+                 if (self->filtered_lines && self->filtered_lines->data) {
+                     size_t count = compact_matches_count(self->filtered_lines);
+                     size_t *data = self->filtered_lines->data;
+                     size_t low = 0, high = count;
+                     while (low < high) {
+                         size_t mid = low + (high - low) / 2;
+                         if (data[mid] <= current_line_idx) low = mid + 1;
+                         else high = mid;
+                     }
+                     if (low < count) next_line = data[low];
+                     else next_line = (size_t)-1;
+                 } else {
+                     next_line = current_line_idx + 1;
+                     if (next_line >= document_get_line_count(self->doc)) next_line = (size_t)-1;
+                 }
+                 if (next_line == (size_t)-1) {
                      iter = pango_layout_get_iter(layout);
                      int last_v = total_v_lines - 1; 
                      for (int i = 0; i < last_v; i++) pango_layout_iter_next_line(iter);
@@ -676,7 +691,23 @@ editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_delta)
             } else {
                  int lines_above = current_v_line_idx;
                  local_delta += (lines_above + 1);
-                 if (current_line_idx == 0) {
+                 size_t prev_line = current_line_idx;
+                 if (self->filtered_lines && self->filtered_lines->data) {
+                     size_t count = compact_matches_count(self->filtered_lines);
+                     size_t *data = self->filtered_lines->data;
+                     size_t low = 0, high = count;
+                     while (low < high) {
+                         size_t mid = low + (high - low) / 2;
+                         if (data[mid] < current_line_idx) low = mid + 1;
+                         else high = mid;
+                     }
+                     if (low > 0) prev_line = data[low - 1];
+                     else prev_line = (size_t)-1;
+                 } else {
+                     if (current_line_idx == 0) prev_line = (size_t)-1;
+                     else prev_line = current_line_idx - 1;
+                 }
+                 if (prev_line == (size_t)-1) {
                      iter = pango_layout_get_iter(layout);
                      PangoLayoutLine *v_line = pango_layout_iter_get_line_readonly(iter);
                      int index, trailing;
@@ -686,7 +717,7 @@ editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_delta)
                      pango_layout_iter_free(iter);
                      break;
                  }
-                 current_line_idx--;
+                 current_line_idx = prev_line;
                  g_object_unref(layout); g_free(text);
                  layout = create_pango_layout_for_line(self, current_line_idx, &text, &len);
                  current_v_line_idx = pango_layout_get_line_count(layout) - 1; 
@@ -804,4 +835,3 @@ editor_widget_get_cursor_position(EditorWidget *self, size_t *line, size_t *col)
         }
     }
 }
-

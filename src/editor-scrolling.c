@@ -225,6 +225,12 @@ scroll_to_cursor(EditorWidget *self)
     /* Else visible */
 }
 
+void
+editor_widget_scroll_to_cursor(EditorWidget *self)
+{
+    scroll_to_cursor(self);
+}
+
 gboolean
 editor_on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer user_data)
 {

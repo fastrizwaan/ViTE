@@ -905,6 +905,7 @@ void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
              filter_result_free(bar->current_filter_result);
              bar->current_filter_result = NULL;
          }
+         editor_widget_scroll_to_cursor(bar->editor);
     } else {
          editor_widget_set_search_results(bar->editor, NULL);
          editor_widget_set_active_search(bar->editor, NULL);

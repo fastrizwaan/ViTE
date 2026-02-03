@@ -19,7 +19,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     /* 1. Calculate Start Line (Same as Snapshot) */
     size_t start_line = 0;
     double partial_y = 0;
-    size_t count = document_get_line_count(self->doc);
+    size_t count = get_visual_line_count(self);
     
     if (self->line_y_offsets && self->line_y_offsets->len > 0) {
         guint low = 0;
@@ -31,7 +31,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             else high = mid - 1;
         }
         start_line = low;
-        if (start_line >= count) start_line = count - 1;
+        if (count > 0 && start_line >= count) start_line = count - 1;
         partial_y = scroll_y - offsets[start_line];
     } else {
         /* Fallback: Statistical */
@@ -48,7 +48,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     /* 2. Scan forward visually to find the line at 'y' */
     double current_y = -partial_y; /* Start with calculated offset, matching snapshot logic */
     double click_y = y - self->padding_top; /* Adjust for padding in click space */
-    size_t max_lines = document_get_line_count(self->doc);
+    size_t max_lines = get_visual_line_count(self);
     PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
     int width = gtk_widget_get_width(GTK_WIDGET(self));
     double gutter_w = get_effective_gutter_width(self);
@@ -77,15 +77,25 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         if (start_line == 0) {
             *out_offset = 0;
         } else {
-            *out_offset = document_get_offset_of_line(self->doc, start_line);
+            size_t phys_line = get_physical_line_index(self, start_line);
+            if (phys_line == (size_t)-1) {
+                *out_offset = 0;
+            } else {
+                *out_offset = document_get_offset_of_line(self->doc, phys_line);
+            }
         }
         return;
     }
     
     /* Limit scan to reasonable screen height + buffer */
     while (line_idx < max_lines) {
+        size_t phys_line = get_physical_line_index(self, line_idx);
+        if (phys_line == (size_t)-1) {
+            line_idx++;
+            continue;
+        }
         size_t len;
-        char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024);
+        char *text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024);
         
         if (!g_utf8_validate(text, len, NULL)) {
              char *safe = g_utf8_make_valid(text, len);
@@ -128,7 +138,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                                      (int)((click_y - current_y) * PANGO_SCALE), 
                                      &idx, &trailing);
             
-            size_t line_start = document_get_offset_of_line(self->doc, line_idx);
+            size_t line_start = document_get_offset_of_line(self->doc, phys_line);
             *out_offset = line_start + idx;
             
              /* Move forward if trailing */
@@ -158,9 +168,11 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     
     /* Fallback if not found (clicked below content?): return end of last scanned line */
     if (line_idx > 0) line_idx--;
-    *out_offset = document_get_offset_of_line(self->doc, line_idx);
+    size_t phys_line = get_physical_line_index(self, line_idx);
+    if (phys_line == (size_t)-1) phys_line = 0;
+    *out_offset = document_get_offset_of_line(self->doc, phys_line);
     size_t last_len;
-    char *ltext = document_get_line(self->doc, line_idx, &last_len);
+    char *ltext = document_get_line(self->doc, phys_line, &last_len);
     g_free(ltext);
     *out_offset += last_len;
     if (tab_array) pango_tab_array_free(tab_array);
