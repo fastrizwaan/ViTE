@@ -98,6 +98,7 @@ editor_input_init_controllers(EditorWidget *self)
     GtkEventController *motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "enter", G_CALLBACK(on_motion), self);
     g_signal_connect(motion, "motion", G_CALLBACK(on_motion), self);
+    g_signal_connect(motion, "leave", G_CALLBACK(on_motion), self); /* Reuse on_motion logic or handle separately */
     gtk_widget_add_controller(GTK_WIDGET(self), motion);
 
     GtkEventController *controller = gtk_event_controller_key_new();
@@ -163,7 +164,13 @@ on_motion(GtkEventControllerMotion *controller, double x, double y, gpointer use
     EditorWidget *self = EDITOR_WIDGET(user_data);
     double gutter_w = get_effective_gutter_width(self);
     
-    if (x < gutter_w && gutter_w > 0) {
+    gboolean in_gutter = (x < gutter_w && gutter_w > 0);
+    if (self->mouse_in_gutter != in_gutter) {
+        self->mouse_in_gutter = in_gutter;
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+    }
+    
+    if (in_gutter) {
         /* Over gutter - use default arrow */
         gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default");
     } else {
@@ -305,6 +312,31 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         right_click(gesture, n_press, x, y, user_data);
         return;
     }
+    
+    /* Folding Click Check */
+    double gutter_w = get_effective_gutter_width(self);
+    double fold_w = editor_widget_get_fold_gutter_width(self);
+    
+    // fprintf(stderr, "[DEBUG] Click: x=%.2f y=%.2f gutter_w=%.2f fold_w=%.2f\n", x, y, gutter_w, fold_w);
+
+    /* If fold gutter allows it, check click in that specific column on the right */
+    /* If fold gutter allows it, check click in that specific column on the right */
+    /* Check for ANY click (n_press >= 1) to consume event and prevent selection */
+    if (fold_w > 0 && x >= (gutter_w - fold_w) && x < gutter_w && n_press >= 1) {
+        
+        /* Toggle on any click (even fast double-clicks) to ensure responsiveness */
+        size_t off;
+        editor_widget_get_offset_at_point(self, x, y, &off);
+        size_t line = document_get_line_of_offset(self->doc, off);
+        
+        if (editor_widget_toggle_fold(self, line)) {
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+        }
+        
+        /* ALWAYS return to prevent line selection when clicking the fold column */
+        return;
+    }
+
     gtk_widget_grab_focus(GTK_WIDGET(self));
     
     if (!self->doc) return;
@@ -578,6 +610,14 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
     
     if (!self->doc) return;
 
+    /* Block drag/selection if starting in fold gutter */
+    double gutter_w = get_effective_gutter_width(self);
+    double fold_w = editor_widget_get_fold_gutter_width(self);
+    if (fold_w > 0 && x >= (gutter_w - fold_w) && x < gutter_w) {
+        /* In fold gutter - do nothing (let click handler separate the event) */
+        return;
+    }
+
     /* If we just did a multi-click selection (double/triple-click), 
        don't process drag_begin as it would interfere with the selection */
     if (self->multi_click_selection) {
@@ -636,6 +676,13 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
     
     double start_x, start_y;
     gtk_gesture_drag_get_start_point(gesture, &start_x, &start_y);
+    
+    /* Check if drag started in fold gutter - if so, ignore */
+    double gutter_w = get_effective_gutter_width(self);
+    double fold_w = editor_widget_get_fold_gutter_width(self);
+    if (fold_w > 0 && start_x >= (gutter_w - fold_w) && start_x < gutter_w) {
+        return;
+    }
     
     self->drag_x = start_x + offset_x;
     self->drag_y = start_y + offset_y;

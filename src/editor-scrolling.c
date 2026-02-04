@@ -93,8 +93,9 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
             for (int i = 0; i < samples; i++) {
                 size_t idx = i * step;
                 if (idx >= total_lines) break;
-                
-                size_t line_len_bytes = document_get_line_length(self->doc, idx);
+                size_t phys_idx = get_physical_line_index(self, idx);
+                if (phys_idx == (size_t)-1) continue;
+                size_t line_len_bytes = document_get_line_length(self->doc, phys_idx);
                 
                 /* Optimization: For massive lines, estimate height to avoid Pango stall */
                 if (line_len_bytes > 4096) {
@@ -107,7 +108,7 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
                      actual_samples++;
                 } else {
                     char *text = NULL;
-                    PangoLayout *layout = create_pango_layout_for_line(self, idx, &text, NULL);
+                    PangoLayout *layout = create_pango_layout_for_line(self, phys_idx, &text, NULL);
                     if (layout) {
                         PangoRectangle logical;
                         pango_layout_get_extents(layout, NULL, &logical);
@@ -136,7 +137,15 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
             state.chars_per_line = chars_per_line;
             state.line_height = self->line_height;
             
-            if (self->filtered_lines) {
+            if (self->visible_lines && self->visible_lines->data) {
+                size_t count = compact_matches_count(self->visible_lines);
+                for (guint i = 0; i < count; i++) {
+                    size_t phys_idx = self->visible_lines->data ? self->visible_lines->data[i] : (size_t)-1;
+                    if (phys_idx == (size_t)-1) continue;
+                    size_t line_len = document_get_line_length(self->doc, phys_idx);
+                    calculate_line_height_cb(line_len, &state);
+                }
+            } else if (self->filtered_lines && self->filtered_lines->data) {
                 size_t count = compact_matches_count(self->filtered_lines);
                 for (guint i = 0; i < count; i++) {
                     size_t phys_idx = self->filtered_lines->data ? self->filtered_lines->data[i] : (size_t)-1;
@@ -315,10 +324,11 @@ autoscroll_tick(gpointer user_data)
     
     double scale = 1.0;
     size_t top_line = (size_t)(current_val / self->line_height);
-    if (top_line < document_get_line_count(self->doc)) {
+    size_t phys_top = get_physical_line_index(self, top_line);
+    if (phys_top != (size_t)-1 && phys_top < document_get_line_count(self->doc)) {
         char *text = NULL;
         size_t len;
-        PangoLayout *layout = create_pango_layout_for_line(self, top_line, &text, &len);
+        PangoLayout *layout = create_pango_layout_for_line(self, phys_top, &text, &len);
         if (layout) {
             int h;
             pango_layout_get_pixel_size(layout, NULL, &h);

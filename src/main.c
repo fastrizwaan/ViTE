@@ -1361,6 +1361,7 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
              
              bind_action_to_editor(map, "show-line-numbers", G_OBJECT(editor), "show-line-numbers");
              bind_action_to_editor(map, "enable-word-wrap", G_OBJECT(editor), "wrap-lines");
+             bind_action_to_editor(map, "enable-folding", G_OBJECT(editor), "enable-folding");
              
              /* Encoding/LineEnding Actions are stateful but we update them imperatively 
                 because they don't map 1:1 to a boolean property via binding easily. */
@@ -1400,6 +1401,17 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
                   int indent_s = 0;
                   g_object_get(G_OBJECT(editor), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
                   vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), tab_w, indent_s == 1);
+                  
+                  /* Update Folding Action State */
+                  GAction *fold_act = g_action_map_lookup_action(map, "enable-folding");
+                  if (fold_act) {
+                      SyntaxContext *ctx = editor_widget_get_syntax_context(EDITOR_WIDGET(editor));
+                      if (ctx && syntax_context_get_language(ctx) == LANG_NONE) {
+                          g_simple_action_set_enabled(G_SIMPLE_ACTION(fold_act), FALSE);
+                      } else {
+                          g_simple_action_set_enabled(G_SIMPLE_ACTION(fold_act), TRUE);
+                      }
+                  }
              }
         }
     }
@@ -3361,6 +3373,22 @@ on_window_close_request(GtkWindow *window, gpointer user_data)
     return FALSE; /* Allow close */
 }
 
+static void
+on_enable_folding_toggled(GSimpleAction *action, GVariant *value, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    gboolean enabled = g_variant_get_boolean(value);
+    
+    GtkWidget *editor = get_active_editor(win);
+    if (EDITOR_IS_WIDGET(editor)) {
+         g_object_set(editor, "enable-folding", enabled, NULL);
+    }
+    
+    g_simple_action_set_state(action, value);
+}
+
+
+
 static ViteWindow *
 setup_window(GtkWindow *window)
 {
@@ -3437,6 +3465,10 @@ setup_window(GtkWindow *window)
     
     /* ACTIONS REGISTRATION */
     /* Map of all window actions including new ones */
+
+
+
+
     const GActionEntry win_entries[] = {
         { "new-window", on_new_window_action, NULL, NULL, NULL },
         { "new-tab", on_new_tab_action, NULL, NULL, NULL },
@@ -3467,6 +3499,7 @@ setup_window(GtkWindow *window)
         { "set-line-ending", NULL, "s", "'lf'", on_set_line_ending },
         { "show-line-numbers", NULL, NULL, "true", on_show_line_numbers_toggled },
         { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled },
+        { "enable-folding", NULL, NULL, "false", on_enable_folding_toggled },
         { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled },
         { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL },
         { "select-all", on_select_all_action, NULL, NULL, NULL }
@@ -3631,6 +3664,7 @@ setup_window(GtkWindow *window)
     /* View Submenu */
     GMenu *view_menu = g_menu_new();
     g_menu_append(view_menu, "Show Line Numbers", "win.show-line-numbers");
+    g_menu_append(view_menu, "Code Folding", "win.enable-folding");
     g_menu_append(view_menu, "Word Wrap", "win.enable-word-wrap");
     g_menu_append(view_menu, "Show Status Bar", "win.show-status-bar");
     
@@ -3896,6 +3930,9 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
              vite_tab_set_title(ctx->tab, g_path_get_basename(ctx->filename)); /* Temporary, update_window_title_for_tab does full logic */
              update_window_title_for_tab(ctx->tab);
              
+             /* Rebuild folding now that content is loaded */
+             editor_widget_rebuild_folding(EDITOR_WIDGET(editor));
+
              /* Refresh status bar (Encoding/Line Endings known now) */
              if (vite_tab_is_active(ctx->tab)) {
                  on_tab_clicked(ctx->tab, NULL);

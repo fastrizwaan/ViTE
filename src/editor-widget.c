@@ -72,6 +72,7 @@ enum {
     PROP_INDENT_WIDTH,
     PROP_USE_CUSTOM_FONT,
     PROP_FONT_NAME,
+    PROP_ENABLE_FOLDING,
     N_PROPS
 };
 
@@ -255,6 +256,35 @@ on_document_edit(Document *doc, size_t offset, int64_t delta_len, gpointer user_
 }
 
 static void
+shift_collapsed_folds(EditorWidget *self, size_t start_line, int line_delta)
+{
+    if (!self->fold_collapsed || self->fold_collapsed->len == 0) return;
+    if (line_delta == 0) return;
+
+    if (line_delta < 0) {
+        size_t removed = (size_t)(-line_delta);
+        size_t del_end = start_line + removed;
+        for (gint i = (gint)self->fold_collapsed->len - 1; i >= 0; i--) {
+            size_t v = g_array_index(self->fold_collapsed, size_t, i);
+            if (v >= start_line && v < del_end) {
+                g_array_remove_index(self->fold_collapsed, i);
+            } else if (v >= del_end) {
+                v -= removed;
+                g_array_index(self->fold_collapsed, size_t, i) = v;
+            }
+        }
+    } else {
+        for (guint i = 0; i < self->fold_collapsed->len; i++) {
+            size_t v = g_array_index(self->fold_collapsed, size_t, i);
+            if (v >= start_line) {
+                v += (size_t)line_delta;
+                g_array_index(self->fold_collapsed, size_t, i) = v;
+            }
+        }
+    }
+}
+
+static void
 on_document_update(Document *doc, size_t start_line, int line_delta, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -275,6 +305,12 @@ on_document_update(Document *doc, size_t start_line, int line_delta, gpointer us
         g_source_remove(self->syntax_scan_idle_id);
         self->syntax_scan_idle_id = 0;
     }
+
+    shift_collapsed_folds(self, start_line, line_delta);
+    editor_widget_rebuild_folding(self);
+    if (self->line_y_offsets) g_array_set_size(self->line_y_offsets, 0);
+    editor_widget_update_adjustments(self, -1, -1);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
 static void
@@ -352,6 +388,22 @@ editor_widget_dispose(GObject *object)
     if (self->filtered_lines) {
         compact_matches_free(self->filtered_lines);
         self->filtered_lines = NULL;
+    }
+    if (self->visible_lines) {
+        compact_matches_free(self->visible_lines);
+        self->visible_lines = NULL;
+    }
+    if (self->fold_ranges) {
+        g_array_unref(self->fold_ranges);
+        self->fold_ranges = NULL;
+    }
+    if (self->fold_collapsed) {
+        g_array_unref(self->fold_collapsed);
+        self->fold_collapsed = NULL;
+    }
+    if (self->collapsed_ranges) {
+        g_array_unref(self->collapsed_ranges);
+        self->collapsed_ranges = NULL;
     }
     
     g_free(self->filter_pattern);
@@ -506,6 +558,12 @@ editor_widget_set_property (GObject      *object,
             self->font_name = g_value_dup_string(value);
             self->line_height = 0; /* Force re-calculation */
             editor_widget_ensure_metrics(self);
+            editor_widget_ensure_metrics(self);
+            gtk_widget_queue_resize(GTK_WIDGET(self));
+            break;
+        case PROP_ENABLE_FOLDING:
+            self->enable_folding = g_value_get_boolean(value);
+            editor_widget_rebuild_folding(self); /* Rebuild or Clear */
             gtk_widget_queue_resize(GTK_WIDGET(self));
             break;
         default:
@@ -566,6 +624,9 @@ editor_widget_get_property (GObject    *object,
             break;
         case PROP_FONT_NAME:
             g_value_set_string(value, self->font_name);
+            break;
+        case PROP_ENABLE_FOLDING:
+            g_value_set_boolean(value, self->enable_folding);
             break;
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -671,6 +732,9 @@ editor_widget_class_init(EditorWidgetClass *klass)
         
     g_object_class_install_property(object_class, PROP_FONT_NAME,
         g_param_spec_string("font-name", "Font Name", "Font Name", "Monospace 11", G_PARAM_READWRITE));
+        
+    g_object_class_install_property(object_class, PROP_ENABLE_FOLDING,
+        g_param_spec_boolean("enable-folding", "Enable Code Folding", "Enable Code Folding", FALSE, G_PARAM_READWRITE));
 }
 
 static void
@@ -727,6 +791,7 @@ editor_widget_init(EditorWidget *self)
     self->use_custom_font = FALSE;
     self->font_zoom_steps = 0;
     self->insert_mode = TRUE;
+    self->enable_folding = FALSE; /* Default Disabled */
     
     self->cursors = g_array_new(FALSE, FALSE, sizeof(EditorCursor));
     self->line_y_offsets = g_array_new(FALSE, FALSE, sizeof(double));
@@ -799,6 +864,10 @@ editor_widget_init(EditorWidget *self)
     self->filter_regex_pattern = NULL;
     self->filter_case_sensitive = FALSE;
     self->filter_is_regex = FALSE;
+    self->fold_ranges = NULL;
+    self->fold_collapsed = NULL;
+    self->collapsed_ranges = NULL;
+    self->visible_lines = NULL;
     self->avg_visual_lines = 1.0;
 }
 
@@ -841,6 +910,7 @@ editor_widget_set_document(EditorWidget *self, Document *doc)
     /* Removed large file auto-disable. Relying on efficient O(N) linear scan now. */
     
     /* Update adjustments (with current size) */
+    editor_widget_rebuild_folding(self);
     editor_widget_update_adjustments(self, -1, -1);
     gtk_widget_queue_draw(GTK_WIDGET(self));
     

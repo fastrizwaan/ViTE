@@ -1,6 +1,21 @@
 #include "editor-internal.h"
 #include <math.h>
 
+double
+editor_widget_get_fold_gutter_width(EditorWidget *self)
+{
+    if (!self->show_line_numbers) return 0.0;
+    if (!self->enable_folding) return 0.0;
+    
+    /* Disable for non-code files */
+    if (self->syntax_ctx && syntax_context_get_language(self->syntax_ctx) == LANG_NONE) {
+        return 0.0;
+    }
+
+    /* Fixed width for fold column */
+    return 20.0;
+}
+
 /* Helper to get gutter width based on settings */
 double
 get_effective_gutter_width(EditorWidget *self)
@@ -24,7 +39,8 @@ get_effective_gutter_width(EditorWidget *self)
     double char_w = self->cached_char_width;
     if (char_w < 1.0) char_w = self->line_height * 0.5; /* Fallback */
 
-    return (digits * char_w) + 8.0; /* 4px left + 4px right */
+    /* Digits width + 8px padding + Fold Gutter Width */
+    return (digits * char_w) + 8.0 + editor_widget_get_fold_gutter_width(self); 
 }
 
 /* UTF-8 grapheme cluster navigation helpers */
@@ -699,20 +715,8 @@ editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_delta)
                  int lines_remaining = total_v_lines - current_v_line_idx - 1;
                  local_delta -= (lines_remaining + 1);
                  size_t next_line = current_line_idx;
-                 if (self->filtered_lines && self->filtered_lines->data) {
-                     size_t count = compact_matches_count(self->filtered_lines);
-                     size_t *data = self->filtered_lines->data;
-                     size_t low = 0, high = count;
-                     while (low < high) {
-                         size_t mid = low + (high - low) / 2;
-                         if (data[mid] <= current_line_idx) low = mid + 1;
-                         else high = mid;
-                     }
-                     if (low < count) next_line = data[low];
-                     else next_line = (size_t)-1;
-                 } else {
-                     next_line = current_line_idx + 1;
-                     if (next_line >= document_get_line_count(self->doc)) next_line = (size_t)-1;
+                 if (!editor_widget_get_next_visible_line(self, current_line_idx, &next_line)) {
+                     next_line = (size_t)-1;
                  }
                  if (next_line == (size_t)-1) {
                      iter = pango_layout_get_iter(layout);
@@ -734,20 +738,8 @@ editor_widget_add_cursor_vertically(EditorWidget *self, int visual_lines_delta)
                  int lines_above = current_v_line_idx;
                  local_delta += (lines_above + 1);
                  size_t prev_line = current_line_idx;
-                 if (self->filtered_lines && self->filtered_lines->data) {
-                     size_t count = compact_matches_count(self->filtered_lines);
-                     size_t *data = self->filtered_lines->data;
-                     size_t low = 0, high = count;
-                     while (low < high) {
-                         size_t mid = low + (high - low) / 2;
-                         if (data[mid] < current_line_idx) low = mid + 1;
-                         else high = mid;
-                     }
-                     if (low > 0) prev_line = data[low - 1];
-                     else prev_line = (size_t)-1;
-                 } else {
-                     if (current_line_idx == 0) prev_line = (size_t)-1;
-                     else prev_line = current_line_idx - 1;
+                 if (!editor_widget_get_prev_visible_line(self, current_line_idx, &prev_line)) {
+                     prev_line = (size_t)-1;
                  }
                  if (prev_line == (size_t)-1) {
                      iter = pango_layout_get_iter(layout);
@@ -805,12 +797,19 @@ is_alt_word_char_at(Document *doc, size_t offset)
 size_t
 get_visual_line_count(EditorWidget *self) {
     if (!self->doc) return 0;
+    if (self->visible_lines) return compact_matches_count(self->visible_lines);
     if (self->filtered_lines) return compact_matches_count(self->filtered_lines);
     return document_get_line_count(self->doc);
 }
 
 size_t
 get_physical_line_index(EditorWidget *self, size_t visual_line_idx) {
+    if (self->visible_lines) {
+        if (visual_line_idx < compact_matches_count(self->visible_lines) && self->visible_lines->data) {
+            return self->visible_lines->data[visual_line_idx];
+        }
+        return (size_t)-1;
+    }
     if (self->filtered_lines) {
         if (visual_line_idx < compact_matches_count(self->filtered_lines) && self->filtered_lines->data) {
             return self->filtered_lines->data[visual_line_idx];
@@ -818,6 +817,454 @@ get_physical_line_index(EditorWidget *self, size_t visual_line_idx) {
         return (size_t)-1;
     }
     return visual_line_idx;
+}
+
+static gint
+fold_range_compare(gconstpointer a, gconstpointer b)
+{
+    const FoldRange *ra = (const FoldRange *)a;
+    const FoldRange *rb = (const FoldRange *)b;
+    if (ra->start_line < rb->start_line) return -1;
+    if (ra->start_line > rb->start_line) return 1;
+    return 0;
+}
+
+static gboolean
+editor_widget_line_has_text(const char *text, size_t len, int tab_width, int *out_indent)
+{
+    int col = 0;
+    size_t i = 0;
+    while (i < len) {
+        char c = text[i];
+        if (c == ' ') {
+            col++;
+            i++;
+            continue;
+        }
+        if (c == '\t') {
+            int step = tab_width > 0 ? tab_width : 4;
+            int rem = col % step;
+            col += (step - rem);
+            i++;
+            continue;
+        }
+        if (c == '\r' || c == '\n') {
+            i++;
+            continue;
+        }
+        if (out_indent) *out_indent = col;
+        return TRUE;
+    }
+    if (out_indent) *out_indent = col;
+    return FALSE;
+}
+
+gboolean
+editor_widget_get_fold_range(EditorWidget *self, size_t line_idx, FoldRange *out_range)
+{
+    if (!self->fold_ranges || self->fold_ranges->len == 0) return FALSE;
+    size_t low = 0;
+    size_t high = self->fold_ranges->len;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        FoldRange r = g_array_index(self->fold_ranges, FoldRange, mid);
+        if (r.start_line == line_idx) {
+            if (out_range) *out_range = r;
+            return TRUE;
+        }
+        if (r.start_line < line_idx) low = mid + 1;
+        else high = mid;
+    }
+    return FALSE;
+}
+
+gboolean
+editor_widget_is_fold_collapsed(EditorWidget *self, size_t line_idx)
+{
+    if (!self->fold_collapsed || self->fold_collapsed->len == 0) return FALSE;
+    size_t low = 0;
+    size_t high = self->fold_collapsed->len;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        size_t v = g_array_index(self->fold_collapsed, size_t, mid);
+        if (v == line_idx) return TRUE;
+        if (v < line_idx) low = mid + 1;
+        else high = mid;
+    }
+    return FALSE;
+}
+
+static void
+editor_widget_compact_collapsed_ranges(EditorWidget *self)
+{
+    if (self->collapsed_ranges) {
+        g_array_set_size(self->collapsed_ranges, 0);
+    } else {
+        self->collapsed_ranges = g_array_new(FALSE, FALSE, sizeof(FoldRange));
+    }
+
+    if (!self->fold_collapsed || self->fold_collapsed->len == 0) return;
+    if (!self->fold_ranges || self->fold_ranges->len == 0) return;
+
+    GArray *ranges = g_array_new(FALSE, FALSE, sizeof(FoldRange));
+    for (guint i = 0; i < self->fold_collapsed->len; i++) {
+        size_t start = g_array_index(self->fold_collapsed, size_t, i);
+        FoldRange r;
+        if (editor_widget_get_fold_range(self, start, &r)) {
+            g_array_append_val(ranges, r);
+        }
+    }
+
+    if (ranges->len == 0) {
+        g_array_free(ranges, TRUE);
+        return;
+    }
+
+    g_array_sort(ranges, (GCompareFunc)fold_range_compare);
+
+    FoldRange current = g_array_index(ranges, FoldRange, 0);
+    for (guint i = 1; i < ranges->len; i++) {
+        FoldRange next = g_array_index(ranges, FoldRange, i);
+        if (next.start_line <= current.end_line + 1) {
+            if (next.end_line > current.end_line) current.end_line = next.end_line;
+        } else {
+            g_array_append_val(self->collapsed_ranges, current);
+            current = next;
+        }
+    }
+    g_array_append_val(self->collapsed_ranges, current);
+    g_array_free(ranges, TRUE);
+}
+
+static gboolean
+editor_widget_line_hidden_by_fold(EditorWidget *self, size_t phys_line, FoldRange *out_range)
+{
+    if (!self->collapsed_ranges || self->collapsed_ranges->len == 0) return FALSE;
+    size_t low = 0;
+    size_t high = self->collapsed_ranges->len;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        FoldRange r = g_array_index(self->collapsed_ranges, FoldRange, mid);
+        if (phys_line <= r.start_line) {
+            high = mid;
+        } else if (phys_line > r.end_line) {
+            low = mid + 1;
+        } else {
+            if (out_range) *out_range = r;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+void
+editor_widget_rebuild_folding(EditorWidget *self)
+{
+    if (!self->doc) return;
+
+    /* Disable for non-code files */
+    if (self->syntax_ctx && syntax_context_get_language(self->syntax_ctx) == LANG_NONE) {
+        /* Clear any existing folds */
+        if (self->fold_ranges) g_array_set_size(self->fold_ranges, 0);
+        if (self->fold_collapsed) g_array_set_size(self->fold_collapsed, 0);
+        /* Ensure visible lines are rebuilt to show everything */
+        editor_widget_rebuild_visible_lines(self);
+        return;
+    }
+
+    if (self->fold_ranges) {
+        g_array_set_size(self->fold_ranges, 0);
+    } else {
+        self->fold_ranges = g_array_new(FALSE, FALSE, sizeof(FoldRange));
+    }
+
+    size_t total = document_get_line_count(self->doc);
+    size_t prev_nonblank = (size_t)-1;
+    int prev_indent = 0;
+
+    GArray *stack_lines = g_array_new(FALSE, FALSE, sizeof(size_t));
+    GArray *stack_indents = g_array_new(FALSE, FALSE, sizeof(int));
+
+    for (size_t i = 0; i < total; i++) {
+        size_t len = 0;
+        char *line = document_get_line(self->doc, i, &len);
+        if (!line) continue;
+        int indent = 0;
+        gboolean has_text = editor_widget_line_has_text(line, len, self->tab_width, &indent);
+        g_free(line);
+        if (!has_text) continue;
+
+        while (stack_lines->len > 0) {
+            int top_indent = g_array_index(stack_indents, int, stack_indents->len - 1);
+            if (indent > top_indent) break;
+            size_t start_line = g_array_index(stack_lines, size_t, stack_lines->len - 1);
+            if (prev_nonblank != (size_t)-1 && prev_nonblank > start_line) {
+                FoldRange r = {start_line, prev_nonblank};
+                g_array_append_val(self->fold_ranges, r);
+            }
+            g_array_set_size(stack_lines, stack_lines->len - 1);
+            g_array_set_size(stack_indents, stack_indents->len - 1);
+        }
+
+        if (prev_nonblank != (size_t)-1 && indent > prev_indent) {
+            g_array_append_val(stack_lines, prev_nonblank);
+            g_array_append_val(stack_indents, prev_indent);
+        }
+
+        prev_nonblank = i;
+        prev_indent = indent;
+    }
+
+    while (stack_lines->len > 0) {
+        size_t start_line = g_array_index(stack_lines, size_t, stack_lines->len - 1);
+        if (prev_nonblank != (size_t)-1 && prev_nonblank > start_line) {
+            FoldRange r = {start_line, prev_nonblank};
+            g_array_append_val(self->fold_ranges, r);
+        }
+        g_array_set_size(stack_lines, stack_lines->len - 1);
+        g_array_set_size(stack_indents, stack_indents->len - 1);
+    }
+
+    g_array_free(stack_lines, TRUE);
+    g_array_free(stack_indents, TRUE);
+
+    if (self->fold_ranges->len > 1) {
+        g_array_sort(self->fold_ranges, (GCompareFunc)fold_range_compare);
+    }
+
+    if (self->fold_collapsed && self->fold_collapsed->len > 0) {
+        for (gint i = (gint)self->fold_collapsed->len - 1; i >= 0; i--) {
+            size_t start = g_array_index(self->fold_collapsed, size_t, i);
+            if (!editor_widget_get_fold_range(self, start, NULL)) {
+                g_array_remove_index(self->fold_collapsed, i);
+            }
+        }
+    }
+
+    editor_widget_compact_collapsed_ranges(self);
+    editor_widget_rebuild_visible_lines(self);
+}
+
+void
+editor_widget_rebuild_visible_lines(EditorWidget *self)
+{
+    if (!self->doc) return;
+    if (self->visible_lines) {
+        compact_matches_free(self->visible_lines);
+        self->visible_lines = NULL;
+    }
+
+    gboolean has_filter = (self->filtered_lines && self->filtered_lines->data && compact_matches_count(self->filtered_lines) > 0);
+    gboolean has_folds = (self->collapsed_ranges && self->collapsed_ranges->len > 0);
+
+    if (!has_filter && !has_folds) {
+        return;
+    }
+
+    self->visible_lines = compact_matches_new(1);
+
+    if (has_filter) {
+        size_t count = compact_matches_count(self->filtered_lines);
+        size_t *data = self->filtered_lines->data;
+        for (size_t i = 0; i < count; i++) {
+            size_t line = data[i];
+            FoldRange r;
+            if (editor_widget_line_hidden_by_fold(self, line, &r)) {
+                continue;
+            }
+            compact_matches_append(self->visible_lines, line);
+        }
+    } else {
+        size_t total = document_get_line_count(self->doc);
+        for (size_t line = 0; line < total; line++) {
+            FoldRange r;
+            if (editor_widget_line_hidden_by_fold(self, line, &r)) {
+                continue;
+            }
+            compact_matches_append(self->visible_lines, line);
+        }
+    }
+}
+
+gboolean
+editor_widget_toggle_fold(EditorWidget *self, size_t line_idx)
+{
+    FoldRange r;
+    if (!editor_widget_get_fold_range(self, line_idx, &r)) return FALSE;
+
+    /* 1. Capture State Before Toggle */
+    size_t old_visual_line = 0;
+    gboolean was_visible = editor_widget_get_visual_line_for_physical(self, line_idx, &old_visual_line);
+    
+    double scroll_y = gtk_adjustment_get_value(self->vadjustment);
+    
+    /* Calculate Old Y robustly */
+    double old_line_y = 0.0;
+    if (self->line_y_offsets && old_visual_line < self->line_y_offsets->len) {
+        old_line_y = g_array_index(self->line_y_offsets, double, old_visual_line);
+    } else {
+        double factor = (self->wrap_lines && self->avg_visual_lines > 1.0) ? self->avg_visual_lines : 1.0;
+        old_line_y = (double)old_visual_line * self->line_height * factor;
+    }
+    
+    double screen_offset = old_line_y - scroll_y; /* Distance from top of viewport */
+
+    if (!self->fold_collapsed) {
+        self->fold_collapsed = g_array_new(FALSE, FALSE, sizeof(size_t));
+    }
+
+    gboolean is_collapsed = editor_widget_is_fold_collapsed(self, line_idx);
+    if (is_collapsed) {
+        for (guint i = 0; i < self->fold_collapsed->len; i++) {
+            size_t v = g_array_index(self->fold_collapsed, size_t, i);
+            if (v == line_idx) {
+                g_array_remove_index(self->fold_collapsed, i);
+                break;
+            }
+        }
+    } else {
+        size_t insert_at = 0;
+        while (insert_at < self->fold_collapsed->len) {
+            size_t v = g_array_index(self->fold_collapsed, size_t, insert_at);
+            if (v > line_idx) break;
+            insert_at++;
+        }
+        g_array_insert_val(self->fold_collapsed, insert_at, line_idx);
+    }
+
+    editor_widget_compact_collapsed_ranges(self);
+    editor_widget_rebuild_visible_lines(self);
+
+    if (self->collapsed_ranges && self->collapsed_ranges->len > 0) {
+        for (guint c = 0; c < self->cursors->len; c++) {
+            EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+            size_t line = document_get_line_of_offset(self->doc, cur->cursor_offset);
+            FoldRange fr;
+            if (editor_widget_line_hidden_by_fold(self, line, &fr)) {
+                size_t start_off = document_get_offset_of_line(self->doc, fr.start_line);
+                cur->cursor_offset = start_off;
+                cur->selection_anchor = start_off;
+                cur->target_x = -1;
+            }
+        }
+    }
+    
+    /* 2. Restore Scroll Position */
+    /* Ensure adjustments are updated - this recalculates offsets/averages */
+    editor_widget_update_adjustments(self, -1, -1);
+    
+    if (was_visible) {
+        size_t new_visual_line = 0;
+        /* The line itself *should* still be visible (it's the header) */
+        if (editor_widget_get_visual_line_for_physical(self, line_idx, &new_visual_line)) {
+            
+            /* Calculate New Y robustly */
+            double new_line_y = 0.0;
+            if (self->line_y_offsets && new_visual_line < self->line_y_offsets->len) {
+                new_line_y = g_array_index(self->line_y_offsets, double, new_visual_line);
+            } else {
+                double factor = (self->wrap_lines && self->avg_visual_lines > 1.0) ? self->avg_visual_lines : 1.0;
+                new_line_y = (double)new_visual_line * self->line_height * factor;
+            }
+            
+            double target_scroll_y = new_line_y - screen_offset;
+            
+            /* Clamp to valid range */
+            double max_val = gtk_adjustment_get_upper(self->vadjustment) - gtk_adjustment_get_page_size(self->vadjustment);
+            if (target_scroll_y < 0) target_scroll_y = 0;
+            if (target_scroll_y > max_val) target_scroll_y = max_val;
+            
+            gtk_adjustment_set_value(self->vadjustment, target_scroll_y);
+        }
+    }
+
+    return TRUE;
+}
+
+gboolean
+editor_widget_get_visual_line_for_physical(EditorWidget *self, size_t phys_line, size_t *out_visual)
+{
+    if (!self->doc) return FALSE;
+    if (!self->visible_lines) {
+        if (out_visual) *out_visual = phys_line;
+        return TRUE;
+    }
+    size_t count = compact_matches_count(self->visible_lines);
+    if (count == 0 || !self->visible_lines->data) return FALSE;
+    size_t *data = self->visible_lines->data;
+
+    size_t low = 0;
+    size_t high = count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (data[mid] < phys_line) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    if (low < count && data[low] == phys_line) {
+        if (out_visual) *out_visual = low;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+gboolean
+editor_widget_get_next_visible_line(EditorWidget *self, size_t phys_line, size_t *out_line)
+{
+    if (!self->visible_lines || !self->visible_lines->data) {
+        size_t next = phys_line + 1;
+        if (next >= document_get_line_count(self->doc)) return FALSE;
+        *out_line = next;
+        return TRUE;
+    }
+
+    size_t count = compact_matches_count(self->visible_lines);
+    if (count == 0) return FALSE;
+    size_t *data = self->visible_lines->data;
+
+    size_t low = 0;
+    size_t high = count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (data[mid] <= phys_line) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    if (low >= count) return FALSE;
+    *out_line = data[low];
+    return TRUE;
+}
+
+gboolean
+editor_widget_get_prev_visible_line(EditorWidget *self, size_t phys_line, size_t *out_line)
+{
+    if (!self->visible_lines || !self->visible_lines->data) {
+        if (phys_line == 0) return FALSE;
+        *out_line = phys_line - 1;
+        return TRUE;
+    }
+
+    size_t count = compact_matches_count(self->visible_lines);
+    if (count == 0) return FALSE;
+    size_t *data = self->visible_lines->data;
+
+    size_t low = 0;
+    size_t high = count;
+    while (low < high) {
+        size_t mid = low + (high - low) / 2;
+        if (data[mid] < phys_line) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    if (low == 0) return FALSE;
+    *out_line = data[low - 1];
+    return TRUE;
 }
 
 void

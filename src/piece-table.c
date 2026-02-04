@@ -2300,9 +2300,9 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
     }
     close(fd);
     
-    if (size > 0 && mmap_ptr == MAP_FAILED) {
+    if (size > 0 && (mmap_ptr == MAP_FAILED || mmap_ptr == NULL)) {
         g_task_return_new_error(task, G_FILE_ERROR, g_file_error_from_errno(errno), 
-                                "Failed to mmap file: %s", strerror(errno));
+                                "Failed to mmap file: %s (ptr=%p)", strerror(errno), mmap_ptr);
         return;
     }
 
@@ -2530,10 +2530,13 @@ conversion_done:
         madvise(res->mmap_base, res->mmap_size, MADV_SEQUENTIAL);
 #endif
         
+
+
         /* 1. Create nodes */
         for (size_t i = 0; i < count; i++) {
             if ((i % 128) == 0) {
                  if (g_cancellable_is_cancelled(cancellable)) {
+
                      load_result_free(res);
                      g_task_return_error_if_cancelled(task);
                      return;
@@ -2552,6 +2555,8 @@ conversion_done:
             size_t len = chunk_size;
             if (start + len > res->size) len = res->size - start;
             
+
+
             size_t lf = count_newlines(res->data + start, len);
             Piece p = { SOURCE_ORIGINAL, start, len, lf };
             res->temp_nodes[i] = node_new(p);
@@ -2571,9 +2576,7 @@ conversion_done:
         res->node_count = 0;
     }
     
-    /* DEBUG: Final timing */
-    g_print("[LOAD DEBUG] %.3fs - COMPLETE: %s (%.2f MB)\n", 
-            g_timer_elapsed(timer, NULL), filename, (double)res->size / (1024*1024));
+
     g_timer_destroy(timer);
     
     g_task_return_pointer(task, res, (GDestroyNotify)load_result_free);

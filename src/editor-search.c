@@ -434,6 +434,8 @@ editor_widget_set_filtered_lines(EditorWidget *self, CompactMatches *matches, co
             g_error_free(err);
         }
     }
+
+    editor_widget_rebuild_visible_lines(self);
     
     /* Force Layout update because line count effectively changes */
     if (self->line_y_offsets) {

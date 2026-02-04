@@ -27,6 +27,11 @@ typedef struct {
     double target_x; /* -1 if needs update */
 } EditorCursor;
 
+typedef struct {
+    size_t start_line;
+    size_t end_line;
+} FoldRange;
+
 struct _EditorWidget {
     GtkWidget parent_instance;
 
@@ -104,8 +109,15 @@ struct _EditorWidget {
     GRegex *filter_regex_pattern;
     gboolean filter_case_sensitive;
     gboolean filter_is_regex;
+    
+    /* Folding */
+    GArray *fold_ranges;       /* FoldRange */
+    GArray *fold_collapsed;    /* size_t start_line */
+    GArray *collapsed_ranges;  /* FoldRange merged, for visibility checks */
+    CompactMatches *visible_lines; /* Visible physical lines after filter+fold */
 
     /* Config */
+    gboolean enable_folding;
     gboolean show_line_numbers;
     gboolean highlight_current_line;
     gboolean show_right_margin;
@@ -134,6 +146,9 @@ struct _EditorWidget {
     
     /* Async Undo/Redo */
     UndoRedoTask *undo_redo_task; /* Active undo/redo operation */
+    
+    /* UI State */
+    gboolean mouse_in_gutter;
 };
 
 /* Helper Functions */
@@ -204,6 +219,16 @@ size_t get_physical_line_index(EditorWidget *self, size_t visual_line_idx);
 size_t utf8_next_grapheme(EditorWidget *self, size_t offset);
 size_t utf8_prev_grapheme(EditorWidget *self, size_t offset);
 void editor_widget_ensure_syntax_state_up_to(EditorWidget *self, size_t target_line);
+void editor_widget_rebuild_folding(EditorWidget *self);
+void editor_widget_rebuild_visible_lines(EditorWidget *self);
+gboolean editor_widget_toggle_fold(EditorWidget *self, size_t line_idx);
+gboolean editor_widget_get_fold_range(EditorWidget *self, size_t line_idx, FoldRange *out_range);
+gboolean editor_widget_is_fold_collapsed(EditorWidget *self, size_t line_idx);
+gboolean editor_widget_get_visual_line_for_physical(EditorWidget *self, size_t phys_line, size_t *out_visual);
+gboolean editor_widget_get_next_visible_line(EditorWidget *self, size_t phys_line, size_t *out_line);
+gboolean editor_widget_get_prev_visible_line(EditorWidget *self, size_t phys_line, size_t *out_line);
+double editor_widget_get_fold_gutter_width(EditorWidget *self);
+gboolean editor_widget_ensure_line_visible(EditorWidget *self, size_t phys_line);
 
 /* Rendering */
 void editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot);

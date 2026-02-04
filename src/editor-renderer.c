@@ -158,6 +158,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
 
 
     double current_y_pos = -partial_y; /* Start with calculated offset */
+
     double text_start_x = gutter_w + self->padding_left;
 
     /* Pre-calculate Tab Array (Performance optimization) */
@@ -253,8 +254,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                  */
                   
                  double line_doc_y = 0;
-                 if (self->line_y_offsets && phys_line < self->line_y_offsets->len) {
-                     line_doc_y = g_array_index(self->line_y_offsets, double, phys_line);
+                 if (self->line_y_offsets && visual_line_idx < self->line_y_offsets->len) {
+                     line_doc_y = g_array_index(self->line_y_offsets, double, visual_line_idx);
                  } else {
                      line_doc_y = current_y_pos + scroll_y;
                  }
@@ -424,16 +425,40 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                      }
                  }
                  
-                 if (free_needed) {
+                if (free_needed) {
                     g_free(haystack_lower);
                     g_free(needle_lower);
-                 }
-             }
+                }
+            }
+        }
+        
+        /* Apply Filter Highlights to attrs */
+        if (filter_highlight_ranges) {
+            for (guint i = 0; i < filter_highlight_ranges->len; i++) {
+                int *range = &g_array_index(filter_highlight_ranges, int, i);
+                int start = range[0];
+                int end = range[1];
+                
+                /* Ensure valid range */
+                if (start >= 0 && end > start && end <= len) {
+                     PangoAttribute *attr = pango_attr_background_new(65535, 65535, 0); /* Yellow */
+                     attr->start_index = start;
+                     attr->end_index = end;
+                     pango_attr_list_insert(attrs, attr);
+                     
+                     PangoAttribute *fg_attr = pango_attr_foreground_new(0, 0, 0); /* Black Text */
+                     fg_attr->start_index = start;
+                     fg_attr->end_index = end;
+                     pango_attr_list_insert(attrs, fg_attr);
+                }
+            }
+            g_array_free(filter_highlight_ranges, TRUE);
         }
 
-
-        
         pango_layout_set_attributes(layout, attrs);
+        
+        /* Cleanup */
+        if (cached_attrs) pango_attr_list_unref(cached_attrs); /* Release reference from syntax_highlight_line */
         pango_attr_list_unref(attrs);
         
         /* Calculate height of this layout */
@@ -472,6 +497,16 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
              }
         }
 
+        /* Draw Folded Line Highlight */
+        if (self->enable_folding && editor_widget_is_fold_collapsed(self, phys_line)) {
+             GdkRGBA fold_hl = {0.2, 0.4, 0.8, 0.1}; /* 10% opacity blue */
+             
+             gtk_snapshot_append_color(snapshot, &fold_hl, 
+                &GRAPHENE_RECT_INIT(text_start_x, current_y_pos + self->padding_top, width - text_start_x, layout_h));
+        }
+
+        /* Draw Fold Marker */
+        /* Draw Line Number */
         /* Draw Line Number */
         if (self->show_line_numbers) {
             char lnum_buf[32];
@@ -482,8 +517,13 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             
             pango_layout_set_text(lnum_layout, lnum_buf, -1);
             pango_layout_set_alignment(lnum_layout, PANGO_ALIGN_RIGHT);
-            /* Width = gutter_w - right_padding(4) - left_padding(4) */
-            pango_layout_set_width(lnum_layout, (int)((gutter_w - 8) * PANGO_SCALE));
+            
+            double fold_w = editor_widget_get_fold_gutter_width(self);
+
+            /* Width = gutter_w - fold_w - 8 (padding) */
+            double lnum_w = gutter_w - fold_w - 8.0; 
+            if (lnum_w < 1.0) lnum_w = 1.0;
+            pango_layout_set_width(lnum_layout, (int)(lnum_w * PANGO_SCALE));
             
             /* Gutter text color - dim it */
             GdkRGBA gutter_fg = self->color_text;
@@ -496,7 +536,38 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             gtk_snapshot_restore(snapshot);
             
             g_object_unref(lnum_layout);
+            
+            /* Draw Fold Marker - In its own column on the right */
+            if (self->enable_folding && self->fold_ranges) {
+                FoldRange fr;
+                if (editor_widget_get_fold_range(self, phys_line, &fr)) {
+                    gboolean is_collapsed = editor_widget_is_fold_collapsed(self, phys_line);
+                    
+                    /* Show if collapsed (always) OR if mouse is hovering in gutter */
+                    if (is_collapsed || self->mouse_in_gutter) {
+                        const char *marker = is_collapsed ? "▶" : "▼";
+                        PangoLayout *fold_layout = pango_layout_new(context);
+                        pango_layout_set_font_description(fold_layout, self->font_desc);
+                        pango_layout_set_text(fold_layout, marker, -1);
+                        pango_layout_set_alignment(fold_layout, PANGO_ALIGN_CENTER);
+                        
+                        /* Center in fold gutter */
+                        pango_layout_set_width(fold_layout, (int)((fold_w - 4.0) * PANGO_SCALE));
+    
+                        GdkRGBA fold_fg = self->color_text;
+                        fold_fg.alpha = 0.7;
+    
+                        gtk_snapshot_save(snapshot);
+                        /* Position in fold column: [gutter_w - fold_w, gutter_w] */
+                        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(gutter_w - fold_w + 2, current_y_pos + self->padding_top + centering_offset));
+                        gtk_snapshot_append_layout(snapshot, fold_layout, &fold_fg);
+                        gtk_snapshot_restore(snapshot);
+                        g_object_unref(fold_layout);
+                    }
+                }
+            }
         }
+
         
         // fprintf(stderr, "[DEBUG] snapshot loop: line_idx=%zu done\n", line_idx);
 
