@@ -180,8 +180,138 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         if (phys_line == (size_t)-1) continue;
 
         size_t len;
-        char *text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024);
-        // fprintf(stderr, "[DEBUG] snapshot loop: len=%zu\n", len);
+        char *text = NULL;
+        
+        /* Virtualization State */
+        gboolean is_virtualized = FALSE;
+        size_t chunk_padding = 0; /* Byte offset of the chunk start */
+        double render_x_offset = 0; /* X offset to draw the chunk at */
+        double render_y_offset = 0; /* Y offset (for vertical virtualization) */
+        double virtual_full_height = 0; /* Full height of a massive wrapped line */
+
+        size_t full_len = document_get_line_length(self->doc, phys_line);
+
+        /* Optimization for Long Lines (> 4KB) */
+        if (full_len > 4096) {
+             is_virtualized = TRUE;
+             double cw = self->cached_char_width > 1.0 ? self->cached_char_width : 8.0; 
+             
+             if (self->wrap_lines) {
+                 /* Vertical Virtualization (Wrapping Enabled) */
+                 int available_w = width - text_start_x - 20; 
+                 if (available_w < 50) available_w = 50;
+                 int chars_per_line = (int)((double)available_w / cw);
+                 if (chars_per_line < 1) chars_per_line = 1;
+                 
+                 /* Determine which rows are visible */
+                 /* We need the line's top Y position relative to document */
+                 /* current_y_pos passed to this loop is relative to the start of the VIEWPORT (if translating?) 
+                    No, current_y_pos accumulates from 0 in the snapshot loop?
+                    Wait, snapshot loop iterates visible lines from 'start'.
+                    'current_y_pos' starts at 0? 
+                    Actually, let's check lines before this block.
+                    The loop iterates from 'start_line' to 'end_line'.
+                    The 'current_y_pos' is calculated?
+                    Wait, the loop uses 'document_iter_next_line' but in renderer it iterates by index?
+                    Ah, lines 177: for (size_t i = start_line; i < end_line; i++) { ... }
+                    Wait, earlier in the file, 'current_y_pos' was initialized.
+                 */
+                 
+                 /* We need to know where THIS specific line starts relative to screen top */
+                 /* We can assume 'current_y_pos' tracks the Render Y.
+                    But if we just jumped to 'start_line', current_y_pos might be 0 relative to the draw call.
+                    Actually, standard loop:
+                    for (...) {
+                       // layout
+                       translate(x, y);
+                       y += h;
+                    }
+                    So 'current_y_pos' is correct for the start of this line.
+                 */
+                 
+                 /* But wait, if this massive line STARTS way above the viewport,
+                    start_line (calculated by get_visible_line_range) would be THIS massive line.
+                    But 'current_y_pos' in the loop starts at... ?
+                    If get_visible_line_range returned start_line = 5, and we start loop at 5.
+                    But line 5 start Y might be -5000 relative to scroll?
+                    
+                    Re-check 'editor_widget_snapshot'.
+                    Line 160: double current_y_pos = 0;
+                    Line 163: if (self->line_y_offsets...) { current_y_pos = offsets[start_line]; }
+                    Else estimation.
+                    
+                    The 'current_y_pos' is essentially 'Y_start_of_line_in_document'.
+                    We subtract 'scroll_y' during translation later.
+                    
+                    So:
+                    line_doc_y = current_y_pos.
+                    visible_top = scroll_y.
+                    relative_start = visible_top - line_doc_y.
+                    
+                    If relative_start < 0, line starts below screen top. row_start = 0.
+                    If relative_start > 0, line starts above. row_start = relative_start / line_h.
+                 */
+                  
+                 double line_doc_y = 0;
+                 if (self->line_y_offsets && phys_line < self->line_y_offsets->len) {
+                     line_doc_y = g_array_index(self->line_y_offsets, double, phys_line);
+                 } else {
+                     line_doc_y = current_y_pos + scroll_y;
+                 }
+                 double relative_start = scroll_y - line_doc_y;
+                 
+                 size_t start_row = 0;
+                 if (relative_start > 0) {
+                     start_row = (size_t)(relative_start / self->line_height);
+                 }
+                 
+                 size_t full_rows = (full_len + chars_per_line - 1) / chars_per_line;
+                 if (full_rows == 0) full_rows = 1;
+                 virtual_full_height = (double)full_rows * self->line_height;
+
+                 size_t start_char_idx = start_row * chars_per_line;
+                 if (start_char_idx > full_len) start_char_idx = full_len;
+                 
+                 /* How many rows visible? */
+                 /* We need to fill 'height' (viewport height) */
+                 size_t visible_rows = (size_t)(height / self->line_height) + 2; 
+                 size_t chars_to_fetch = visible_rows * chars_per_line + 100; // buffer
+                 
+                 size_t safe_len = chars_to_fetch;
+                 if (start_char_idx + safe_len > full_len) safe_len = full_len - start_char_idx;
+                 
+                 text = document_get_text_range(self->doc, document_get_offset_of_line(self->doc, phys_line) + start_char_idx, safe_len);
+                 len = safe_len;
+                 chunk_padding = start_char_idx;
+                 
+                 /* We must render this chunk offset vertically */
+                 render_y_offset = (double)start_row * self->line_height;
+                 
+             } else {
+                 /* Horizontal Virtualization (No Wrap) */
+                 double cw = self->cached_char_width > 1.0 ? self->cached_char_width : 8.0; 
+                 
+                 double start_char_visual = (scroll_x / cw) - 100.0;
+                 if (start_char_visual < 0) start_char_visual = 0;
+                 
+                 size_t start_byte_approx = (size_t)start_char_visual;
+                 if (start_byte_approx > full_len) start_byte_approx = full_len;
+
+                 size_t visible_chars = (size_t)(width / cw) + 300; 
+                 size_t safe_len = visible_chars;
+                 if (start_byte_approx + safe_len > full_len) safe_len = full_len - start_byte_approx;
+                 
+                 text = document_get_text_range(self->doc, document_get_offset_of_line(self->doc, phys_line) + start_byte_approx, safe_len);
+                 len = safe_len;
+                 chunk_padding = start_byte_approx;
+                 render_x_offset = start_byte_approx * cw;
+             }
+             
+             /* UTF-8 Safety */
+        } else {
+             text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024);
+        }
+        // fprintf(stderr, "[DEBUG] snapshot loop: len=%zu virtualized=%d\n", len, is_virtualized);
 
         /* Null check - document_get_line_truncated can return NULL */
         if (!text) {
@@ -210,19 +340,31 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         if (tab_array) pango_layout_set_tabs(layout, tab_array);
         
         /* Word Wrap - account for gutter and padding */
+        /* Virtualized lines need handling: */
+        /* If Horizontal (No Wrap for Huge): force no-wrap. */
+        /* If Vertical (Wrap Huge): force wrap CHAR. */
+        
         if (self->wrap_lines) {
             int available_w = width - text_start_x - 20; /* 20px buffer for scrollbar */
             if (available_w < 50) available_w = 50; /* Safe min width */
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
-            pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+            
+            if (is_virtualized) {
+               pango_layout_set_wrap(layout, PANGO_WRAP_CHAR);
+            } else {
+               pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+            }
         } else {
-            pango_layout_set_width(layout, -1);
-            pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+            pango_layout_set_width(layout, -1); /* Unwrapped */
         }
         
         /* Syntax highlight and Search Highlight */
         /* MUST COPY cached attributes to avoid corrupting the syntax cache with search highlights! */
-        PangoAttrList *cached_attrs = syntax_highlight_line(self->syntax_ctx, phys_line, text);
+        PangoAttrList *cached_attrs = NULL;
+        /* Disable highlighting for virtualized chunks to prevent applying Start-Of-Line state to Middle-Of-Line text */
+        if (!is_virtualized) {
+            cached_attrs = syntax_highlight_line(self->syntax_ctx, phys_line, text);
+        }
         PangoAttrList *attrs = cached_attrs ? pango_attr_list_copy(cached_attrs) : pango_attr_list_new();
         
         /* Attribute injection removed for search matches - moving to manual drawing below */
@@ -300,6 +442,10 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         double real_layout_h = (double)pixel_h;
         double layout_h = real_layout_h;
         if (layout_h < self->line_height) layout_h = self->line_height; /* Min height */
+        double advance_h = layout_h;
+        if (is_virtualized && self->wrap_lines && virtual_full_height > 0) {
+            advance_h = virtual_full_height;
+        }
         
         /* Vertical Centering: Calculate offset to center the text within the row */
         double centering_offset = floor((layout_h - real_layout_h) / 2.0);
@@ -359,7 +505,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(gutter_w, 0, width - gutter_w, height));
         
         /* Translate to the TOP of the line slot (contiguous baseline) */
-        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x - scroll_x, current_y_pos + self->padding_top));
+        /* Incorporate render_x_offset for virtualized chunks */
+        gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(text_start_x - scroll_x + render_x_offset, current_y_pos + self->padding_top + render_y_offset));
         
         /* Draw Line Background if selected */
         /* Selection rendering across lines is complex. 
@@ -367,7 +514,9 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         */
 
         /* Draws Search Matches (Manual Drawing) */
-        size_t line_start_off = document_get_offset_of_line(self->doc, phys_line);
+        /* Adjusted start offset for virtualized chunks */
+        size_t line_start_off_real = document_get_offset_of_line(self->doc, phys_line);
+        size_t line_start_off = line_start_off_real + chunk_padding;
         size_t line_end_off = 0;
         size_t total_lines = document_get_line_count(self->doc);
         if (phys_line + 1 < total_lines) {
@@ -817,7 +966,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         }
         
         /* Update Y position for next line */
-        current_y_pos += layout_h;
+        current_y_pos += advance_h;
         
         gtk_snapshot_pop(snapshot);
         gtk_snapshot_restore(snapshot);

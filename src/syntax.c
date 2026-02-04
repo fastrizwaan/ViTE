@@ -569,6 +569,12 @@ syntax_process_line_len(SyntaxContext *ctx, size_t line_index, const char *text,
     
     PangoAttrList *attrs = compute_attributes ? pango_attr_list_new() : NULL;
     /* len is provided, no strlen needed */
+
+    /* PERF: Disable syntax highlighting for extremely long lines (minified files)
+       to avoid freezing the UI with massive regex scans. */
+    if (len > 4096) {
+        return NULL;
+    }
     
     /* Dispatch to language handlers */
     switch (ctx->lang) {

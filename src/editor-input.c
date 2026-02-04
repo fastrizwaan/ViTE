@@ -1387,6 +1387,9 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
     document_end_undo_group(self->doc);
     
     editor_widget_update_im_cursor_location(self);
+    editor_widget_reset_cursor_blink(self);
+    editor_widget_update_adjustments(self, -1, -1);
+    scroll_to_cursor(self);
     gtk_widget_queue_draw(GTK_WIDGET(self));
     
     size_t line, col;

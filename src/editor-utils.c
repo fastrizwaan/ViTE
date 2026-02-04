@@ -505,6 +505,21 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     size_t true_len = strlen(text);
     if (true_len < len) len = true_len;
 
+    /* OPTIMIZATION: If line is massive (>40KB), truncation is handled by document_get_line_truncated 
+       (using MAX_PANGO_LINE_LEN = 10MB). 
+       However, 10MB layout is still too slow. 
+       If this helper is used for METRICS (e.g. word boundary), we might need the full line conceptually,
+       but we can't afford it. 
+       We truncate to 4096 for general utility usage to prevent stalls.
+       Callers requiring full line access (like renderer) use their own virtualization logic.
+    */
+    if (len > 4096) {
+        len = 4096;
+        /* Ensure valid UTF-8 cut */
+        while (len > 0 && (text[len] & 0xC0) == 0x80) len--;
+        text[len] = '\0';
+    }
+
     if (!g_utf8_validate(text, len, NULL)) {
         char *safe = g_utf8_make_valid(text, len);
         g_free(text);
@@ -562,6 +577,14 @@ update_target_x(EditorWidget *self)
         size_t index_in_line = cur->cursor_offset - line_start;
         
         char *text; size_t len;
+        
+        /* Optimization for long lines: Estimate target_x instead of full layout */
+        if (document_get_line_length(self->doc, line_idx) > 4096) {
+             double cw = self->cached_char_width > 1.0 ? self->cached_char_width : 8.0;
+             cur->target_x = (double)index_in_line * cw;
+             continue;
+        }
+
         PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
         if (!layout) continue;
         

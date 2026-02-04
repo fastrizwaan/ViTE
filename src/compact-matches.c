@@ -108,14 +108,6 @@ static gboolean compact_matches_grow(CompactMatches *cm) {
     size_t new_capacity = cm->capacity * GROWTH_FACTOR;
     size_t new_size = new_capacity * sizeof(size_t);
     
-    /* Unmap old region */
-    if (munmap(cm->data, old_size) < 0) {
-        g_warning("munmap failed: %s", strerror(errno));
-        cm->data = NULL;  /* Mark as invalid */
-        return FALSE;
-    }
-    cm->data = NULL;  /* Mark as unmapped during resize */
-    
     /* Check disk space before growing */
     if (!resource_can_write_disk("/tmp", new_size - old_size)) {
         g_warning("compact_matches_grow: Insufficient disk space");
@@ -128,14 +120,21 @@ static gboolean compact_matches_grow(CompactMatches *cm) {
         return FALSE;
     }
     
-    /* Re-mmap with new size */
-    cm->data = mmap(NULL, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, cm->fd, 0);
-    if (cm->data == MAP_FAILED) {
+    /* Re-mmap with new size (keep old mapping until new one is ready) */
+    void *new_map = mmap(NULL, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, cm->fd, 0);
+    if (new_map == MAP_FAILED) {
         g_warning("mmap failed after grow: %s", strerror(errno));
-        cm->data = NULL;
+        /* Best-effort rollback to old size; keep old mapping intact */
+        ftruncate(cm->fd, old_size);
         return FALSE;
     }
     
+    /* Swap mappings */
+    if (munmap(cm->data, old_size) < 0) {
+        g_warning("munmap failed after grow: %s", strerror(errno));
+        /* Keep new mapping anyway to avoid invalid state */
+    }
+    cm->data = new_map;
     cm->capacity = new_capacity;
     return TRUE;
 }

@@ -70,7 +70,7 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
     } else {
         /* Accurate calculation for wrapped lines */
         double text_start_x = get_effective_gutter_width(self) + self->padding_left;
-        double wrap_width = (double)widget_width - text_start_x;
+        double wrap_width = (double)widget_width - text_start_x - 20.0; /* Match renderer buffer */
         
         if (wrap_width < 1.0) wrap_width = 1.0;
         
@@ -94,19 +94,32 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
                 size_t idx = i * step;
                 if (idx >= total_lines) break;
                 
-                char *text = NULL;
-                PangoLayout *layout = create_pango_layout_for_line(self, idx, &text, NULL);
-                if (layout) {
-                    PangoRectangle logical;
-                    pango_layout_get_extents(layout, NULL, &logical);
-                    double h = (double)logical.height / PANGO_SCALE;
-                    if (h < self->line_height) h = self->line_height; /* Sanity floor */
-                    
-                    total_sample_height += h;
-                    actual_samples++;
-                    g_object_unref(layout);
+                size_t line_len_bytes = document_get_line_length(self->doc, idx);
+                
+                /* Optimization: For massive lines, estimate height to avoid Pango stall */
+                if (line_len_bytes > 4096) {
+                    /* Estimate visual lines (Simple Char Wrap) */
+                    size_t visual_lines = 1;
+                    if (chars_per_line > 0) {
+                        visual_lines = (line_len_bytes + chars_per_line - 1) / chars_per_line;
+                    }
+                     total_sample_height += (double)visual_lines * self->line_height;
+                     actual_samples++;
+                } else {
+                    char *text = NULL;
+                    PangoLayout *layout = create_pango_layout_for_line(self, idx, &text, NULL);
+                    if (layout) {
+                        PangoRectangle logical;
+                        pango_layout_get_extents(layout, NULL, &logical);
+                        double h = (double)logical.height / PANGO_SCALE;
+                        if (h < self->line_height) h = self->line_height; /* Sanity floor */
+                        
+                        total_sample_height += h;
+                        actual_samples++;
+                        g_object_unref(layout);
+                    }
+                    if (text) g_free(text);
                 }
-                if (text) g_free(text);
             }
             
             double avg_height = (actual_samples > 0) ? (total_sample_height / actual_samples) : self->line_height;
@@ -197,6 +210,10 @@ scroll_to_cursor(EditorWidget *self)
     if (!cur || !self->vadjustment) return;
     
     size_t line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
+    size_t line_start_offset = document_get_offset_of_line(self->doc, line_idx);
+    size_t offset_in_line = (cur->cursor_offset >= line_start_offset)
+        ? (cur->cursor_offset - line_start_offset)
+        : 0;
     
     /* Find visual Y */
     double y = 0;
@@ -209,6 +226,19 @@ scroll_to_cursor(EditorWidget *self)
         } else {
             y = (double)line_idx * self->line_height;
         }
+    }
+
+    /* If wrapping, adjust y to the cursor's visual row within the line. */
+    if (self->wrap_lines) {
+        int widget_width = gtk_widget_get_width(GTK_WIDGET(self));
+        double text_start_x = get_effective_gutter_width(self) + self->padding_left;
+        double wrap_width = (double)widget_width - text_start_x - 20.0;
+        if (wrap_width < 1.0) wrap_width = 1.0;
+        double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
+        int chars_per_line = (int)(wrap_width / cw);
+        if (chars_per_line < 1) chars_per_line = 1;
+        size_t row = offset_in_line / (size_t)chars_per_line;
+        y += (double)row * self->line_height;
     }
     
     double page_size = gtk_adjustment_get_page_size(self->vadjustment);
