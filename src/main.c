@@ -132,6 +132,9 @@ static void on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpoi
 static void on_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_right(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_down(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_zoom_in_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_zoom_out_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_zoom_reset_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void check_close_when_done(ViteWindow *win);
 static void on_close_split_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_close_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
@@ -3237,6 +3240,36 @@ on_select_all_action(GSimpleAction *action, GVariant *value, gpointer user_data)
 }
 
 static void
+on_zoom_in_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        editor_widget_zoom_in(EDITOR_WIDGET(editor));
+    }
+}
+
+static void
+on_zoom_out_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        editor_widget_zoom_out(EDITOR_WIDGET(editor));
+    }
+}
+
+static void
+on_zoom_reset_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        editor_widget_zoom_reset(EDITOR_WIDGET(editor));
+    }
+}
+
+static void
 on_window_close_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
@@ -3425,6 +3458,9 @@ setup_window(GtkWindow *window)
         { "fullscreen", on_fullscreen_action, NULL, NULL, NULL },
         { "shortcuts", on_shortcuts_action, NULL, NULL, NULL },
         { "about", on_about_action, NULL, NULL, NULL },
+        { "zoom-in", on_zoom_in_action, NULL, NULL, NULL },
+        { "zoom-out", on_zoom_out_action, NULL, NULL, NULL },
+        { "zoom-reset", on_zoom_reset_action, NULL, NULL, NULL },
         
         /* Stateful Actions */
         { "set-encoding", NULL, "s", "'utf-8'", on_set_encoding },
@@ -3457,7 +3493,14 @@ setup_window(GtkWindow *window)
         { GDK_KEY_F5, 0, "win.discard-changes" },
         { GDK_KEY_F11, 0, "win.fullscreen" },
         { GDK_KEY_question, GDK_CONTROL_MASK, "win.shortcuts" },
-        { GDK_KEY_comma, GDK_CONTROL_MASK, "win.preferences" }
+        { GDK_KEY_comma, GDK_CONTROL_MASK, "win.preferences" },
+        { GDK_KEY_plus, GDK_CONTROL_MASK, "win.zoom-in" },
+        { GDK_KEY_equal, GDK_CONTROL_MASK, "win.zoom-in" },
+        { GDK_KEY_KP_Add, GDK_CONTROL_MASK, "win.zoom-in" },
+        { GDK_KEY_minus, GDK_CONTROL_MASK, "win.zoom-out" },
+        { GDK_KEY_KP_Subtract, GDK_CONTROL_MASK, "win.zoom-out" },
+        { GDK_KEY_0, GDK_CONTROL_MASK, "win.zoom-reset" },
+        { GDK_KEY_KP_0, GDK_CONTROL_MASK, "win.zoom-reset" }
     };
 
     for (int i = 0; i < G_N_ELEMENTS(keys); i++) {

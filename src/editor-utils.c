@@ -373,6 +373,9 @@ editor_widget_ensure_metrics(EditorWidget *self)
     if (self->line_height > 0) return;
 
     PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
+    const int min_font_size = 6 * PANGO_SCALE;
+    const int max_font_size = 48 * PANGO_SCALE;
+    const int default_font_size = 11 * PANGO_SCALE;
     
     /* Free existing font description */
     if (self->font_desc) {
@@ -398,6 +401,22 @@ editor_widget_ensure_metrics(EditorWidget *self)
         } else {
             self->font_desc = pango_font_description_from_string("Monospace 11");
         }
+    }
+
+    int base_size = pango_font_description_get_size(self->font_desc);
+    if (base_size <= 0) base_size = default_font_size;
+
+    int min_steps = (min_font_size - base_size) / PANGO_SCALE;
+    int max_steps = (max_font_size - base_size) / PANGO_SCALE;
+    if (self->font_zoom_steps < min_steps) self->font_zoom_steps = min_steps;
+    if (self->font_zoom_steps > max_steps) self->font_zoom_steps = max_steps;
+
+    int adjusted_size = base_size + (self->font_zoom_steps * PANGO_SCALE);
+
+    if (pango_font_description_get_size_is_absolute(self->font_desc)) {
+        pango_font_description_set_absolute_size(self->font_desc, adjusted_size);
+    } else {
+        pango_font_description_set_size(self->font_desc, adjusted_size);
     }
     
     /* Set font on context for measurements */

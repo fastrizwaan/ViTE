@@ -725,6 +725,7 @@ editor_widget_init(EditorWidget *self)
     /* Initialize custom font name to default (used when custom font is enabled) */
     self->font_name = g_strdup("Monospace 11");
     self->use_custom_font = FALSE;
+    self->font_zoom_steps = 0;
     self->insert_mode = TRUE;
     
     self->cursors = g_array_new(FALSE, FALSE, sizeof(EditorCursor));
@@ -1023,4 +1024,42 @@ editor_widget_get_word_wrap(EditorWidget *self)
 {
     g_return_val_if_fail(EDITOR_IS_WIDGET(self), FALSE);
     return self->wrap_lines;
+}
+
+static void
+editor_widget_apply_zoom(EditorWidget *self, int delta_steps, gboolean reset)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+
+    if (reset) {
+        self->font_zoom_steps = 0;
+    } else {
+        self->font_zoom_steps += delta_steps;
+    }
+
+    self->line_height = 0; /* Force metrics update */
+    editor_widget_ensure_metrics(self);
+
+    if (self->line_y_offsets) g_array_set_size(self->line_y_offsets, 0);
+    editor_widget_update_adjustments(self, -1, -1);
+    gtk_widget_queue_resize(GTK_WIDGET(self));
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
+void
+editor_widget_zoom_in(EditorWidget *self)
+{
+    editor_widget_apply_zoom(self, 1, FALSE);
+}
+
+void
+editor_widget_zoom_out(EditorWidget *self)
+{
+    editor_widget_apply_zoom(self, -1, FALSE);
+}
+
+void
+editor_widget_zoom_reset(EditorWidget *self)
+{
+    editor_widget_apply_zoom(self, 0, TRUE);
 }

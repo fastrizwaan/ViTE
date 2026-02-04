@@ -44,6 +44,7 @@ struct _EditorWidget {
     PangoFontDescription *font_desc;
     char *font_name;
     gboolean use_custom_font;
+    int font_zoom_steps;
     GSettings *interface_settings;
     
     GdkRGBA color_text;
