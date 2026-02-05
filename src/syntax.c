@@ -116,6 +116,12 @@ syntax_set_theme_mode(gboolean is_dark)
     }
 }
 
+gboolean
+syntax_get_theme_mode(void)
+{
+    return is_dark_mode;
+}
+
 SyntaxContext *
 syntax_context_new(void)
 {

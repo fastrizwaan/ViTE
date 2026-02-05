@@ -17,6 +17,7 @@ typedef enum {
 } SyntaxLanguage;
 
 void syntax_set_theme_mode(gboolean is_dark);
+gboolean syntax_get_theme_mode(void);
 
 /* States match Python logic roughly but simplified for C port first */
 typedef enum {

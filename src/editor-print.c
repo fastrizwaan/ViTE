@@ -24,11 +24,24 @@ typedef struct {
     
     double header_height;
     double footer_height;
+    
+    gboolean original_theme_dark;
 } PrintData;
 
 static void
 print_data_free(PrintData *data)
 {
+    /* Restore theme */
+    if (data->editor && data->editor->syntax_ctx) {
+        /* Only restore if we actually changed it? Or unconditionally?
+           We saved original state, so just restore that. */
+        if (syntax_get_theme_mode() != data->original_theme_dark) {
+             syntax_set_theme_mode(data->original_theme_dark);
+             syntax_context_invalidate_cache(data->editor->syntax_ctx);
+             gtk_widget_queue_draw(GTK_WIDGET(data->editor));
+        }
+    }
+
     if (data->settings) g_object_unref(data->settings);
     if (data->font_desc) pango_font_description_free(data->font_desc);
     g_free(data);
@@ -41,6 +54,13 @@ begin_print(GtkPrintOperation *operation, GtkPrintContext *context, gpointer use
     EditorWidget *self = data->editor;
     
     if (!self->doc) return;
+    
+    /* Force Light Theme for Printing */
+    data->original_theme_dark = syntax_get_theme_mode();
+    if (data->original_theme_dark) {
+        syntax_set_theme_mode(FALSE); /* Light */
+        if (self->syntax_ctx) syntax_context_invalidate_cache(self->syntax_ctx);
+    }
     
     data->total_lines = document_get_line_count(self->doc);
     
