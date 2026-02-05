@@ -756,7 +756,7 @@ editor_widget_class_init(EditorWidgetClass *klass)
         g_param_spec_boolean("enable-folding", "Enable Code Folding", "Enable Code Folding", FALSE, G_PARAM_READWRITE));
 
     g_object_class_install_property(object_class, PROP_MINIMAP_ENABLED,
-        g_param_spec_boolean("minimap-enabled", "Enable Minimap", "Enable Minimap", TRUE, G_PARAM_READWRITE));
+        g_param_spec_boolean("minimap-enabled", "Enable Minimap", "Enable Minimap", FALSE, G_PARAM_READWRITE));
 }
 
 static void
@@ -815,7 +815,7 @@ editor_widget_init(EditorWidget *self)
     self->insert_mode = TRUE;
     self->enable_folding = FALSE; /* Default Disabled */
     
-    self->minimap_enabled = TRUE;
+    self->minimap_enabled = FALSE;
     self->minimap_width = 100.0;
     self->minimap_block_height = 2;
     self->minimap_active = FALSE;

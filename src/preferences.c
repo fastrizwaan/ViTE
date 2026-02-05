@@ -119,6 +119,7 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Display Line Numbers", editor, "show-line-numbers"));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Enable Code Folding", editor, "enable-folding"));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Enable Minimap", editor, "minimap-enabled"));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Highlight Current Line", editor, "highlight-current-line"));
     
     /* Group: Typography/Font */

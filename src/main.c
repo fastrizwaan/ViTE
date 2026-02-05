@@ -3393,6 +3393,20 @@ on_enable_folding_toggled(GSimpleAction *action, GVariant *value, gpointer user_
     g_simple_action_set_state(action, value);
 }
 
+static void
+on_enable_minimap_toggled(GSimpleAction *action, GVariant *value, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    gboolean enabled = g_variant_get_boolean(value);
+
+    GtkWidget *editor = get_active_editor(win);
+    if (EDITOR_IS_WIDGET(editor)) {
+         g_object_set(editor, "minimap-enabled", enabled, NULL);
+    }
+
+    g_simple_action_set_state(action, value);
+}
+
 
 
 static void
@@ -3527,6 +3541,7 @@ setup_window(GtkWindow *window)
         { "show-line-numbers", NULL, NULL, "true", on_show_line_numbers_toggled },
         { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled },
         { "enable-folding", NULL, NULL, "false", on_enable_folding_toggled },
+        { "enable-minimap", NULL, NULL, "false", on_enable_minimap_toggled },
         { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled },
         { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL },
         { "select-all", on_select_all_action, NULL, NULL, NULL }
@@ -3692,6 +3707,7 @@ setup_window(GtkWindow *window)
     GMenu *view_menu = g_menu_new();
     g_menu_append(view_menu, "Show Line Numbers", "win.show-line-numbers");
     g_menu_append(view_menu, "Code Folding", "win.enable-folding");
+    g_menu_append(view_menu, "Minimap", "win.enable-minimap");
     g_menu_append(view_menu, "Word Wrap", "win.enable-word-wrap");
     g_menu_append(view_menu, "Show Status Bar", "win.show-status-bar");
     

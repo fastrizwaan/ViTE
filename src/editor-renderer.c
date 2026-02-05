@@ -441,28 +441,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             }
         }
         
-        /* Apply Filter Highlights to attrs */
-        if (filter_highlight_ranges) {
-            for (guint i = 0; i < filter_highlight_ranges->len; i++) {
-                int *range = &g_array_index(filter_highlight_ranges, int, i);
-                int start = range[0];
-                int end = range[1];
-                
-                /* Ensure valid range */
-                if (start >= 0 && end > start && end <= len) {
-                     PangoAttribute *attr = pango_attr_background_new(65535, 65535, 0); /* Yellow */
-                     attr->start_index = start;
-                     attr->end_index = end;
-                     pango_attr_list_insert(attrs, attr);
-                     
-                     PangoAttribute *fg_attr = pango_attr_foreground_new(0, 0, 0); /* Black Text */
-                     fg_attr->start_index = start;
-                     fg_attr->end_index = end;
-                     pango_attr_list_insert(attrs, fg_attr);
-                }
-            }
-            g_array_free(filter_highlight_ranges, TRUE);
-        }
+        /* Apply Filter Highlights to attrs - REMOVED (User requested revert of Yellow color) */
+        /* if (filter_highlight_ranges) { ... } */
 
         pango_layout_set_attributes(layout, attrs);
         
