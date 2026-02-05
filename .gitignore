@@ -9,3 +9,4 @@ svite
 tests
 *.log
 .github
+CudaText
