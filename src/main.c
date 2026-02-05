@@ -7,6 +7,7 @@
 #include "tab-bar.h"
 #include "tab.h"
 #include "find-replace-bar.h"
+#include "editor-print.h"
 #include "status-bar.h"
 
 
@@ -286,8 +287,12 @@ on_discard_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_
 static void
 on_print_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
-    /* Placeholder for Print */
-    /* Future: GtkPrintOperation */
+    ViteWindow *win = (ViteWindow *)user_data;
+    GtkWidget *editor = get_active_editor(win);
+    
+    if (EDITOR_IS_WIDGET(editor)) {
+         editor_print_start(EDITOR_WIDGET(editor));
+    }
 }
 
 static gboolean
