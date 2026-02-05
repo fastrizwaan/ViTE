@@ -133,11 +133,17 @@ draw_page(GtkPrintOperation *operation, GtkPrintContext *context, gint page_nr, 
     size_t end_line = start_line + data->lines_per_page;
     if (end_line > data->total_lines) end_line = data->total_lines;
     
+    /* Check if line numbers should be shown */
+    gboolean show_line_numbers = editor_widget_get_show_line_numbers(self);
+    
     /* Calculate Line Number width */
-    int max_digits = 1;
-    size_t tmp = data->total_lines;
-    while (tmp >= 10) { tmp /= 10; max_digits++; }
-    double lnum_w = (max_digits + 1) * data->char_width;
+    double lnum_w = 0.0;
+    if (show_line_numbers) {
+        int max_digits = 1;
+        size_t tmp = data->total_lines;
+        while (tmp >= 10) { tmp /= 10; max_digits++; }
+        lnum_w = (max_digits + 1) * data->char_width;
+    }
     
     double content_start_y = data->header_height;
     double current_y = content_start_y;
@@ -155,20 +161,22 @@ draw_page(GtkPrintOperation *operation, GtkPrintContext *context, gint page_nr, 
     
     for (size_t i = start_line; i < end_line; i++) {
         /* Line Number */
-        char lnum[32];
-        snprintf(lnum, sizeof(lnum), "%zu", i + 1);
-        pango_layout_set_text(layout, lnum, -1);
-        pango_layout_set_width(layout, -1); /* Auto width for number */
-        pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT); /* Line numbers right aligned */
-        pango_layout_set_attributes(layout, NULL); /* Clear potential attributes from previous line */
-        
-        cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
-        
-        /* Right align number */
-        int w;
-        pango_layout_get_pixel_size(layout, &w, NULL);
-        cairo_move_to(cr, lnum_w - w - 4, current_y);
-        pango_cairo_show_layout(cr, layout);
+        if (show_line_numbers) {
+            char lnum[32];
+            snprintf(lnum, sizeof(lnum), "%zu", i + 1);
+            pango_layout_set_text(layout, lnum, -1);
+            pango_layout_set_width(layout, -1); /* Auto width for number */
+            pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT); /* Line numbers right aligned */
+            pango_layout_set_attributes(layout, NULL); /* Clear potential attributes from previous line */
+            
+            cairo_set_source_rgb(cr, 0.5, 0.5, 0.5);
+            
+            /* Right align number */
+            int w;
+            pango_layout_get_pixel_size(layout, &w, NULL);
+            cairo_move_to(cr, lnum_w - w - 4, current_y);
+            pango_cairo_show_layout(cr, layout);
+        }
         
         /* Text */
         size_t len;
