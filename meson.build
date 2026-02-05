@@ -42,7 +42,8 @@ sources = files(
   'src/syntax-yaml.c',
   'src/syntax-xml.c',
   'src/syntax-desktop.c',
-  'src/syntax-rust.c'
+  'src/syntax-rust.c',
+  'src/editor-minimap.c'
 )
 
 executable('vite',

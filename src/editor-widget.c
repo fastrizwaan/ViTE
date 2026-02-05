@@ -1,7 +1,11 @@
+#include <gtk/gtk.h>
+#include "editor-widget.h"
 #include "editor-internal.h"
+#include "editor-minimap.h"
 #include "syntax.h"
 #include "syntax-internal.h"
 #include <math.h>
+#include <adwaita.h>
 
 #define MAX_PANGO_LINE_LEN 10485760 /* 10MB limit for single line rendering to avoid int overflow/crash */
 
@@ -73,6 +77,7 @@ enum {
     PROP_USE_CUSTOM_FONT,
     PROP_FONT_NAME,
     PROP_ENABLE_FOLDING,
+    PROP_MINIMAP_ENABLED,
     N_PROPS
 };
 
@@ -469,9 +474,15 @@ editor_widget_size_allocate (GtkWidget *widget,
     EditorWidget *self = EDITOR_WIDGET(widget);
     editor_widget_update_adjustments(self, width, height);
     editor_widget_update_search_viewport(self);
+    /* Recalibrate minimap on resize */
+    gtk_widget_queue_draw(widget);
 }
 
-
+static void
+editor_widget_map (GtkWidget *widget)
+{
+    GTK_WIDGET_CLASS(editor_widget_parent_class)->map(widget);
+}
 
 static void
 editor_widget_set_property (GObject      *object,
@@ -566,6 +577,10 @@ editor_widget_set_property (GObject      *object,
             editor_widget_rebuild_folding(self); /* Rebuild or Clear */
             gtk_widget_queue_resize(GTK_WIDGET(self));
             break;
+        case PROP_MINIMAP_ENABLED:
+             self->minimap_enabled = g_value_get_boolean(value);
+            gtk_widget_queue_resize(GTK_WIDGET(self));
+            break;
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
             break;
@@ -627,6 +642,9 @@ editor_widget_get_property (GObject    *object,
             break;
         case PROP_ENABLE_FOLDING:
             g_value_set_boolean(value, self->enable_folding);
+            break;
+        case PROP_MINIMAP_ENABLED:
+            g_value_set_boolean(value, self->minimap_enabled);
             break;
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
@@ -692,6 +710,7 @@ editor_widget_class_init(EditorWidgetClass *klass)
                                  G_TYPE_BOOLEAN);
 
     widget_class->snapshot = editor_widget_snapshot;
+    widget_class->map = editor_widget_map;
     widget_class->measure = editor_widget_measure;
     widget_class->size_allocate = editor_widget_size_allocate;
 
@@ -735,6 +754,9 @@ editor_widget_class_init(EditorWidgetClass *klass)
         
     g_object_class_install_property(object_class, PROP_ENABLE_FOLDING,
         g_param_spec_boolean("enable-folding", "Enable Code Folding", "Enable Code Folding", FALSE, G_PARAM_READWRITE));
+
+    g_object_class_install_property(object_class, PROP_MINIMAP_ENABLED,
+        g_param_spec_boolean("minimap-enabled", "Enable Minimap", "Enable Minimap", TRUE, G_PARAM_READWRITE));
 }
 
 static void
@@ -792,6 +814,11 @@ editor_widget_init(EditorWidget *self)
     self->font_zoom_steps = 0;
     self->insert_mode = TRUE;
     self->enable_folding = FALSE; /* Default Disabled */
+    
+    self->minimap_enabled = TRUE;
+    self->minimap_width = 100.0;
+    self->minimap_block_height = 2;
+    self->minimap_active = FALSE;
     
     self->cursors = g_array_new(FALSE, FALSE, sizeof(EditorCursor));
     self->line_y_offsets = g_array_new(FALSE, FALSE, sizeof(double));

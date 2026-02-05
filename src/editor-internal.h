@@ -128,6 +128,14 @@ struct _EditorWidget {
     int tab_width;
     int indent_width;
 
+    /* Minimap */
+    gboolean minimap_enabled;
+    double minimap_width;
+    int minimap_block_height;
+    gboolean minimap_active; /* Dragging minimap? */
+    double drag_start_scroll; /* For relative dragging */
+    double drag_ratio;        /* Cached ratio for stable dragging */
+
     /* Animation / Timer */
     double cursor_alpha;
     gint64 cursor_blink_start_time;
@@ -229,6 +237,7 @@ gboolean editor_widget_get_next_visible_line(EditorWidget *self, size_t phys_lin
 gboolean editor_widget_get_prev_visible_line(EditorWidget *self, size_t phys_line, size_t *out_line);
 double editor_widget_get_fold_gutter_width(EditorWidget *self);
 gboolean editor_widget_ensure_line_visible(EditorWidget *self, size_t phys_line);
+void editor_widget_get_visible_line_range(EditorWidget *self, size_t *start, size_t *end);
 
 /* Rendering */
 void editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot);

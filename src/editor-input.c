@@ -1,5 +1,6 @@
 #include "editor-internal.h"
 #include <gtk/gtk.h>
+#include "editor-minimap.h"
 #include <string.h>
 #include <math.h>
 
@@ -163,16 +164,29 @@ on_motion(GtkEventControllerMotion *controller, double x, double y, gpointer use
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     double gutter_w = get_effective_gutter_width(self);
-    
+
     gboolean in_gutter = (x < gutter_w && gutter_w > 0);
+    gboolean in_minimap = FALSE;
+
+    if (self->minimap_enabled) {
+        int width = gtk_widget_get_width(GTK_WIDGET(self));
+        double map_w = self->minimap_width;
+        if (map_w > width / 2) map_w = width / 2;
+
+        in_minimap = (x >= width - map_w);
+    }
+
     if (self->mouse_in_gutter != in_gutter) {
         self->mouse_in_gutter = in_gutter;
         gtk_widget_queue_draw(GTK_WIDGET(self));
     }
-    
+
     if (in_gutter) {
         /* Over gutter - use default arrow */
         gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default");
+    } else if (in_minimap) {
+        /* Over minimap - use hand cursor */
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "hand");
     } else {
         /* Over text - use I-beam */
         gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "text");
@@ -303,6 +317,37 @@ static void right_click(GtkGestureClick *gesture,
 }
 
 static void
+calculate_minimap_drag_ratio(EditorWidget *self)
+{
+    double height = gtk_widget_get_height(GTK_WIDGET(self));
+    double map_content_h, map_scroll_y, map_line_h;
+    editor_minimap_get_params(self, height, &map_content_h, &map_scroll_y, &map_line_h);
+
+    /* Calculate Lens Height */
+    size_t vis_start, vis_end;
+    editor_widget_get_visible_line_range(self, &vis_start, &vis_end);
+    if (vis_end <= vis_start) vis_end = vis_start + 1;
+    
+    double lens_h = (double)(vis_end - vis_start) * map_line_h;
+    if (lens_h < 5.0) lens_h = 5.0; /* Match drawing minimum */
+    
+    /* Correct Track Height: The visual track is limited by content if shorter than widget */
+    double track_h = height;
+    if (map_content_h < height) track_h = map_content_h;
+    
+    /* Available Track */
+    double available_track = track_h - lens_h;
+    if (available_track < 1.0) available_track = 1.0;
+
+    /* Max Scroll */
+    double max_scroll = gtk_adjustment_get_upper(self->vadjustment) - gtk_adjustment_get_page_size(self->vadjustment);
+    if (max_scroll < 0) max_scroll = 0;
+
+    /* Calculate Ratio */
+    self->drag_ratio = max_scroll / available_track;
+}
+
+static void
 on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -316,6 +361,112 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
     /* Folding Click Check */
     double gutter_w = get_effective_gutter_width(self);
     double fold_w = editor_widget_get_fold_gutter_width(self);
+    
+    /* Minimap Click Check */
+    if (self->minimap_enabled) {
+        int width = gtk_widget_get_width(GTK_WIDGET(self));
+        double map_w = self->minimap_width;
+        if (map_w > width / 2) map_w = width / 2;
+
+        if (x >= width - map_w) {
+            /* Clicked in Minimap - consume the event to prevent it from going to viewport */
+            double height = gtk_widget_get_height(GTK_WIDGET(self));
+
+            double map_content_h, map_scroll_y, map_line_h;
+            editor_minimap_get_params(self, height, &map_content_h, &map_scroll_y, &map_line_h);
+
+            /* Calculate the clicked position relative to the minimap content */
+            /* y is the mouse Y coordinate relative to the widget */
+            /* We want to find which line corresponds to this Y position in the minimap */
+            double clicked_y_in_minimap = y;  // y is already relative to the widget
+
+            /* Check if clicked on Lens - need to calculate lens position accounting for scroll */
+            size_t vis_start, vis_end;
+            editor_widget_get_visible_line_range(self, &vis_start, &vis_end);
+
+            /* Calculate lens position in minimap coordinates */
+            if (vis_end <= vis_start) vis_end = vis_start + 1;
+            double lens_y = (double)vis_start * map_line_h - map_scroll_y;
+            double lens_h = (double)(vis_end - vis_start) * map_line_h;
+
+            /* Clamp lens position to visible area */
+            if (lens_y < 0) {
+                lens_h += lens_y;
+                lens_y = 0;
+            }
+            double lens_bottom = lens_y + lens_h;
+
+            /* Check if click is within the lens bounds */
+            if (clicked_y_in_minimap >= lens_y && clicked_y_in_minimap <= lens_bottom) {
+                /* Clicked on Lens - GRAB IT (No Scroll) */
+                /* Set the minimap_active flag to enable dragging */
+                self->minimap_active = TRUE;
+                /* Store the initial scroll position for drag calculations */
+                if (self->vadjustment) {
+                    self->drag_start_scroll = gtk_adjustment_get_value(self->vadjustment);
+                }
+                /* Don't return here - let the drag gesture handle the drag */
+            } else {
+                /* Clicked elsewhere in minimap - Move lens by one viewport based on click position */
+                /* Calculate current lens position using existing variables */
+                double dummy_content_h, dummy_scroll_y;
+                editor_minimap_get_params(self, height, &dummy_content_h, &dummy_scroll_y, &map_line_h);
+
+                double current_lens_y = (double)vis_start * map_line_h - dummy_scroll_y;
+                double current_lens_h = (double)(vis_end - vis_start) * map_line_h;
+
+                /* Determine if click is above or below the lens */
+                if (clicked_y_in_minimap < current_lens_y) {
+                    /* Clicked above lens - move up by one viewport */
+                    size_t viewport_lines = (size_t)(height / self->line_height);
+                    if (viewport_lines < 1) viewport_lines = 1;
+
+                    size_t target_line = (vis_start > viewport_lines) ? (vis_start - viewport_lines) : 0;
+
+                    /* Ensure target line is within bounds */
+                    size_t total_lines;
+                    if (self->wrap_lines) {
+                        total_lines = get_visual_line_count(self);
+                    } else {
+                        total_lines = document_get_line_count(self->doc);
+                    }
+
+                    if (target_line >= total_lines) target_line = (total_lines > 0) ? total_lines - 1 : 0;
+
+                    editor_widget_scroll_to_line(self, target_line);
+                } else {
+                    /* Clicked below lens - move down by one viewport */
+                    size_t viewport_lines = (size_t)(height / self->line_height);
+                    if (viewport_lines < 1) viewport_lines = 1;
+
+                    size_t target_line = vis_start + viewport_lines;
+
+                    /* Ensure target line is within bounds */
+                    size_t total_lines;
+                    if (self->wrap_lines) {
+                        total_lines = get_visual_line_count(self);
+                    } else {
+                        total_lines = document_get_line_count(self->doc);
+                    }
+
+                    if (target_line >= total_lines) target_line = (total_lines > 0) ? total_lines - 1 : 0;
+
+                    editor_widget_scroll_to_line(self, target_line);
+                }
+
+                /* After jumping, treat as if we grabbed the lens to allow immediate dragging */
+                self->minimap_active = TRUE;
+                calculate_minimap_drag_ratio(self);
+                if (self->vadjustment) {
+                     self->drag_start_scroll = gtk_adjustment_get_value(self->vadjustment);
+                } else {
+                     self->drag_start_scroll = 0;
+                }
+            }
+            /* Return here to consume the event and prevent it from going to viewport */
+            return;
+        }
+    }
     
     // fprintf(stderr, "[DEBUG] Click: x=%.2f y=%.2f gutter_w=%.2f fold_w=%.2f\n", x, y, gutter_w, fold_w);
 
@@ -604,18 +755,70 @@ static void
 on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
-    
+
     /* Claim the sequence to prevent ScrolledWindow from intercepting it for scrolling */
     gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
-    
+
     if (!self->doc) return;
 
     /* Block drag/selection if starting in fold gutter */
     double gutter_w = get_effective_gutter_width(self);
     double fold_w = editor_widget_get_fold_gutter_width(self);
     if (fold_w > 0 && x >= (gutter_w - fold_w) && x < gutter_w) {
-        /* In fold gutter - do nothing (let click handler separate the event) */
         return;
+    }
+
+    /* Minimap Drag Check */
+    if (self->minimap_enabled) {
+        int width = gtk_widget_get_width(GTK_WIDGET(self));
+        double map_w = self->minimap_width;
+        if (map_w > width / 2) map_w = width / 2;
+
+        if (x >= width - map_w) {
+            /* Check if drag starts on the lens to determine behavior */
+            double height = gtk_widget_get_height(GTK_WIDGET(self));
+            double map_content_h, map_scroll_y, map_line_h;
+            editor_minimap_get_params(self, height, &map_content_h, &map_scroll_y, &map_line_h);
+
+            /* Calculate lens position to see if drag starts on lens */
+            size_t vis_start, vis_end;
+            editor_widget_get_visible_line_range(self, &vis_start, &vis_end);
+
+            if (vis_end <= vis_start) vis_end = vis_start + 1;
+            double lens_y = (double)vis_start * map_line_h - map_scroll_y;
+            double lens_h = (double)(vis_end - vis_start) * map_line_h;
+
+            /* Check if y is within lens bounds */
+            if (y >= lens_y && y <= (lens_y + lens_h)) {
+                /* Drag starts on lens - enable minimap dragging */
+                self->minimap_active = TRUE;
+                calculate_minimap_drag_ratio(self);
+                gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default");
+                /* Store initial scroll position for relative drag */
+                if (self->vadjustment) {
+                    self->drag_start_scroll = gtk_adjustment_get_value(self->vadjustment);
+                } else {
+                    self->drag_start_scroll = 0;
+                }
+
+                /* Claim sequence */
+                gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+                return;
+            } else {
+                /* Drag starts in minimap but not on lens - still claim the sequence to prevent text selection */
+                /* If we are already active (from click), update state */
+                if (self->minimap_active) {
+                     gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default");
+                     /* Claim sequence */
+                     gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+                     return;
+                }
+
+                /* Otherwise just block selection */
+                gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+                return;
+            }
+        }
     }
 
     /* If we just did a multi-click selection (double/triple-click), 
@@ -684,6 +887,27 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
         return;
     }
     
+    /* Guard: If drag was not authorized (e.g. minimap click outside lens, or fold click), return */
+    if (!self->is_drag_gesture_active && !self->minimap_active) {
+        return;
+    }
+    
+    /* Minimap Drag Update */
+    if (self->minimap_active) {
+        /* Apply Delta using cached ratio */
+        double target_scroll = self->drag_start_scroll + offset_y * self->drag_ratio;
+        
+        /* Clamp */
+        double max_scroll = gtk_adjustment_get_upper(self->vadjustment) - gtk_adjustment_get_page_size(self->vadjustment);
+        if (max_scroll < 0) max_scroll = 0;
+        
+        if (target_scroll < 0) target_scroll = 0;
+        if (target_scroll > max_scroll) target_scroll = max_scroll;
+
+        gtk_adjustment_set_value(self->vadjustment, target_scroll);
+        return;
+    }
+    
     self->drag_x = start_x + offset_x;
     self->drag_y = start_y + offset_y;
 
@@ -691,22 +915,29 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
     editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &off);
     
     gboolean is_dnd_mode = (self->is_dragging_selection && !self->multi_click_selection);
-    
+
     if (is_dnd_mode) {
         /* Dragging selection for DnD - visual feedback handled in snapshot */
         gboolean has_movement = (fabs(offset_x) > 8 || fabs(offset_y) > 8);
-        
+
         if (has_movement) {
             self->is_dnd_active = TRUE;
-            
+
             /* Detect copy mode (Ctrl held) */
             GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
             self->drag_copy_mode = (state & GDK_CONTROL_MASK) != 0;
 
+            /* Change cursor to indicate drag operation */
+            if (self->drag_copy_mode) {
+                gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "copy"); /* Copy cursor */
+            } else {
+                gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "move"); /* Move cursor */
+            }
+
             /* Calculate drop insertion point */
             size_t drop_off;
             editor_widget_get_offset_at_point(self, self->drag_x, self->drag_y, &drop_off);
-            
+
             EditorCursor *primary = editor_widget_get_primary_cursor(self);
             size_t sel_start = MIN(primary->cursor_offset, primary->selection_anchor);
             size_t sel_end = MAX(primary->cursor_offset, primary->selection_anchor);
@@ -721,12 +952,16 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
             /* Not moved enough yet - suppress feedback */
             self->drag_drop_offset = (size_t)-1;
             self->is_dnd_active = FALSE;
+            /* Set cursor to indicate potential drag */
+            gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "grab"); /* Open hand for potential drag */
         }
     } else {
         /* Standard or Multi-Click Selection Extension */
         update_selection_extension(self, off);
         self->is_dnd_active = FALSE;
         self->drag_drop_offset = (size_t)-1;
+        /* During selection extension, show grabbing cursor */
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "text"); /* Back to text cursor for selection */
     }
     
     /* Unified Autoscroll Logic */
@@ -805,6 +1040,14 @@ static void
 on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
+    
+    if (self->minimap_active) {
+        self->minimap_active = FALSE;
+        /* Reset cursor after minimap drag ends */
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "text");
+        return;
+    }
+    
     if (!self->doc) return;
     
     /* Always stop autoscroll when drag ends */
@@ -842,6 +1085,9 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
     stop_autoscroll(self);
     editor_widget_update_adjustments(self, -1, -1);
     self->is_drag_gesture_active = FALSE;
+
+    /* Reset cursor to default text cursor after drag ends */
+    gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "text");
 }
 
 /* Keyboard Input */

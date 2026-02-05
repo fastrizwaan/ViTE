@@ -32,6 +32,8 @@ struct _ViteWindow {
     GtkWidget *titlebar_revealer;
     GtkWidget *fullscreen_restore_btn;
     AdwHeaderBar *header_bar;
+    
+    guint auto_hide_source_id;
 };
 
 typedef struct {
@@ -292,6 +294,9 @@ static gboolean
 auto_hide_header(gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
+    /* Clear ID since this is a one-shot (G_SOURCE_REMOVE) */
+    if (win) win->auto_hide_source_id = 0;
+    
     if (win && win->titlebar_revealer && gtk_window_is_fullscreen(win->window)) {
          /* Only hide if mouse is NOT at the top? 
             Or simple logic: hide it. If mouse is there, motion will reveal it back? 
@@ -331,7 +336,8 @@ on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointe
                  gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), TRUE);
                  
                  /* Schedule Auto-Hide after 500ms */
-                 g_timeout_add(500, auto_hide_header, win);
+                 if (win->auto_hide_source_id > 0) g_source_remove(win->auto_hide_source_id);
+                 win->auto_hide_source_id = g_timeout_add(500, auto_hide_header, win);
                  
                  if (win->status_bar) gtk_widget_set_visible(win->status_bar, TRUE); 
                  
@@ -3389,6 +3395,26 @@ on_enable_folding_toggled(GSimpleAction *action, GVariant *value, gpointer user_
 
 
 
+static void
+on_window_destroy(GtkWidget *widget, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win) return;
+
+    /* Cancel any pending auto-hide */
+    if (win->auto_hide_source_id > 0) {
+        g_source_remove(win->auto_hide_source_id);
+        win->auto_hide_source_id = 0;
+    }
+
+    /* Clear weak refs */
+    g_weak_ref_clear(&win->active_dialog_ref);
+    
+    /* Pointers to widgets (stack, tab_bar, etc.) don't need free as they are destroyed with window */
+
+    g_free(win);
+}
+
 static ViteWindow *
 setup_window(GtkWindow *window)
 {
@@ -3396,6 +3422,7 @@ setup_window(GtkWindow *window)
     win->window = window;
     g_weak_ref_init(&win->active_dialog_ref, NULL);
     g_signal_connect(window, "close-request", G_CALLBACK(on_window_close_request), win);
+    g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), win);
     g_signal_connect(window, "notify::fullscreened", G_CALLBACK(on_window_fullscreen_state_changed), win);
     g_object_set_data(G_OBJECT(window), "vite-window", win);
 

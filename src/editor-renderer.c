@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include "syntax.h"
+#include "editor-minimap.h"
 
 void
 editor_widget_refresh_syntax(EditorWidget *self)
@@ -34,6 +35,14 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
     int width = gtk_widget_get_width(widget);
     int height = gtk_widget_get_height(widget);
     
+    /* Calculate Minimap Layout */
+    double minimap_w = 0;
+    if (self->minimap_enabled) {
+        minimap_w = self->minimap_width;
+        if (minimap_w > width / 2) minimap_w = width / 2; /* Limit to half width */
+    }
+    double minimap_x = width - minimap_w;
+
     /* Clip to visible area to prevent drawing over splitters */
     gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)height));
     
@@ -346,7 +355,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         /* If Vertical (Wrap Huge): force wrap CHAR. */
         
         if (self->wrap_lines) {
-            int available_w = width - text_start_x - 20; /* 20px buffer for scrollbar */
+            int available_w = width - text_start_x - 20 - (int)minimap_w; /* Buffer + Minimap */
             if (available_w < 50) available_w = 50; /* Safe min width */
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
             
@@ -572,8 +581,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         // fprintf(stderr, "[DEBUG] snapshot loop: line_idx=%zu done\n", line_idx);
 
         gtk_snapshot_save(snapshot);
-        /* Clip text area to ensure it doesn't draw over the gutter */
-        gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(gutter_w, 0, width - gutter_w, height));
+        /* Clip text area to ensure it doesn't draw over the gutter or minimap */
+        gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(gutter_w, 0, width - gutter_w - minimap_w, height));
         
         /* Translate to the TOP of the line slot (contiguous baseline) */
         /* Incorporate render_x_offset for virtualized chunks */
@@ -1106,5 +1115,10 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         g_free(cursor_lines);
     }
     
-    gtk_snapshot_pop(snapshot);
+    gtk_snapshot_pop(snapshot); /* Pop clip from beginning */
+    
+    /* Draw Minimap Overlay */
+    if (self->minimap_enabled) {
+        editor_minimap_draw(self, snapshot, minimap_x, 0, minimap_w, height);
+    }
 }
