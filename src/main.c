@@ -1373,6 +1373,7 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
              bind_action_to_editor(map, "show-line-numbers", G_OBJECT(editor), "show-line-numbers");
              bind_action_to_editor(map, "enable-word-wrap", G_OBJECT(editor), "wrap-lines");
              bind_action_to_editor(map, "enable-folding", G_OBJECT(editor), "enable-folding");
+             bind_action_to_editor(map, "enable-minimap", G_OBJECT(editor), "minimap-enabled");
              
              /* Encoding/LineEnding Actions are stateful but we update them imperatively 
                 because they don't map 1:1 to a boolean property via binding easily. */
