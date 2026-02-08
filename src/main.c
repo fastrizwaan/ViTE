@@ -10,6 +10,27 @@
 #include "editor-print.h"
 #include "status-bar.h"
 
+/* Define file type entries for the menu */
+typedef struct {
+    const char *name;
+    const char *id;
+} FileTypeEntry;
+
+static const FileTypeEntry file_types[] = {
+    { "Plain Text", "plain" },
+    { "C", "c" },
+    { "C++", "cpp" },
+    { "Python", "python" },
+    { "Bash", "bash" },
+    { "Rust", "rust" },
+    { "Header", "h" },
+    { "YAML", "yaml" },
+    { "JSON", "json" },
+    { "XML", "xml" },
+    { "JavaScript", "javascript" },
+    { "Desktop Entry", "desktop" },
+    { NULL, NULL }
+};
 
 typedef struct _ViteWindow ViteWindow;
 
@@ -2631,18 +2652,44 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), editor);
     
     const char *doc_path = document_get_file_path(doc);
+    gboolean lang_set = FALSE;
+    const char *selected_lang_id = "plain";  // Default to plain text
+    
     if (doc_path) {
         const char *dot = strrchr(doc_path, '.');
         if (dot) {
             const char *ext = dot + 1;
             /* Restricted list as requested by user */
-            if (g_ascii_strcasecmp(ext, "c") == 0 || g_ascii_strcasecmp(ext, "py") == 0 || 
-                g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "json") == 0 || 
+            if (g_ascii_strcasecmp(ext, "c") == 0 || g_ascii_strcasecmp(ext, "py") == 0 ||
+                g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "json") == 0 ||
                 g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "rst") == 0 ||
                 g_ascii_strcasecmp(ext, "h") == 0 || g_ascii_strcasecmp(ext, "js") == 0 ||
                 g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) {
                 editor_widget_set_language(EDITOR_WIDGET(editor), ext);
+                selected_lang_id = ext;
+                lang_set = TRUE;
             }
+        }
+    }
+    
+    /* Update action state and status bar regardless of whether language was set from extension or defaults to plain text */
+    if (win && win->window) {
+        /* Update the action state using the actual GtkWindow */
+        GAction *action = g_action_map_lookup_action(G_ACTION_MAP(win->window), "set-file-type");
+        if (action && G_IS_SIMPLE_ACTION(action)) {
+            g_simple_action_set_state(G_SIMPLE_ACTION(action), g_variant_new_string(selected_lang_id));
+        }
+
+        /* Also update the status bar to show the selected language */
+        const char *display_name = "Plain Text";  // Default
+        for (int i = 0; file_types[i].name != NULL; i++) {
+            if (g_strcmp0(file_types[i].id, selected_lang_id) == 0) {
+                display_name = file_types[i].name;
+                break;
+            }
+        }
+        if (win->status_bar) {
+            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), display_name);
         }
     }
     
@@ -3025,9 +3072,19 @@ on_status_bar_file_type_changed(ViteStatusBar *bar, const char *lang_id, gpointe
 {
     ViteWindow *win = (ViteWindow*)user_data;
     GtkWidget *editor = get_active_editor(win);
-    
+
     if (editor && EDITOR_IS_WIDGET(editor)) {
          editor_widget_set_language(EDITOR_WIDGET(editor), lang_id);
+    }
+
+    /* Update the corresponding action state to reflect in the menu */
+    if (win && win->window) {
+        GAction *action = g_action_map_lookup_action(G_ACTION_MAP(win->window), "set-file-type");
+        if (action && G_IS_SIMPLE_ACTION(action)) {
+            /* Convert NULL to "plain" for the action state */
+            const char *action_lang_id = (lang_id == NULL) ? "plain" : lang_id;
+            g_simple_action_set_state(G_SIMPLE_ACTION(action), g_variant_new_string(action_lang_id));
+        }
     }
 }
 
@@ -3181,6 +3238,35 @@ on_set_line_ending(GSimpleAction *action, GVariant *value, gpointer user_data)
     /* Pass ID directly */
     /* Update Status Bar regardless of editor presence */
     vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), le_id);
+}
+
+static void
+on_set_file_type(GSimpleAction *action, GVariant *value, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    g_simple_action_set_state(action, value);
+
+    const char *lang_id = g_variant_get_string(value, NULL);
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        /* Convert "plain" to NULL for editor widget (which expects NULL for plain text) */
+        const char *editor_lang_id = (g_strcmp0(lang_id, "plain") == 0) ? NULL : lang_id;
+        editor_widget_set_language(EDITOR_WIDGET(editor), editor_lang_id);
+    }
+
+    /* Update Status Bar - need to map ID to display name */
+    /* Find the display name for the language ID */
+    const char *display_name = "Plain Text";
+    for (int i = 0; file_types[i].name != NULL; i++) {
+        if (g_strcmp0(file_types[i].id, lang_id) == 0) {
+            display_name = file_types[i].name;
+            break;
+        }
+    }
+    
+    if (win->status_bar) {
+        vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), display_name);
+    }
 }
 
 static void
@@ -3544,6 +3630,7 @@ setup_window(GtkWindow *window)
         /* Stateful Actions */
         { "set-encoding", NULL, "s", "'utf-8'", on_set_encoding },
         { "set-line-ending", NULL, "s", "'lf'", on_set_line_ending },
+        { "set-file-type", NULL, "s", "'plain'", on_set_file_type },
         { "show-line-numbers", NULL, NULL, "true", on_show_line_numbers_toggled },
         { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled },
         { "enable-folding", NULL, NULL, "false", on_enable_folding_toggled },
@@ -3742,7 +3829,23 @@ setup_window(GtkWindow *window)
     g_menu_append(le_menu, "Legacy Mac (CR)", "win.set-line-ending::cr");
     g_menu_append_submenu(doc_menu, "Line Ending", G_MENU_MODEL(le_menu));
     g_object_unref(le_menu);
-    
+
+    GMenu *ft_menu = g_menu_new();
+    g_menu_append(ft_menu, "Plain Text", "win.set-file-type::plain");
+    g_menu_append(ft_menu, "C", "win.set-file-type::c");
+    g_menu_append(ft_menu, "C++", "win.set-file-type::cpp");
+    g_menu_append(ft_menu, "Python", "win.set-file-type::python");
+    g_menu_append(ft_menu, "Bash", "win.set-file-type::bash");
+    g_menu_append(ft_menu, "Rust", "win.set-file-type::rust");
+    g_menu_append(ft_menu, "Header", "win.set-file-type::h");
+    g_menu_append(ft_menu, "YAML", "win.set-file-type::yaml");
+    g_menu_append(ft_menu, "JSON", "win.set-file-type::json");
+    g_menu_append(ft_menu, "XML", "win.set-file-type::xml");
+    g_menu_append(ft_menu, "JavaScript", "win.set-file-type::javascript");
+    g_menu_append(ft_menu, "Desktop Entry", "win.set-file-type::desktop");
+    g_menu_append_submenu(doc_menu, "File Type", G_MENU_MODEL(ft_menu));
+    g_object_unref(ft_menu);
+
     g_menu_append_submenu(s_subs, "Document", G_MENU_MODEL(doc_menu));
     g_object_unref(doc_menu);
     
@@ -4194,19 +4297,65 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
     GtkWidget *editor = get_editor_from_page(page);
     const char *dot = strrchr(path, '.');
     gboolean lang_set = FALSE;
+    const char *selected_lang_id = NULL;  // Track which language was set
+    
     if (dot && EDITOR_IS_WIDGET(editor)) {
         const char *ext = dot + 1;
-        if (g_ascii_strcasecmp(ext, "c") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "c"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "cc") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "c"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "h") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "c"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "py") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "python"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "bash") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "bash"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "js") == 0 || g_ascii_strcasecmp(ext, "ts") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "javascript"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "json") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "json"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "yaml"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "xml") == 0 || g_ascii_strcasecmp(ext, "html") == 0 || g_ascii_strcasecmp(ext, "svg") == 0 || g_ascii_strcasecmp(ext, "xsl") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "xml"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "desktop") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "desktop"); lang_set = TRUE; }
-        else if (g_ascii_strcasecmp(ext, "rs") == 0) { editor_widget_set_language(EDITOR_WIDGET(editor), "rust"); lang_set = TRUE; }
+        if (g_ascii_strcasecmp(ext, "c") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "c"); 
+            selected_lang_id = "c";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "cc") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "c"); 
+            selected_lang_id = "c";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "h") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "c"); 
+            selected_lang_id = "c";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "py") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "python"); 
+            selected_lang_id = "python";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "bash") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "bash"); 
+            selected_lang_id = "bash";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "js") == 0 || g_ascii_strcasecmp(ext, "ts") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "javascript"); 
+            selected_lang_id = "javascript";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "json") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "json"); 
+            selected_lang_id = "json";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "yaml"); 
+            selected_lang_id = "yaml";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "xml") == 0 || g_ascii_strcasecmp(ext, "html") == 0 || g_ascii_strcasecmp(ext, "svg") == 0 || g_ascii_strcasecmp(ext, "xsl") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "xml"); 
+            selected_lang_id = "xml";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "desktop") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "desktop"); 
+            selected_lang_id = "desktop";
+            lang_set = TRUE; 
+        }
+        else if (g_ascii_strcasecmp(ext, "rs") == 0) { 
+            editor_widget_set_language(EDITOR_WIDGET(editor), "rust"); 
+            selected_lang_id = "rust";
+            lang_set = TRUE; 
+        }
     }
 
     if (!lang_set && EDITOR_IS_WIDGET(editor)) {
@@ -4220,10 +4369,31 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
                 const char *detected = syntax_detect_language(sample);
                 if (detected) {
                     editor_widget_set_language(EDITOR_WIDGET(editor), detected);
+                    selected_lang_id = detected;
                     lang_set = TRUE;
                 }
             }
             g_object_unref(in_stream);
+        }
+    }
+
+    /* Update the action state to reflect the selected language */
+    if (lang_set && selected_lang_id && target_window && target_window->window) {
+        GAction *action = g_action_map_lookup_action(G_ACTION_MAP(target_window->window), "set-file-type");
+        if (action && G_IS_SIMPLE_ACTION(action)) {
+            g_simple_action_set_state(G_SIMPLE_ACTION(action), g_variant_new_string(selected_lang_id));
+        }
+
+        /* Also update the status bar to show the selected language */
+        const char *display_name = "Plain Text";  // Default
+        for (int i = 0; file_types[i].name != NULL; i++) {
+            if (g_strcmp0(file_types[i].id, selected_lang_id) == 0) {
+                display_name = file_types[i].name;
+                break;
+            }
+        }
+        if (target_window->status_bar) {
+            vite_status_bar_set_file_type(VITE_STATUS_BAR(target_window->status_bar), display_name);
         }
     }
     
