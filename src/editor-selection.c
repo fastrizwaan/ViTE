@@ -162,7 +162,14 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
         gboolean is_massive_wrapped = FALSE;
 
         if (self->wrap_lines && !is_virtualized) {
-            int available_w = width - text_start_x - 20; /* 20px buffer for scrollbar */
+            /* Minimap Width Calculation for Wrap */
+            double minimap_w = 0;
+            if (self->minimap_enabled) {
+                minimap_w = self->minimap_width;
+                if (minimap_w > width / 2) minimap_w = width / 2;
+            }
+
+            int available_w = width - text_start_x - 20 - (int)minimap_w; /* Buffer + Minimap */
             if (available_w < 50) available_w = 50; 
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
@@ -170,10 +177,18 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             /* Massive line with wrap: logic in 'else' block below normally sets width -1 (NO WRAP).
                This causes the scan loop to think height is 1 row.
                We must compute REAL virtual height here to advance current_y correctly.
+                we must compute REAL virtual height here to advance current_y correctly.
             */
             is_massive_wrapped = TRUE;
             double cw = self->cached_char_width > 1.0 ? self->cached_char_width : 8.0; 
-            int available_w = width - text_start_x - 20; 
+            
+            double minimap_w = 0;
+            if (self->minimap_enabled) {
+                minimap_w = self->minimap_width;
+                if (minimap_w > width / 2) minimap_w = width / 2;
+            }
+            
+            int available_w = width - text_start_x - 20 - (int)minimap_w; 
             if (available_w < 50) available_w = 50;
             int chars_per_line = (int)((double)available_w / cw);
             if (chars_per_line < 1) chars_per_line = 1;
@@ -220,7 +235,14 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             if (is_virtualized && self->wrap_lines) {
                 /* Vertical Virtualization Hit Test (viewport chunk) */
                 double cw = self->cached_char_width > 1.0 ? self->cached_char_width : 8.0;
-                int available_w = width - text_start_x - 20;
+                
+                double minimap_w = 0;
+                if (self->minimap_enabled) {
+                    minimap_w = self->minimap_width;
+                    if (minimap_w > width / 2) minimap_w = width / 2;
+                }
+
+                int available_w = width - text_start_x - 20 - (int)minimap_w;
                 if (available_w < 50) available_w = 50;
                 int chars_per_line = (int)((double)available_w / cw);
                 if (chars_per_line < 1) chars_per_line = 1;
