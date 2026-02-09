@@ -4201,6 +4201,11 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
         }
     }
         
+    /* Ensure window is presented (raised/focused) even if reused */
+    if (target_window && target_window->window) {
+        gtk_window_present(GTK_WINDOW(target_window->window));
+    }
+        
     /* Check if we can reuse the active tab in TARGET window (Untitled & Unmodified) */
     gboolean reused = FALSE;
     ViteTab *reused_tab = NULL;
