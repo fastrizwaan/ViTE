@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Virtual Text Editor
+GenericName=Virtual Text Editor
+Type=Application
+Comment=A high-performance text editor
+Exec=vite %F
+MimeType=text/plain;text/x-python;text/x-csrc;text/x-chdr;text/javascript;text/css;text/html;application/json;application/xml;text/markdown;text/x-yaml;text/x-sh;
+Icon=io.github.fastrizwaan.vite
+StartupNotify=true
+Terminal=false
+Categories=Utility;TextEditor;Development;GTK;
+Keywords=text;editor;code;development;programming;syntax;highlighting;
+StartupWMClass=io.github.fastrizwaan.vite

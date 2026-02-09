@@ -43,13 +43,32 @@ sources = files(
   'src/syntax-xml.c',
   'src/syntax-desktop.c',
   'src/syntax-rust.c',
-  'src/editor-minimap.c'
+  'src/editor-minimap.c',
+  'src/editor-print.c'
 )
 
 executable('vite',
   sources,
   dependencies : [gtk_dep, adw_dep, m_dep],
-  install : false)
+  install : true)
+
+# Install desktop file
+install_data(
+  'data/io.github.fastrizwaan.vite.desktop',
+  install_dir: join_paths(get_option('datadir'), 'applications')
+)
+
+# Install icon
+install_data(
+  'data/icons/io.github.fastrizwaan.vite.svg',
+  install_dir: join_paths(get_option('datadir'), 'icons', 'hicolor', 'scalable', 'apps')
+)
+
+# Also install to pixmaps as fallback
+install_data(
+  'data/icons/io.github.fastrizwaan.vite.svg',
+  install_dir: join_paths(get_option('datadir'), 'pixmaps')
+)
 
 # Reproduction Test (disabled - test file doesn't exist)
 # test_sources = files(
