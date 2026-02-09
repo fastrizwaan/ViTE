@@ -163,6 +163,10 @@ static void
 on_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
+
+    /* If dragging, don't let motion override the cursor */
+    if (self->is_drag_gesture_active) return;
+
     double gutter_w = get_effective_gutter_width(self);
 
     gboolean in_gutter = (x < gutter_w && gutter_w > 0);
@@ -931,7 +935,7 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
             if (self->drag_copy_mode) {
                 gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "copy"); /* Copy cursor */
             } else {
-                gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "move"); /* Move cursor */
+                gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default"); /* Default arrow for move */
             }
 
             /* Calculate drop insertion point */
@@ -953,7 +957,7 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
             self->drag_drop_offset = (size_t)-1;
             self->is_dnd_active = FALSE;
             /* Set cursor to indicate potential drag */
-            gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "grab"); /* Open hand for potential drag */
+            gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default"); /* Arrow for potential drag */
         }
     } else {
         /* Standard or Multi-Click Selection Extension */
