@@ -328,6 +328,23 @@ auto_hide_header(gpointer user_data)
     return G_SOURCE_REMOVE;
 }
 
+static gboolean
+restore_ui_after_fullscreen(gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win || !win->window) return G_SOURCE_REMOVE;
+    
+    /* Double check we are still not fullscreen (user didn't toggle back rapidly) */
+    if (!gtk_window_is_fullscreen(GTK_WINDOW(win->window))) {
+        if (win->titlebar_container) {
+             adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
+        }
+        if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, TRUE);
+        if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, FALSE);
+    }
+    return G_SOURCE_REMOVE;
+}
+
 static void
 on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointer user_data)
 {
@@ -349,11 +366,8 @@ on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointe
             win->auto_hide_source_id = 0;
         }
         
-        if (win->titlebar_container) {
-             adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
-        }
-        if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, TRUE);
-        if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, FALSE);
+        /* Defer UI restore to allow window system to settle swapchain */
+        g_timeout_add(100, restore_ui_after_fullscreen, win);
     }
 }
 
