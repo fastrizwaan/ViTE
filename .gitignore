@@ -10,3 +10,5 @@ tests
 *.log
 .github
 CudaText
+gnome-text-editor-49.0
+
