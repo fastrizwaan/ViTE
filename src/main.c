@@ -602,7 +602,7 @@ on_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     
     AdwAboutDialog *about = ADW_ABOUT_DIALOG(adw_about_dialog_new());
     adw_about_dialog_set_application_name(about, "ViTE");
-    adw_about_dialog_set_version(about, "1.0");
+    adw_about_dialog_set_version(about, "0.1");
     adw_about_dialog_set_developer_name(about, "Rizvan");
     adw_about_dialog_set_license_type(about, GTK_LICENSE_GPL_3_0);
     adw_about_dialog_set_comments(about, "A Virtual Text Editor built with GTK4 and Libadwaita.");

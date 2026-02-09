@@ -90,3 +90,9 @@ install_data(
 #   test_sources,
 #   dependencies : [gtk_dep, adw_dep, m_dep],
 #   install : false)
+
+# Install AppData/AppStream metadata
+install_data(
+  'data/io.github.fastrizwaan.ViTE.xml',
+  install_dir: join_paths(get_option('datadir'), 'metainfo')
+)

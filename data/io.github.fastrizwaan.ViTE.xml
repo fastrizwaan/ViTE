@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.fastrizwaan.ViTE</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.fastrizwaan">
+    <name>Mohammed Asif Ali Rizvan</name>
+  </developer>
+  <launchable type="desktop-id">io.github.fastrizwaan.ViTE.desktop</launchable>
+  <name>ViTE</name>
+  <summary>A high-performance text editor</summary>
+  <description>
+    <p>ViTE is a modern, high-performance text editor, designed for speed and a fluid user experience.</p>
+  </description>
+
+  <url type="homepage">https://github.com/fastrizwaan/ViTE</url>
+  <url type="bugtracker">https://github.com/fastrizwaan/ViTE/issues</url>
+  <url type="vcs-browser">https://github.com/fastrizwaan/ViTE</url>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#ffffff</color>
+    <color type="primary" scheme_preference="dark">#241f31</color>
+  </branding>
+
+  <content_rating type="oars-1.1"/>
+
+  <translation type="gettext">vite</translation>
+
+  <requires>
+    <display_length compare="ge">360</display_length>
+    <internet>offline-only</internet>
+  </requires>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+
+  <releases>
+    <release version="0.1" date="2026-02-09"/>
+  </releases>
+</component>
