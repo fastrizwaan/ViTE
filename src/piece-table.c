@@ -242,6 +242,23 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
                 *enc = ENCODING_UTF16LE;
             } else if (be_count > check_len / 4) {
                 *enc = ENCODING_UTF16BE;
+            } else {
+                /* Not valid UTF-8 and doesn't look like UTF-16. */
+                /* Check for Windows-1252 characters (0x80-0x9F) */
+                gboolean has_win1252 = FALSE;
+                for (size_t i = 0; i < check_len; i++) {
+                    unsigned char c = (unsigned char)data[i];
+                    if (c >= 0x80 && c <= 0x9F) {
+                        has_win1252 = TRUE;
+                        break;
+                    }
+                }
+                
+                if (has_win1252) {
+                    *enc = ENCODING_WINDOWS_1252;
+                } else {
+                    *enc = ENCODING_ISO_8859_1;
+                }
             }
         }
     }
@@ -2328,7 +2345,9 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
         
         /* DEBUG: After encoding detection */
         const char *enc_name = (res->encoding == ENCODING_UTF8) ? "UTF-8" : 
-                               (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
+                               (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : 
+                               (res->encoding == ENCODING_UTF16BE) ? "UTF-16BE" : 
+                               (res->encoding == ENCODING_WINDOWS_1252) ? "Windows-1252" : "ISO-8859-1";
         g_print("[LOAD DEBUG] %.3fs - Detected encoding: %s, Size: %.2f MB\n", 
                 g_timer_elapsed(timer, NULL), enc_name, (double)res->size / (1024*1024));
         
@@ -2342,7 +2361,9 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
         if (res->encoding != ENCODING_UTF8) {
             did_conversion = TRUE;
             /* Disk-backed UTF-16 to UTF-8 conversion for zero-RAM storage */
-            const char *from_codeset = (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
+            const char *from_codeset = (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : 
+                                       (res->encoding == ENCODING_UTF16BE) ? "UTF-16BE" : 
+                                       (res->encoding == ENCODING_WINDOWS_1252) ? "WINDOWS-1252" : "ISO-8859-1";
             
             /* Create temp file for converted UTF-8 data */
             const char *tmp_dir = g_get_tmp_dir();
@@ -2378,29 +2399,31 @@ load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCance
                 
                 size_t to_convert = (src_remaining < conv_chunk_size) ? src_remaining : conv_chunk_size;
                 
-                /* Ensure strictly even bytes for UTF-16 */
-                if ((to_convert % 2) != 0) {
-                     to_convert--;
-                }
-                
-                /* Check for split surrogate pair at end of chunk */
-                if (to_convert < src_remaining && to_convert >= 2) {
-                     guint16 last_unit;
-                     memcpy(&last_unit, src + to_convert - 2, 2);
-                     if (res->encoding == ENCODING_UTF16BE) {
-                         last_unit = GUINT16_FROM_BE(last_unit);
-                     } else {
-                         last_unit = GUINT16_FROM_LE(last_unit);
-                     }
-                     
-                     /* High surrogate range: 0xD800 - 0xDBFF */
-                     if (last_unit >= 0xD800 && last_unit <= 0xDBFF) {
-                          /* Last unit is a high surrogate, and we know we have more data 
-                             (because to_convert < src_remaining).
-                             The low surrogate is in the next chunk.
-                             We must exclude this high surrogate from this chunk. */
-                          to_convert -= 2;
-                     }
+                if (res->encoding == ENCODING_UTF16LE || res->encoding == ENCODING_UTF16BE) {
+                    /* Ensure strictly even bytes for UTF-16 */
+                    if ((to_convert % 2) != 0) {
+                        to_convert--;
+                    }
+                    
+                    /* Check for split surrogate pair at end of chunk */
+                    if (to_convert < src_remaining && to_convert >= 2) {
+                        guint16 last_unit;
+                        memcpy(&last_unit, src + to_convert - 2, 2);
+                        if (res->encoding == ENCODING_UTF16BE) {
+                            last_unit = GUINT16_FROM_BE(last_unit);
+                        } else {
+                            last_unit = GUINT16_FROM_LE(last_unit);
+                        }
+                        
+                        /* High surrogate range: 0xD800 - 0xDBFF */
+                        if (last_unit >= 0xD800 && last_unit <= 0xDBFF) {
+                            /* Last unit is a high surrogate, and we know we have more data 
+                                (because to_convert < src_remaining).
+                                The low surrogate is in the next chunk.
+                                We must exclude this high surrogate from this chunk. */
+                            to_convert -= 2;
+                        }
+                    }
                 }
                 
                 gsize bytes_read, bytes_written;
@@ -2643,9 +2666,14 @@ piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error)
     
     /* Clear from LR so they aren't freed */
     lr->mmap_base = NULL;
+    lr->mmap_size = 0;
     lr->data = NULL;
+    lr->size = 0;
     lr->root = NULL;
     lr->temp_path = NULL;  /* Don't let load_result_free delete it */
+    lr->is_mmapped = FALSE;
+    lr->node_count = 0;
+    lr->temp_nodes = NULL;
     
     /* Reset add buffer */
     disk_buffer_free(pt->add_buffer);
@@ -3130,9 +3158,12 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
     
     gint64 start_us = g_get_monotonic_time();
     
-    gboolean need_utf16 = (task->pt->encoding == ENCODING_UTF16LE || task->pt->encoding == ENCODING_UTF16BE);
-    const char *target_charset = (task->pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : 
-                                  (task->pt->encoding == ENCODING_UTF16BE) ? "UTF-16BE" : "UTF-8";
+    gboolean need_conversion = (task->pt->encoding != ENCODING_UTF8);
+    const char *target_charset = "UTF-8";
+    if (task->pt->encoding == ENCODING_UTF16LE) target_charset = "UTF-16LE";
+    else if (task->pt->encoding == ENCODING_UTF16BE) target_charset = "UTF-16BE";
+    else if (task->pt->encoding == ENCODING_ISO_8859_1) target_charset = "ISO-8859-1";
+    else if (task->pt->encoding == ENCODING_WINDOWS_1252) target_charset = "WINDOWS-1252";
 
     /* Write BOM if needed */
     if (!task->bom_written) {
@@ -3185,9 +3216,9 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
             task->pending_len = 0;
         }
         
-        /* For UTF-16 conversion, find the last complete UTF-8 character */
+        /* For conversion, find the last complete UTF-8 character */
         size_t safe_len = working_len;
-        if (need_utf16) {
+        if (need_conversion) {
             /* Check if the last few bytes form a complete UTF-8 sequence */
             const char *p = working_data + working_len;
             size_t trailing = 0;
@@ -3279,7 +3310,7 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
         }
         
         /* 2. Encoding Conversion */
-        if (need_utf16 && data_len > 0) {
+        if (need_conversion && data_len > 0) {
             gsize bytes_conv_written;
             GError *conv_error = NULL;
             char *utf16_data = g_convert(data_to_encode, data_len,
@@ -3378,8 +3409,8 @@ piece_table_save_async_finalize(PieceTableSaveTask *task)
            If we are doing UTF-16, these bytes failed to form a char, so they are garbage?
            Sync implementation: writes them if !need_utf16.
         */
-        gboolean need_utf16 = (task->pt->encoding == ENCODING_UTF16LE || task->pt->encoding == ENCODING_UTF16BE);
-        if (!need_utf16) {
+        gboolean need_conversion = (task->pt->encoding != ENCODING_UTF8);
+        if (!need_conversion) {
              /* Before writing expected garbage, check saved_cr */
              if (task->saved_cr) {
                  const char *nl_str = "\n";

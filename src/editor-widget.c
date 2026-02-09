@@ -1073,6 +1073,8 @@ editor_widget_set_encoding(EditorWidget *self, const char *encoding_id)
     FileEncoding enc = ENCODING_UTF8;
     if (g_strcmp0(encoding_id, "utf-16le") == 0) enc = ENCODING_UTF16LE;
     else if (g_strcmp0(encoding_id, "utf-16be") == 0) enc = ENCODING_UTF16BE;
+    else if (g_strcmp0(encoding_id, "iso-8859-1") == 0) enc = ENCODING_ISO_8859_1;
+    else if (g_strcmp0(encoding_id, "windows-1252") == 0) enc = ENCODING_WINDOWS_1252;
     
     document_set_encoding(self->doc, enc);
 }

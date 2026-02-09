@@ -603,13 +603,13 @@ on_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     AdwAboutDialog *about = ADW_ABOUT_DIALOG(adw_about_dialog_new());
     adw_about_dialog_set_application_name(about, "ViTE");
     adw_about_dialog_set_version(about, "0.1");
-    adw_about_dialog_set_developer_name(about, "Rizvan");
+    adw_about_dialog_set_developer_name(about, "Mohammed Asif Ali Rizvan");
     adw_about_dialog_set_license_type(about, GTK_LICENSE_GPL_3_0);
     adw_about_dialog_set_comments(about, "A Virtual Text Editor built with GTK4 and Libadwaita.");
     adw_about_dialog_set_website(about, "https://github.com/fastrizwaan/ViTE");
     adw_about_dialog_set_issue_url(about, "https://github.com/fastrizwaan/ViTE/issues");
     
-    adw_about_dialog_add_credit_section(about, "Created By", (const char *[]) { "Rizvan", NULL });
+    adw_about_dialog_add_credit_section(about, "Created By", (const char *[]) { "Mohammed Asif Ali Rizvan", NULL });
     
     adw_dialog_present(ADW_DIALOG(about), GTK_WIDGET(win->window));
 }
@@ -1406,6 +1406,8 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
                  const char *enc_id = "utf-8";
                  if (enc == ENCODING_UTF16LE) enc_id = "utf-16le";
                  else if (enc == ENCODING_UTF16BE) enc_id = "utf-16be";
+                 else if (enc == ENCODING_ISO_8859_1) enc_id = "iso-8859-1";
+                 else if (enc == ENCODING_WINDOWS_1252) enc_id = "windows-1252";
                  vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), enc_id);
                  
                  /* Line Ending - Keep imperative */
@@ -1419,6 +1421,8 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
                  const char *enc_key = "utf-8";
                  if (enc == ENCODING_UTF16LE) enc_key = "utf-16le";
                  else if (enc == ENCODING_UTF16BE) enc_key = "utf-16be";
+                 else if (enc == ENCODING_ISO_8859_1) enc_key = "iso-8859-1";
+                 else if (enc == ENCODING_WINDOWS_1252) enc_key = "windows-1252";
                  GAction *act = g_action_map_lookup_action(map, "set-encoding");
                  if (act) g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(enc_key));
                  

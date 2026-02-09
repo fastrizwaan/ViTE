@@ -33,6 +33,8 @@ typedef enum {
     ENCODING_UTF8,
     ENCODING_UTF16LE,
     ENCODING_UTF16BE,
+    ENCODING_ISO_8859_1,
+    ENCODING_WINDOWS_1252,
 } FileEncoding;
 
 typedef enum {

@@ -160,6 +160,8 @@ create_encoding_menu(ViteStatusBar *self)
     g_menu_append(menu, "UTF-8", "enc.set::utf-8");
     g_menu_append(menu, "UTF-16 LE", "enc.set::utf-16le");
     g_menu_append(menu, "UTF-16 BE", "enc.set::utf-16be");
+    g_menu_append(menu, "ISO-8859-1", "enc.set::iso-8859-1");
+    g_menu_append(menu, "Windows-1252", "enc.set::windows-1252");
     
     GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->encoding_btn), popover);
@@ -477,8 +479,11 @@ vite_status_bar_set_encoding(ViteStatusBar *self, const char *encoding_id)
     
     /* Map ID to Display Name */
     const char *display = "UTF-8";
-    if (g_strcmp0(encoding_id, "utf-16le") == 0) display = "UTF-16 LE";
+    if (g_strcmp0(encoding_id, "utf-8") == 0) display = "UTF-8";
+    else if (g_strcmp0(encoding_id, "utf-16le") == 0) display = "UTF-16 LE";
     else if (g_strcmp0(encoding_id, "utf-16be") == 0) display = "UTF-16 BE";
+    else if (g_strcmp0(encoding_id, "iso-8859-1") == 0) display = "ISO-8859-1";
+    else if (g_strcmp0(encoding_id, "windows-1252") == 0) display = "Windows-1252";
     
     char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", display);
     gtk_label_set_markup(GTK_LABEL(self->encoding_label), markup);
