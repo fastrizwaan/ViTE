@@ -248,7 +248,7 @@ on_visual_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
     GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(GTK_WIDGET(self)));
     if (!root) return G_SOURCE_CONTINUE;
     
-    GtkWidget *titlebar_overlay = gtk_window_get_titlebar(GTK_WINDOW(root));
+    GtkWidget *titlebar_overlay = g_object_get_data(G_OBJECT(root), "main-overlay");
     if (!titlebar_overlay) return G_SOURCE_CONTINUE;
     
     /* Get cursor position in root coords */
@@ -301,8 +301,9 @@ on_visual_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
     }
     
     /* Update visual overlay position */
-    gtk_fixed_move(GTK_FIXED(gtk_widget_get_parent(self->visual_overlay)),
-                   self->visual_overlay, final_x, final_y);
+    /* Update visual overlay position - move picture inside fixed */
+    gtk_fixed_move(GTK_FIXED(self->visual_overlay),
+                   self->visual_picture, final_x, final_y);
     
     return G_SOURCE_CONTINUE;
 }
@@ -315,6 +316,44 @@ on_drag_begin (GtkDragSource *source, GdkDrag *drag, ViteTab *self)
     
     GtkWidget *widget = GTK_WIDGET(self);
     GtkWidget *root = GTK_WIDGET(gtk_widget_get_root(widget));
+    GtkWidget *titlebar_overlay = g_object_get_data(G_OBJECT(root), "main-overlay");
+    
+    if (titlebar_overlay && !self->visual_overlay) {
+        /* Create the visual ghost overlay */
+        self->visual_overlay = gtk_fixed_new();
+        gtk_widget_add_css_class(self->visual_overlay, "drag-ghost");
+        gtk_widget_set_can_target(self->visual_overlay, FALSE);
+        
+        self->visual_picture = gtk_picture_new();
+        GtkWidgetPaintable *wp = GTK_WIDGET_PAINTABLE(gtk_widget_paintable_new(widget));
+        GdkPaintable *p = gdk_paintable_get_current_image(GDK_PAINTABLE(wp));
+        gtk_picture_set_paintable(GTK_PICTURE(self->visual_picture), p);
+        g_object_unref(p);
+        g_object_unref(wp);
+        
+        gtk_fixed_put(GTK_FIXED(self->visual_overlay), self->visual_picture, 0, 0);
+        gtk_overlay_add_overlay(GTK_OVERLAY(titlebar_overlay), self->visual_overlay);
+        
+        /* Position initially */
+        graphene_point_t p_overlay;
+        if (gtk_widget_compute_point(widget, titlebar_overlay, &GRAPHENE_POINT_INIT(0, 0), &p_overlay)) {
+            self->initial_overlay_y = p_overlay.y;
+            gtk_fixed_move(GTK_FIXED(self->visual_overlay), self->visual_picture, p_overlay.x, p_overlay.y);
+        }
+        
+        graphene_point_t p_root;
+        if (gtk_widget_compute_point(widget, root, &GRAPHENE_POINT_INIT(self->drag_start_x, self->drag_start_y), &p_root)) {
+            self->cursor_start_y = p_root.y;
+        }
+        
+        graphene_point_t tb_root;
+        if (gtk_widget_compute_point(widget, root, &GRAPHENE_POINT_INIT(0, 0), &tb_root)) {
+            self->tab_bar_y = tb_root.y;
+        }
+        
+        /* Start tick for movement */
+        self->visual_tick_id = gtk_widget_add_tick_callback(widget, on_visual_tick, self, NULL);
+    }
     
     /* Create the drag icon snapshot before hiding the tab */
     GtkWidgetPaintable *widget_paintable = GTK_WIDGET_PAINTABLE(gtk_widget_paintable_new(widget));
@@ -359,7 +398,7 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
     if (self->visual_overlay) {
         GtkWidget *parent = gtk_widget_get_parent(self->visual_overlay);
         if (parent) {
-            gtk_fixed_remove(GTK_FIXED(parent), self->visual_overlay);
+            gtk_overlay_remove_overlay(GTK_OVERLAY(parent), self->visual_overlay);
         }
         self->visual_overlay = NULL;
         self->visual_picture = NULL;
@@ -436,6 +475,15 @@ released_cb(GtkGestureClick *gesture,
 static void
 on_click_pressed (GtkGestureClick *gesture, int n_press, double x, double y, ViteTab *self)
 {
+    /* Use gtk_widget_pick to see if the close button is under the pointer */
+    GtkWidget *picked = gtk_widget_pick(GTK_WIDGET(self), x, y, GTK_PICK_DEFAULT);
+    if (picked && (picked == self->close_button || gtk_widget_is_ancestor(picked, self->close_button))) {
+         return; /* Don't claim, let button handle it */
+    }
+
+    /* Claim the sequence to stop window dragging from moving the window */
+    gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    
     /* Activate tab immediately on mouse button press */
     g_signal_emit(self, signals[SIGNAL_CLICKED], 0);
 }
@@ -666,7 +714,7 @@ vite_tab_init (ViteTab *self)
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(drag_source));
     
     GtkGesture *click = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_PRIMARY);
     g_signal_connect(click, "pressed", G_CALLBACK(on_click_pressed), self);
     g_signal_connect(click, "pressed", G_CALLBACK(pressed_cb), self);
     g_signal_connect(click, "released", G_CALLBACK(released_cb), self);
@@ -761,6 +809,7 @@ on_context_menu_move_left (GSimpleAction *action, GVariant *parameter, gpointer 
 static void
 on_context_menu_move_right (GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
+
     ViteTab *self = VITE_TAB(user_data);
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
     if (!tab_bar) return;

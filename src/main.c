@@ -35,7 +35,7 @@ static const FileTypeEntry file_types[] = {
 typedef struct _ViteWindow ViteWindow;
 
 struct _ViteWindow {
-    GtkWindow *window;
+    AdwApplicationWindow *window;
     ViteTabBar *tab_bar;
     GtkStack *stack;
     AdwWindowTitle *window_title;
@@ -49,9 +49,8 @@ struct _ViteWindow {
     
     /* Fullscreen Support */
     GtkOverlay *main_overlay;
+    GtkWidget *main_box;
     GtkWidget *titlebar_container; 
-    GtkWidget *titlebar_overlay;
-    GtkWidget *titlebar_revealer;
     GtkWidget *fullscreen_restore_btn;
     AdwHeaderBar *header_bar;
     
@@ -83,7 +82,7 @@ static int untitled_count = 1;
 
 static void open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean allow_reuse);
 static void create_new_tab (ViteWindow *win, const char *title, Document *doc);
-static ViteWindow *setup_window(GtkWindow *window);
+static ViteWindow *setup_window(AdwApplicationWindow *window);
 static void activate(GtkApplication *app, gpointer user_data);
 static void update_recent_files_list(GtkListBox *list_box, GtkApplication *app, GtkPopover *popover);
 static void on_action_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data);
@@ -320,80 +319,41 @@ static gboolean
 auto_hide_header(gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
-    /* Clear ID since this is a one-shot (G_SOURCE_REMOVE) */
-    if (win) win->auto_hide_source_id = 0;
-    
-    if (win && win->titlebar_revealer && gtk_window_is_fullscreen(win->window)) {
-         /* Only hide if mouse is NOT at the top? 
-            Or simple logic: hide it. If mouse is there, motion will reveal it back? 
-            Motion event only fires on motion. If mouse sits there, it might hide?
-            That matches "after 0.5 seconds later hide them".
-         */
-         gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), FALSE);
+    if (win) {
+        win->auto_hide_source_id = 0;
+        if (win->titlebar_container) {
+            adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
+        }
     }
     return G_SOURCE_REMOVE;
 }
 
 static void
-
 on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     gboolean is_fullscreen = gtk_window_is_fullscreen(window);
     
     if (is_fullscreen) {
-        /* ENTERING FULLSCREEN: Move titlebar REVEALER to main overlay */
-        if (win->titlebar_revealer && win->main_overlay && win->titlebar_overlay) {
-             if (gtk_widget_get_parent(win->titlebar_revealer) != GTK_WIDGET(win->main_overlay)) {
-                 g_object_ref(win->titlebar_revealer);
-                 
-                 /* Remove from titlebar_overlay */
-                 gtk_overlay_set_child(GTK_OVERLAY(win->titlebar_overlay), NULL);
-                 
-                 gtk_overlay_add_overlay(win->main_overlay, win->titlebar_revealer);
-                 g_object_unref(win->titlebar_revealer);
-                 
-                 /* Position at top */
-                 gtk_widget_set_valign(win->titlebar_revealer, GTK_ALIGN_START);
-                 /* Ensure visible but handle reveal */
-                 gtk_widget_set_visible(win->titlebar_revealer, TRUE);
-                 
-                 /* Slide Down initially */
-                 gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), TRUE);
-                 
-                 /* Schedule Auto-Hide after 500ms */
-                 if (win->auto_hide_source_id > 0) g_source_remove(win->auto_hide_source_id);
-                 win->auto_hide_source_id = g_timeout_add(500, auto_hide_header, win);
-                 
-                 if (win->status_bar) gtk_widget_set_visible(win->status_bar, TRUE); 
-                 
-                 /* Hide default window controls, show custom button */
-                 if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, FALSE);
-                 if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, TRUE);
-             }
+        /* ENTERING FULLSCREEN */
+        if (win->titlebar_container) {
+             adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
         }
+        if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, FALSE);
+        if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, TRUE);
+        
     } else {
-        /* EXITING FULLSCREEN: Restore UI to titlebar overlay */
-        if (win->titlebar_revealer && win->main_overlay && win->titlebar_overlay) {
-             if (gtk_widget_get_parent(win->titlebar_revealer) == GTK_WIDGET(win->main_overlay)) {
-                 g_object_ref(win->titlebar_revealer);
-                 gtk_overlay_remove_overlay(win->main_overlay, win->titlebar_revealer);
-                 
-                 gtk_overlay_set_child(GTK_OVERLAY(win->titlebar_overlay), win->titlebar_revealer);
-                 g_object_unref(win->titlebar_revealer);
-                 
-                 /* Always revealed in normal mode */
-                 gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), TRUE);
-                 gtk_widget_set_visible(win->titlebar_revealer, TRUE);
-                 
-                 if (win->status_bar) gtk_widget_set_visible(win->status_bar, TRUE);
-                 gtk_widget_set_valign(win->titlebar_revealer, GTK_ALIGN_FILL);
-                 
-                 /* Show default window controls, hide custom button */
-                 if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, TRUE);
-                 if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, FALSE);
-             }
+        /* EXITING FULLSCREEN */
+        if (win->auto_hide_source_id > 0) {
+            g_source_remove(win->auto_hide_source_id);
+            win->auto_hide_source_id = 0;
         }
+        
+        if (win->titlebar_container) {
+             adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
+        }
+        if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, TRUE);
+        if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, FALSE);
     }
 }
 
@@ -404,10 +364,10 @@ on_fullscreen_action(GSimpleAction *action, GVariant *parameter, gpointer user_d
     if (!win || !win->window) return;
     
     /* Just toggle state; listener handles UI */
-    if (gtk_window_is_fullscreen(win->window)) {
-        gtk_window_unfullscreen(win->window);
+    if (gtk_window_is_fullscreen(GTK_WINDOW(win->window))) {
+        gtk_window_unfullscreen(GTK_WINDOW(win->window));
     } else {
-        gtk_window_fullscreen(win->window);
+        gtk_window_fullscreen(GTK_WINDOW(win->window));
     }
 }
 
@@ -588,7 +548,7 @@ on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
     
     if (win_shortcuts) {
         gtk_window_set_default_size(GTK_WINDOW(win_shortcuts), 400, 500);
-        gtk_window_set_transient_for(GTK_WINDOW(win_shortcuts), win->window);
+        gtk_window_set_transient_for(GTK_WINDOW(win_shortcuts), GTK_WINDOW(win->window));
         gtk_window_present(GTK_WINDOW(win_shortcuts));
     }
 
@@ -623,7 +583,7 @@ on_open_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer us
         guint n = g_list_model_get_n_items(files);
         for (guint i = 0; i < n; i++) {
             GFile *file = g_list_model_get_item(files, i);
-            open_file(gtk_window_get_application(win->window), win, file, TRUE);
+            open_file(gtk_window_get_application(GTK_WINDOW(win->window)), win, file, TRUE);
             g_object_unref(file);
         }
         g_object_unref(files);
@@ -643,7 +603,7 @@ on_open_btn_clicked(GtkButton *btn, gpointer user_data)
     if (!win) return;
     
     GtkFileDialog *dialog = gtk_file_dialog_new();
-    gtk_file_dialog_open_multiple(dialog, win->window, NULL, (GAsyncReadyCallback)on_open_dialog_response, win);
+    gtk_file_dialog_open_multiple(dialog, GTK_WINDOW(win->window), NULL, (GAsyncReadyCallback)on_open_dialog_response, win);
 }
 
 static void update_window_title_for_tab(ViteTab *tab);
@@ -1066,7 +1026,7 @@ on_preferences_action(GSimpleAction *action, GVariant *parameter, gpointer user_
     /* Try to find editor from focus first */
     GtkWidget *focus = NULL;
     if (win->window && GTK_IS_WINDOW(win->window)) {
-        focus = gtk_window_get_focus(win->window);
+        focus = gtk_window_get_focus(GTK_WINDOW(win->window));
     }
     GtkWidget *editor = NULL;
     
@@ -1091,7 +1051,7 @@ on_preferences_action(GSimpleAction *action, GVariant *parameter, gpointer user_
     }
     
     if (editor) {
-        show_preferences_dialog(win->window, EDITOR_WIDGET(editor));
+        show_preferences_dialog(GTK_WINDOW(win->window), EDITOR_WIDGET(editor));
     }
 }
 
@@ -1359,7 +1319,7 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
         GtkWidget *editor = NULL;
         GtkWidget *focus = NULL;
         if (win->window && GTK_IS_WINDOW(win->window)) {
-            focus = gtk_window_get_focus(win->window);
+            focus = gtk_window_get_focus(GTK_WINDOW(win->window));
         }
         
         GtkWidget *iter = focus;
@@ -1389,7 +1349,7 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
              
              /* BIND Menu Actions to Editor Properties */
              /* This mirrors the logic in preferences.c, ensuring robust sync */
-             GActionMap *map = G_ACTION_MAP(win->window);
+             GActionMap *map = G_ACTION_MAP(GTK_WINDOW(win->window));
              
              bind_action_to_editor(map, "show-line-numbers", G_OBJECT(editor), "show-line-numbers");
              bind_action_to_editor(map, "enable-word-wrap", G_OBJECT(editor), "wrap-lines");
@@ -1512,7 +1472,7 @@ close_split_view(GtkWidget *view_container)
         GtkRoot *root = gtk_widget_get_root(view_container);
         ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
         if (win && win->window) {
-             gtk_window_set_focus(win->window, NULL);
+             gtk_window_set_focus(GTK_WINDOW(win->window), NULL);
         }
         
         g_object_ref(sibling); /* Protect sibling */
@@ -1573,7 +1533,7 @@ do_split(ViteWindow *win, GtkOrientation orientation)
     
     /* Fallback to window focus */
     if (!target_overlay) {
-        GtkWidget *focus = gtk_window_get_focus(win->window);
+        GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(win->window));
         if (focus && gtk_widget_is_ancestor(focus, page)) {
              target_overlay = gtk_widget_get_ancestor(focus, GTK_TYPE_OVERLAY);
         }
@@ -1800,7 +1760,7 @@ load_css(void)
     ".titlebar-box {"
     "    background: @headerbar_bg_color;"
     "    color: @headerbar_fg_color;"
-    "    padding-bottom: 4px;"
+    "    padding-bottom: 0px;"
     "    min-height: 0px;"
     "}"
     ".open-split-btn {"
@@ -2502,7 +2462,7 @@ static void
 on_new_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
-    GtkApplication *app = gtk_window_get_application(win->window);
+    GtkApplication *app = gtk_window_get_application(GTK_WINDOW(win->window));
     activate(app, NULL);
 }
 
@@ -2524,16 +2484,26 @@ on_tab_move_to_new_window (ViteTab *tab, gpointer user_data)
     if (!page) return;
     
     /* 1. Create new window */
-    GtkApplication *app = gtk_window_get_application(current_win->window);
-    GtkWindow *w = GTK_WINDOW(gtk_application_window_new(app));
+    GtkApplication *app = gtk_window_get_application(GTK_WINDOW(current_win->window));
+    AdwApplicationWindow *w = ADW_APPLICATION_WINDOW(adw_application_window_new(app));
     ViteWindow *new_win = setup_window(w);
-    gtk_window_set_default_size(w, 800, 600);
+    gtk_window_set_default_size(GTK_WINDOW(w), 800, 600);
     
     /* 2. Move tab */
     move_tab_to_window(new_win, tab, -1);
 }
 
 
+
+static gboolean
+close_window_idle(gpointer user_data)
+{
+    GtkWindow *window = GTK_WINDOW(user_data);
+    if (window && GTK_IS_WINDOW(window)) {
+         gtk_window_close(window);
+    }
+    return G_SOURCE_REMOVE;
+}
 
 static void
 move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
@@ -2576,16 +2546,16 @@ move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
     g_object_set_data(G_OBJECT(page), "vite-window", target_win);
     
     update_window_title_for_tab(tab);
-    gtk_window_present(target_win->window);
+    gtk_window_present(GTK_WINDOW(target_win->window));
 
     g_object_unref(tab);
     g_object_unref(page);
     
     /* Check if source window empty */
     if (vite_tab_bar_get_n_tabs(source_win->tab_bar) == 0) {
-        /* Close source window if empty */
+        /* Close source window if empty - ASYNCHRONOUSLY to avoid Wayland/Popup crash */
         if (source_win->window && GTK_IS_WINDOW(source_win->window)) {
-            gtk_window_close(source_win->window);
+            g_idle_add(close_window_idle, source_win->window);
         }
     }
 }
@@ -2797,7 +2767,7 @@ on_reopen_closed_tab_action(GSimpleAction *action, GVariant *parameter, gpointer
     char *path = pop_recently_closed_file();
     if (!path) return;
 
-    GtkApplication *app = gtk_window_get_application(win->window);
+    GtkApplication *app = gtk_window_get_application(GTK_WINDOW(win->window));
     if (!app) {
         g_free(path);
         return;
@@ -2814,7 +2784,7 @@ on_quit_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win || !win->window) return;
-    gtk_window_close(win->window);
+    gtk_window_close(GTK_WINDOW(win->window));
 }
 
 
@@ -3083,7 +3053,7 @@ on_status_bar_file_type_changed(ViteStatusBar *bar, const char *lang_id, gpointe
 
     /* Update the corresponding action state to reflect in the menu */
     if (win && win->window) {
-        GAction *action = g_action_map_lookup_action(G_ACTION_MAP(win->window), "set-file-type");
+        GAction *action = g_action_map_lookup_action(G_ACTION_MAP(GTK_WINDOW(win->window)), "set-file-type");
         if (action && G_IS_SIMPLE_ACTION(action)) {
             /* Convert NULL to "plain" for the action state */
             const char *action_lang_id = (lang_id == NULL) ? "plain" : lang_id;
@@ -3103,7 +3073,7 @@ on_status_bar_line_ending_changed(ViteStatusBar *bar, const char *line_ending_id
     }
     
     /* Always Sync Menu Action */
-    GActionMap *map = G_ACTION_MAP(win->window);
+    GActionMap *map = G_ACTION_MAP(GTK_WINDOW(win->window));
     GAction *act = g_action_map_lookup_action(map, "set-line-ending");
     if (act) {
         /* ID should match keys: lf, crlf, cr */
@@ -3122,7 +3092,7 @@ on_status_bar_encoding_changed(ViteStatusBar *bar, const char *encoding_id, gpoi
     }
     
     /* Always Sync Menu Action to match Status Bar selection */
-    GActionMap *map = G_ACTION_MAP(win->window);
+    GActionMap *map = G_ACTION_MAP(GTK_WINDOW(win->window));
     GAction *act = g_action_map_lookup_action(map, "set-encoding");
     if (act) {
         g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(encoding_id));
@@ -3189,22 +3159,13 @@ static void
 on_fullscreen_hover_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
-    if (!win || !win->window) return;
+    if (!win || !win->window || !win->titlebar_container) return;
     
-    if (gtk_window_is_fullscreen(win->window)) {
-        /* In fullscreen, titlebar_revealer is a child of main_overlay */
-        if (win->titlebar_revealer && gtk_widget_get_parent(win->titlebar_revealer) == GTK_WIDGET(win->main_overlay)) {
-            if (y < 10) { 
-                 if (!gtk_revealer_get_reveal_child(GTK_REVEALER(win->titlebar_revealer))) {
-                     gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), TRUE);
-                 }
-                 if (win->status_bar) gtk_widget_set_visible(win->status_bar, TRUE);
-            } else if (y > 80 && gtk_revealer_get_reveal_child(GTK_REVEALER(win->titlebar_revealer))) {
-                 gtk_revealer_set_reveal_child(GTK_REVEALER(win->titlebar_revealer), FALSE);
-                 /* TODO: Status bar hiding might be abrupt. 
-                    But prompt requested "hide them" which implies synced visibility. */
-                 if (win->status_bar) gtk_widget_set_visible(win->status_bar, FALSE);
-            }
+    if (gtk_window_is_fullscreen(GTK_WINDOW(win->window))) {
+        if (y < 10) { 
+             adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
+        } else if (y > 80 && adw_toolbar_view_get_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container))) {
+             adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
         }
     }
 }
@@ -3337,7 +3298,7 @@ check_close_when_done(ViteWindow *win)
         
         if (win->close_when_done) {
             if (win->window) {
-                gtk_window_close(win->window);
+                gtk_window_close(GTK_WINDOW(win->window));
             }
         }
     }
@@ -3526,7 +3487,7 @@ on_window_destroy(GtkWidget *widget, gpointer user_data)
 }
 
 static ViteWindow *
-setup_window(GtkWindow *window)
+setup_window(AdwApplicationWindow *window)
 {
     ViteWindow *win = g_new0(ViteWindow, 1);
     win->window = window;
@@ -3538,34 +3499,30 @@ setup_window(GtkWindow *window)
 
     load_css();
 
-    /* Create overlay for titlebar to support drag ghosts */
-    GtkWidget *titlebar_overlay = gtk_overlay_new();
-    win->titlebar_overlay = titlebar_overlay;
+    /* Use AdwToolbarView as main container for proper RAISED styling */
+    GtkWidget *toolbar_view = adw_toolbar_view_new();
+    adw_toolbar_view_set_top_bar_style(ADW_TOOLBAR_VIEW(toolbar_view), ADW_TOOLBAR_RAISED);
+    win->titlebar_container = toolbar_view;
+    gtk_widget_add_css_class(toolbar_view, "titlebar-box");
     
-    GtkWidget *titlebar_revealer = gtk_revealer_new();
-    win->titlebar_revealer = titlebar_revealer;
-    gtk_revealer_set_transition_type(GTK_REVEALER(titlebar_revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
-    gtk_revealer_set_reveal_child(GTK_REVEALER(titlebar_revealer), TRUE);
-    
-    GtkWidget *titlebar_container = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    win->titlebar_container = titlebar_container;
-    
-    gtk_widget_add_css_class(titlebar_container, "titlebar-box");
-    
-    gtk_revealer_set_child(GTK_REVEALER(titlebar_revealer), titlebar_container);
-    gtk_overlay_set_child(GTK_OVERLAY(titlebar_overlay), titlebar_revealer);
-    
-    gtk_window_set_titlebar(window, titlebar_overlay);
+    /* NOTE: AdwApplicationWindow does not support gtk_window_set_titlebar().
+     * The titlebar is integrated into the main content area below. */
     
     /* Add drop target to window to accept tabs */
     GtkDropTarget *window_drop = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
     g_signal_connect(window_drop, "drop", G_CALLBACK(on_window_drop), win);
     gtk_widget_add_controller(GTK_WIDGET(window), GTK_EVENT_CONTROLLER(window_drop));
+
+    /* Seperate drop target for toolbar_view area */
+    GtkDropTarget *toolbar_drop = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
+    g_signal_connect(toolbar_drop, "drop", G_CALLBACK(on_window_drop), win);
+    gtk_widget_add_controller(GTK_WIDGET(toolbar_view), GTK_EVENT_CONTROLLER(toolbar_drop));
     
     GtkWidget *header = adw_header_bar_new();
     win->header_bar = ADW_HEADER_BAR(header);
     /* gtk_widget_add_css_class(header, "flat"); Removed to ensure background visibility in overlay */
-    gtk_box_append(GTK_BOX(titlebar_container), header);
+    gtk_widget_set_margin_bottom(header, 4);
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view), header);
     
     /* Fullscreen Restore Button */
     GtkWidget *btn_restore = gtk_button_new_from_icon_name("view-restore-symbolic");
@@ -3746,7 +3703,7 @@ setup_window(GtkWindow *window)
     g_signal_connect(right_click, "pressed", G_CALLBACK(on_recent_context_menu), recent_list);
     gtk_widget_add_controller(recent_list, GTK_EVENT_CONTROLLER(right_click));
 
-    GtkApplication *app = gtk_window_get_application(window);
+    GtkApplication *app = gtk_window_get_application(GTK_WINDOW(window));
     g_signal_connect(recent_list, "row-activated", G_CALLBACK(on_recent_item_activated), app);
     
     /* Update list when popover is shown */
@@ -3884,7 +3841,7 @@ setup_window(GtkWindow *window)
 
     /* main_tab_bar = NULL; Removed */
     win->tab_bar = VITE_TAB_BAR(vite_tab_bar_new());
-    gtk_box_append(GTK_BOX(titlebar_container), GTK_WIDGET(win->tab_bar));
+    adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(win->titlebar_container), GTK_WIDGET(win->tab_bar));
 
     /* Open Tabs Button (Overflow Menu) */
     GtkWidget *btn_tabs = gtk_menu_button_new();
@@ -3917,20 +3874,20 @@ setup_window(GtkWindow *window)
     /* Main Overlay as Root */
     GtkOverlay *main_overlay = GTK_OVERLAY(gtk_overlay_new());
     win->main_overlay = main_overlay;
-    gtk_window_set_child(window, GTK_WIDGET(main_overlay));
+    g_object_set_data(G_OBJECT(window), "main-overlay", main_overlay);
     
-    /* Main Content Area (outside titlebar) */
+    /* Main Content Box inside overlay */
     GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    win->main_box = main_box;
     gtk_overlay_set_child(main_overlay, main_box);
     
-    /* Progress bar at the top of content (below titlebar area) */
+    /* Progress bar at the top */
     gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->header_progress));
     
     /* Initialize Stack */
     win->stack = GTK_STACK(gtk_stack_new());
     gtk_stack_set_transition_type(win->stack, GTK_STACK_TRANSITION_TYPE_NONE);
     gtk_widget_set_vexpand(GTK_WIDGET(win->stack), TRUE);
-    
     gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->stack));
     
     /* Status Bar */
@@ -3941,6 +3898,12 @@ setup_window(GtkWindow *window)
     g_signal_connect(win->status_bar, "encoding-changed", G_CALLBACK(on_status_bar_encoding_changed), win);
     g_signal_connect(win->status_bar, "indent-width-changed", G_CALLBACK(on_status_bar_indent_width_changed), win);
     g_signal_connect(win->status_bar, "indent-style-changed", G_CALLBACK(on_status_bar_indent_style_changed), win);
+    
+    /* Set main_overlay as the AdwToolbarView's content for RAISED shadow effect */
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(win->titlebar_container), GTK_WIDGET(main_overlay));
+    
+    /* Set the toolbar view (which contains header + content) as the window content */
+    adw_application_window_set_content(window, GTK_WIDGET(win->titlebar_container));
     
     /* Create Initial Tab if needed? 
        Actually activate() might do nothing? 
@@ -3959,15 +3922,15 @@ setup_window(GtkWindow *window)
 static void
 activate(GtkApplication *app, gpointer user_data)
 {
-    GtkWindow *window = GTK_WINDOW(gtk_application_window_new(app));
+    AdwApplicationWindow *window = ADW_APPLICATION_WINDOW(adw_application_window_new(app));
     ViteWindow *win = setup_window(window);
     
-    gtk_window_set_default_size(window, 800, 600);
+    gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
     
     Document *doc = document_new(NULL);
     create_new_tab(win, "Untitled", doc);
     
-    gtk_window_present(window);
+    gtk_window_present(GTK_WINDOW(window));
 }
 
 
@@ -4201,7 +4164,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
                 if (g_strcmp0(path, p) == 0) {
                     /* FOUND! Switch to this window and tab */
                     on_tab_clicked(tab, NULL);
-                    gtk_window_present(check_win->window);
+                    gtk_window_present(GTK_WINDOW(check_win->window));
                     
                     /* Also add to recents to bump it up */
                     char *uri = g_file_get_uri(file);
@@ -4231,10 +4194,10 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
         }
 
         if (!target_window) {
-            GtkWindow *window = GTK_WINDOW(gtk_application_window_new(app));
+            AdwApplicationWindow *window = ADW_APPLICATION_WINDOW(adw_application_window_new(app));
             target_window = setup_window(window);
-            gtk_window_set_default_size(window, 800, 600);
-            gtk_window_present(window);
+            gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
+            gtk_window_present(GTK_WINDOW(window));
         }
     }
         
@@ -4429,7 +4392,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
     ctx->header_spinner = target_window->header_spinner; /* Still keep weak ref for safety in callback? */
     ctx->filename = g_strdup(path);
     ctx->window = target_window;
-    ctx->gtkw_ref = target_window->window;
+    ctx->gtkw_ref = GTK_WINDOW(target_window->window);
     ctx->doc = document_ref(doc);
     
     /* Weak references for safety */
@@ -4473,10 +4436,10 @@ on_open(GtkApplication *app, GFile **files, int n_files, char *hint, gpointer us
 int
 main(int argc, char **argv)
 {
-    GtkApplication *app;
+    AdwApplication *app;
     int status;
     adw_init();
-    app = gtk_application_new("io.github.fastrizwan.ViTE", G_APPLICATION_HANDLES_OPEN);
+    app = adw_application_new("io.github.fastrizwan.ViTE", G_APPLICATION_HANDLES_OPEN);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
     g_signal_connect(app, "open", G_CALLBACK(on_open), NULL);
     status = g_application_run(G_APPLICATION(app), argc, argv);
@@ -4486,7 +4449,7 @@ main(int argc, char **argv)
 static GtkWidget *
 get_active_overlay(ViteWindow *win) {
     /* Try focused widget first */
-    GtkWidget *focus = gtk_window_get_focus(win->window);
+    GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(win->window));
     GtkWidget *iter = focus;
     while (iter) {
         if (gtk_widget_has_css_class(iter, "view-split")) return iter;
