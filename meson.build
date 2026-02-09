@@ -54,19 +54,19 @@ executable('vite',
 
 # Install desktop file
 install_data(
-  'data/io.github.fastrizwaan.vite.desktop',
+  'data/io.github.fastrizwaan.ViTE.desktop',
   install_dir: join_paths(get_option('datadir'), 'applications')
 )
 
 # Install icon
 install_data(
-  'data/icons/io.github.fastrizwaan.vite.svg',
+  'data/icons/io.github.fastrizwaan.ViTE.svg',
   install_dir: join_paths(get_option('datadir'), 'icons', 'hicolor', 'scalable', 'apps')
 )
 
 # Also install to pixmaps as fallback
 install_data(
-  'data/icons/io.github.fastrizwaan.vite.svg',
+  'data/icons/io.github.fastrizwaan.ViTE.svg',
   install_dir: join_paths(get_option('datadir'), 'pixmaps')
 )
 
