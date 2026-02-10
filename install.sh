@@ -21,6 +21,11 @@ ninja -C builddir
 echo "Installing ViTE..."
 sudo ninja -C builddir install
 
+# Update icon cache and desktop database
+echo "Updating icon cache and desktop database..."
+sudo gtk-update-icon-cache -f -t /usr/local/share/icons/hicolor
+sudo update-desktop-database /usr/local/share/applications
+
 echo "Installation complete!"
 echo ""
 echo "You can now:"
