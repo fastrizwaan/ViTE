@@ -1045,6 +1045,9 @@ on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer 
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     
+    /* Close typing group on mouse interaction */
+    editor_widget_finish_typing_undo_group(self);
+    
     if (self->minimap_active) {
         self->minimap_active = FALSE;
         /* Reset cursor after minimap drag ends */
@@ -1181,6 +1184,9 @@ on_key_pressed(GtkEventControllerKey *controller,
     
     if (gtk_im_context_filter_keypress(self->im_context, gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller))))
         return TRUE;
+
+    /* If key was not handled by IM (e.g. navigation, shortcuts), close any open typing undo group */
+    editor_widget_finish_typing_undo_group(self);
 
     if (keyval == GDK_KEY_Insert) {
         editor_widget_set_insert_mode(self, !self->insert_mode);
@@ -1613,6 +1619,7 @@ on_focus_leave (GtkEventControllerFocus *controller,
                 gpointer                 user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
+    editor_widget_finish_typing_undo_group(self);
     gtk_im_context_focus_out(self->im_context);
 }
 
@@ -1625,7 +1632,42 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
     size_t len = strlen(str);
     if (len == 0) return;
 
-    document_begin_undo_group(self->doc);
+    /* Word-Based Undo Grouping Logic */
+    gboolean is_separator = FALSE;
+    /* Check if the inserted text starts with a separator (space, punct) */
+    if (len > 0) {
+        /* Simple heuristic: if first char is not alnum, treat as separator */
+        /* Exception: underscore might be part of word? For now, standard alnum check. */
+        /* UTF-8 aware check would be better, but basic ASCII check is a start. */
+        /* Use glib unicode functions */
+        gunichar c = g_utf8_get_char(str);
+        if (!g_unichar_isalnum(c) && c != '_') {
+            is_separator = TRUE;
+        }
+    }
+
+    /* Logic:
+       1. If !active, start group.
+       2. If active:
+          - If new is Word AND last was Separator -> Close group, Start new.
+          - Else (Word->Word, Sep->Sep, Word->Sep): Continue group.
+       3. Update last_char status.
+    */
+    
+    if (!self->typing_undo_group_active) {
+        document_begin_undo_group(self->doc);
+        self->typing_undo_group_active = TRUE;
+    } else {
+        if (!is_separator && self->last_char_was_separator) {
+            /* Switching from Separator to Word -> New Undo Step */
+            document_end_undo_group(self->doc);
+            document_begin_undo_group(self->doc);
+        }
+        /* Else continue current group (Word->Word, Sep->Sep, Word->Sep including trailing spaces) */
+    }
+    
+    self->last_char_was_separator = is_separator;
+
     /* Basic multi-cursor insert logic for IM commit */
     /* Often IM input implies single cursor, but if we have multiple, we insert at all */
     g_array_sort(self->cursors, compare_cursors_desc);
@@ -1681,7 +1723,8 @@ on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
             }
         }
     }
-    document_end_undo_group(self->doc);
+    /* Do NOT allow end undo group here, we keep it open for typing stream */
+    // document_end_undo_group(self->doc); 
     
     editor_widget_update_im_cursor_location(self);
     editor_widget_reset_cursor_blink(self);

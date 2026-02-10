@@ -75,6 +75,10 @@ struct _EditorWidget {
     /* Input State */
     GtkIMContext *im_context;
     gboolean insert_mode;
+    
+    /* Typing Grouping State */
+    gboolean typing_undo_group_active;
+    gboolean last_char_was_separator;
 
     /* Drag & Selection State */
     gboolean is_dragging_selection;
@@ -211,6 +215,7 @@ void editor_widget_undo(EditorWidget *self);
 void editor_widget_redo(EditorWidget *self);
 void editor_widget_select_all(EditorWidget *self);
 void editor_widget_change_case(EditorWidget *self, int type);
+void editor_widget_finish_typing_undo_group(EditorWidget *self);
 
 void editor_widget_update_adjustments(EditorWidget *self, int width, int height);
 void editor_widget_update_search_viewport(EditorWidget *self);

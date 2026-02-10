@@ -12,6 +12,16 @@ static int compare_size_t(gconstpointer a, gconstpointer b) {
 }
 
 void
+editor_widget_finish_typing_undo_group(EditorWidget *self)
+{
+    if (self->typing_undo_group_active) {
+        document_end_undo_group(self->doc);
+        self->typing_undo_group_active = FALSE;
+        self->last_char_was_separator = FALSE;
+    }
+}
+
+void
 move_cursor(EditorWidget *self, int visual_lines_delta)
 {
     if (visual_lines_delta == 0) return;
@@ -722,6 +732,9 @@ void
 editor_widget_undo(EditorWidget *self)
 {
     if (!self->doc || self->undo_redo_task) return;
+    
+    /* Ensure any active typing group is committed before undoing */
+    editor_widget_finish_typing_undo_group(self);
     
     self->undo_redo_task = document_undo_async(self->doc, 
         (UndoRedoProgressCallback)editor_widget_on_undo_redo_progress, self);
