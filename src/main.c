@@ -328,21 +328,23 @@ auto_hide_header(gpointer user_data)
     return G_SOURCE_REMOVE;
 }
 
-static gboolean
-restore_ui_after_fullscreen(gpointer user_data)
+static void
+restore_ui_after_fullscreen_real(ViteWindow *win)
 {
-    ViteWindow *win = (ViteWindow *)user_data;
-    if (!win || !win->window) return G_SOURCE_REMOVE;
+    if (!win || !win->window) return;
     
     /* Double check we are still not fullscreen (user didn't toggle back rapidly) */
     if (!gtk_window_is_fullscreen(GTK_WINDOW(win->window))) {
         if (win->titlebar_container) {
              adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
+             adw_toolbar_view_set_extend_content_to_top_edge(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
+             
+             adw_toolbar_view_set_reveal_bottom_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
+             adw_toolbar_view_set_extend_content_to_bottom_edge(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
         }
         if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, TRUE);
         if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, FALSE);
     }
-    return G_SOURCE_REMOVE;
 }
 
 static void
@@ -354,7 +356,12 @@ on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointe
     if (is_fullscreen) {
         /* ENTERING FULLSCREEN */
         if (win->titlebar_container) {
+             /* Extend content to edges so bars overlay content */
+             adw_toolbar_view_set_extend_content_to_top_edge(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
              adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
+             
+             adw_toolbar_view_set_extend_content_to_bottom_edge(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
+             adw_toolbar_view_set_reveal_bottom_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
         }
         if (win->header_bar) adw_header_bar_set_show_end_title_buttons(win->header_bar, FALSE);
         if (win->fullscreen_restore_btn) gtk_widget_set_visible(win->fullscreen_restore_btn, TRUE);
@@ -365,9 +372,7 @@ on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointe
             g_source_remove(win->auto_hide_source_id);
             win->auto_hide_source_id = 0;
         }
-        
-        /* Defer UI restore to allow window system to settle swapchain */
-        g_timeout_add(100, restore_ui_after_fullscreen, win);
+        restore_ui_after_fullscreen_real(win);
     }
 }
 
@@ -3176,10 +3181,32 @@ on_fullscreen_hover_motion(GtkEventControllerMotion *controller, double x, doubl
     if (!win || !win->window || !win->titlebar_container) return;
     
     if (gtk_window_is_fullscreen(GTK_WINDOW(win->window))) {
-        if (y < 10) { 
+        int h = gtk_widget_get_height(GTK_WIDGET(win->window));
+        
+        /* Check Top Edge */
+        if (y < 5) { 
              adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
-        } else if (y > 80 && adw_toolbar_view_get_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container))) {
-             adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
+             /* Top edge hover should ALSO reveal status bar per requirements */
+             adw_toolbar_view_set_reveal_bottom_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
+        }
+        
+        /* Check Bottom Edge */
+        else if (y > h - 5) {
+             /* Bottom edge hover reveals status bar */
+             adw_toolbar_view_set_reveal_bottom_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), TRUE);
+        }
+        
+        /* Hiding Logic with Hysteresis */
+        else {
+            /* Hide top bar if far enough down */
+            if (y > 80 && adw_toolbar_view_get_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container))) {
+                 adw_toolbar_view_set_reveal_top_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
+            }
+            
+            /* Hide bottom bar if far enough up */
+            if (y < h - 80 && adw_toolbar_view_get_reveal_bottom_bars(ADW_TOOLBAR_VIEW(win->titlebar_container))) {
+                 adw_toolbar_view_set_reveal_bottom_bars(ADW_TOOLBAR_VIEW(win->titlebar_container), FALSE);
+            }
         }
     }
 }
@@ -3904,9 +3931,11 @@ setup_window(AdwApplicationWindow *window)
     gtk_widget_set_vexpand(GTK_WIDGET(win->stack), TRUE);
     gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->stack));
     
-    /* Status Bar */
+    /* Status Bar in AdwToolbarView Bottom Bar */
     win->status_bar = vite_status_bar_new();
-    gtk_box_append(GTK_BOX(main_box), win->status_bar);
+    adw_toolbar_view_add_bottom_bar(ADW_TOOLBAR_VIEW(win->titlebar_container), win->status_bar);
+    
+    /* Connect signals */
     g_signal_connect(win->status_bar, "file-type-changed", G_CALLBACK(on_status_bar_file_type_changed), win);
     g_signal_connect(win->status_bar, "line-ending-changed", G_CALLBACK(on_status_bar_line_ending_changed), win);
     g_signal_connect(win->status_bar, "encoding-changed", G_CALLBACK(on_status_bar_encoding_changed), win);
@@ -4452,12 +4481,15 @@ on_open(GtkApplication *app, GFile **files, int n_files, char *hint, gpointer us
     for (int i = 0; i < n_files; i++) open_file(app, NULL, files[i], TRUE);
 }
 
+
+
 int
 main(int argc, char **argv)
 {
     AdwApplication *app;
     int status;
     adw_init();
+    
     app = adw_application_new("io.github.fastrizwaan.ViTE", G_APPLICATION_HANDLES_OPEN);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
     g_signal_connect(app, "open", G_CALLBACK(on_open), NULL);
