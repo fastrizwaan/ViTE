@@ -102,15 +102,26 @@ editor_minimap_draw(EditorWidget *self, GtkSnapshot *snapshot, double x, double 
     if (!self->doc || !self->minimap_enabled) return;
 
     /* Draw Background */
-    GdkRGBA bg_color = {0.98, 0.98, 0.98, 1.0};
+    GdkRGBA bg_color = {1.0, 1.0, 1.0, 1.0}; /* Match editor-renderer default */
+    gboolean is_dark = FALSE;
     if (self->color_text.red > 0.5) { /* Dark theme detection */
-        bg_color = (GdkRGBA){0.15, 0.15, 0.15, 1.0};
+        bg_color = (GdkRGBA){0.11, 0.11, 0.11, 1.0}; /* Match editor-renderer dark bg */
+        is_dark = TRUE;
     }
     gtk_snapshot_append_color(snapshot, &bg_color, &GRAPHENE_RECT_INIT(x, y, w, h));
 
     /* Clip to minimap area */
     gtk_snapshot_push_clip(snapshot, &GRAPHENE_RECT_INIT(x, y, w, h));
     gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(x, y));
+
+    /* Draw 1px Left Border */
+    GdkRGBA border_color = {0, 0, 0, 0.1};
+    if (is_dark) {
+        border_color = (GdkRGBA){1, 1, 1, 0.08}; /* Subtle light border for dark mode */
+    } else {
+        border_color = (GdkRGBA){0, 0, 0, 0.08}; /* Subtle dark border for light mode */
+    }
+    gtk_snapshot_append_color(snapshot, &border_color, &GRAPHENE_RECT_INIT(0, 0, 1, h));
 
     /* Get shared params */
     double map_content_h, map_scroll_y, map_line_h;
@@ -164,8 +175,19 @@ editor_minimap_draw(EditorWidget *self, GtkSnapshot *snapshot, double x, double 
     if (lens_h > h) lens_h = h;
 
     if (lens_h > 0) {
-        GdkRGBA lens_col = {0.5, 0.5, 0.5, 0.1};
-        if (self->minimap_active) lens_col.alpha = 0.2;
+        /* "Lens is a little dark" -> Dark overlay */
+        GdkRGBA lens_col = {0, 0, 0, 0.05}; /* Default for light mode */
+        
+        if (is_dark) {
+             /* In dark mode (bg ~0.11), black overlay is invisible. Use white overlay to make it "grey/lighter" */
+             lens_col = (GdkRGBA){1, 1, 1, 0.08};
+        } else {
+             /* Light mode: black overlay */
+             lens_col = (GdkRGBA){0, 0, 0, 0.05};
+        }
+        
+        if (self->minimap_active) lens_col.alpha += 0.1; /* Darker when dragging */
+        
         gtk_snapshot_append_color(snapshot, &lens_col, &GRAPHENE_RECT_INIT(0, (float)lens_y, w, (float)lens_h));
     }
 
