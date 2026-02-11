@@ -134,6 +134,56 @@ find_first_editor_recursive(GtkWidget *widget) {
     return NULL;
 }
 
+static void
+find_all_editors_recursive_internal(GtkWidget *widget, GPtrArray *editors)
+{
+    if (!widget) return;
+    if (EDITOR_IS_WIDGET(widget)) {
+        g_ptr_array_add(editors, widget);
+        return;
+    }
+
+    if (GTK_IS_SCROLLED_WINDOW(widget)) {
+        find_all_editors_recursive_internal(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(widget)), editors);
+    } else if (GTK_IS_OVERLAY(widget)) {
+        find_all_editors_recursive_internal(gtk_overlay_get_child(GTK_OVERLAY(widget)), editors);
+    } else {
+        GtkWidget *child = gtk_widget_get_first_child(widget);
+        while (child) {
+            find_all_editors_recursive_internal(child, editors);
+            child = gtk_widget_get_next_sibling(child);
+        }
+    }
+}
+
+static GPtrArray *
+find_all_editors_recursive(GtkWidget *page)
+{
+    GPtrArray *editors = g_ptr_array_new();
+    find_all_editors_recursive_internal(page, editors);
+    return editors;
+}
+
+static void
+page_set_document(GtkWidget *page, Document *new_doc)
+{
+    GPtrArray *editors = find_all_editors_recursive(page);
+    Document *old_doc = NULL;
+
+    for (guint i = 0; i < editors->len; i++) {
+        EditorWidget *ed = EDITOR_WIDGET(g_ptr_array_index(editors, i));
+        if (i == 0) {
+            old_doc = editor_widget_get_document(ed);
+        }
+        editor_widget_set_document(ed, new_doc);
+    }
+
+    if (old_doc && old_doc != new_doc) {
+        document_free(old_doc);
+    }
+    g_ptr_array_unref(editors);
+}
+
 static GtkWidget *get_editor_from_page(GtkWidget *page);
 static void on_tab_clicked (ViteTab *tab, gpointer user_data);
 static void on_new_tab_clicked_header(GtkButton *btn, gpointer user_data);
@@ -187,12 +237,9 @@ reset_tab_to_empty(ViteWindow *win, ViteTab *tab)
     if (!win || !tab || !VITE_IS_TAB(tab)) return;
 
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
-    GtkWidget *editor = get_editor_from_page(page);
-    if (EDITOR_IS_WIDGET(editor)) {
-        Document *old_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+    if (page) {
         Document *doc = document_new(NULL);
-        editor_widget_set_document(EDITOR_WIDGET(editor), doc);
-        if (old_doc) document_free(old_doc);
+        page_set_document(page, doc);
 
         document_add_modification_callback(doc, on_document_modified, tab);
         document_add_content_callback(doc, on_document_content_changed, tab);
@@ -3064,10 +3111,16 @@ static void
 on_status_bar_file_type_changed(ViteStatusBar *bar, const char *lang_id, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
-    GtkWidget *editor = get_active_editor(win);
-
-    if (editor && EDITOR_IS_WIDGET(editor)) {
-         editor_widget_set_language(EDITOR_WIDGET(editor), lang_id);
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (tab) {
+        GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+        if (page) {
+            GPtrArray *editors = find_all_editors_recursive(page);
+            for (guint i = 0; i < editors->len; i++) {
+                editor_widget_set_language(EDITOR_WIDGET(g_ptr_array_index(editors, i)), lang_id);
+            }
+            g_ptr_array_unref(editors);
+        }
     }
 
     /* Update the corresponding action state to reflect in the menu */
@@ -3085,10 +3138,16 @@ static void
 on_status_bar_line_ending_changed(ViteStatusBar *bar, const char *line_ending_id, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
-    GtkWidget *editor = get_active_editor(win);
-    
-    if (editor && EDITOR_IS_WIDGET(editor)) {
-         editor_widget_set_line_ending(EDITOR_WIDGET(editor), line_ending_id);
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (tab) {
+        GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+        if (page) {
+            GPtrArray *editors = find_all_editors_recursive(page);
+            for (guint i = 0; i < editors->len; i++) {
+                editor_widget_set_line_ending(EDITOR_WIDGET(g_ptr_array_index(editors, i)), line_ending_id);
+            }
+            g_ptr_array_unref(editors);
+        }
     }
     
     /* Always Sync Menu Action */
@@ -3104,10 +3163,16 @@ static void
 on_status_bar_encoding_changed(ViteStatusBar *bar, const char *encoding_id, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
-    GtkWidget *editor = get_active_editor(win);
-    
-    if (editor && EDITOR_IS_WIDGET(editor)) {
-         editor_widget_set_encoding(EDITOR_WIDGET(editor), encoding_id);
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (tab) {
+        GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+        if (page) {
+            GPtrArray *editors = find_all_editors_recursive(page);
+            for (guint i = 0; i < editors->len; i++) {
+                editor_widget_set_encoding(EDITOR_WIDGET(g_ptr_array_index(editors, i)), encoding_id);
+            }
+            g_ptr_array_unref(editors);
+        }
     }
     
     /* Always Sync Menu Action to match Status Bar selection */
@@ -3122,16 +3187,22 @@ static void
 on_status_bar_indent_width_changed(ViteStatusBar *bar, int width, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
-    GtkWidget *editor = get_active_editor(win);
-    
-    if (editor && EDITOR_IS_WIDGET(editor)) {
-         /* Update both tab width and indent width for consistency */
-         g_object_set(editor, "tab-width", width, "indent-width", width, NULL);
-         
-         /* Reflect back to status bar label */
-         int style = 0;
-         g_object_get(editor, "indent-style", &style, NULL);
-         vite_status_bar_set_indentation(bar, width, style == 1);
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (tab) {
+        GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+        if (page) {
+            GPtrArray *editors = find_all_editors_recursive(page);
+            for (guint i = 0; i < editors->len; i++) {
+                GtkWidget *ed = g_ptr_array_index(editors, i);
+                g_object_set(ed, "tab-width", width, "indent-width", width, NULL);
+            }
+            if (editors->len > 0) {
+                 int style = 0;
+                 g_object_get(g_ptr_array_index(editors, 0), "indent-style", &style, NULL);
+                 vite_status_bar_set_indentation(bar, width, style == 1);
+            }
+            g_ptr_array_unref(editors);
+        }
     }
 }
 
@@ -3139,15 +3210,21 @@ static void
 on_status_bar_indent_style_changed(ViteStatusBar *bar, int style, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
-    GtkWidget *editor = get_active_editor(win);
-    
-    if (editor && EDITOR_IS_WIDGET(editor)) {
-         g_object_set(editor, "indent-style", style, NULL);
-         
-         /* Reflect back to status bar label */
-         int width = 4;
-         g_object_get(editor, "tab-width", &width, NULL);
-         vite_status_bar_set_indentation(bar, width, style == 1);
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (tab) {
+        GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+        if (page) {
+            GPtrArray *editors = find_all_editors_recursive(page);
+            for (guint i = 0; i < editors->len; i++) {
+                g_object_set(g_ptr_array_index(editors, i), "indent-style", style, NULL);
+            }
+            if (editors->len > 0) {
+                 int width = 4;
+                 g_object_get(g_ptr_array_index(editors, 0), "tab-width", &width, NULL);
+                 vite_status_bar_set_indentation(bar, width, style == 1);
+            }
+            g_ptr_array_unref(editors);
+        }
     }
 }
 
@@ -4078,22 +4155,23 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
         vite_tab_close_active_dialog(ctx->tab);
         
         GtkWidget *page = g_object_get_data(G_OBJECT(ctx->tab), "page");
-        GtkWidget *editor = get_editor_from_page(page);
-        if (EDITOR_IS_WIDGET(editor)) {
-            gtk_widget_set_sensitive(editor, TRUE);
+        GPtrArray *editors = find_all_editors_recursive(page);
+
+        for (guint i = 0; i < editors->len; i++) {
+            GtkWidget *ed = g_ptr_array_index(editors, i);
+            gtk_widget_set_sensitive(ed, TRUE);
+            if (success) {
+                editor_widget_rebuild_folding(EDITOR_WIDGET(ed));
+            }
         }
+        g_ptr_array_unref(editors);
         
         if (success) {
              document_set_file_path(doc, ctx->filename);
              
              /* Force title update */
-             /* We can rely on modification callback? No, doc is not modified. 
-                Manually call update. */
-             vite_tab_set_title(ctx->tab, g_path_get_basename(ctx->filename)); /* Temporary, update_window_title_for_tab does full logic */
+             vite_tab_set_title(ctx->tab, g_path_get_basename(ctx->filename));
              update_window_title_for_tab(ctx->tab);
-             
-             /* Rebuild folding now that content is loaded */
-             editor_widget_rebuild_folding(EDITOR_WIDGET(editor));
 
              /* Refresh status bar (Encoding/Line Endings known now) */
              if (vite_tab_is_active(ctx->tab)) {
@@ -4278,16 +4356,9 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
 
     if (reused && reused_tab) {
         GtkWidget *page = g_object_get_data(G_OBJECT(reused_tab), "page");
-        GtkWidget *editor = get_editor_from_page(page);
-        Document *old_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
         
-        // Remove callbacks from old doc
-        // document_remove_modification_callback(old_doc, on_document_modified, reused_tab); // Not strictly needed as doc is freed
-        // document_remove_content_callback(old_doc, on_document_content_changed, reused_tab);
-
         doc = document_new_empty();
-        editor_widget_set_document(EDITOR_WIDGET(editor), doc);
-        document_free(old_doc);
+        page_set_document(page, doc);
         
         /* Update tab callbacks for new doc */
         document_add_modification_callback(doc, on_document_modified, reused_tab);
@@ -4309,71 +4380,29 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
     
     /* Set language based on extension immediately */
     GtkWidget *page = g_object_get_data(G_OBJECT(tab_to_use), "page");
-    GtkWidget *editor = get_editor_from_page(page);
+    GPtrArray *editors = find_all_editors_recursive(page);
     const char *dot = strrchr(path, '.');
     gboolean lang_set = FALSE;
     const char *selected_lang_id = NULL;  // Track which language was set
     
-    if (dot && EDITOR_IS_WIDGET(editor)) {
+    if (dot) {
         const char *ext = dot + 1;
-        if (g_ascii_strcasecmp(ext, "c") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "c"); 
-            selected_lang_id = "c";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "cc") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "c"); 
-            selected_lang_id = "c";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "h") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "c"); 
-            selected_lang_id = "c";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "py") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "python"); 
-            selected_lang_id = "python";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "bash") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "bash"); 
-            selected_lang_id = "bash";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "js") == 0 || g_ascii_strcasecmp(ext, "ts") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "javascript"); 
-            selected_lang_id = "javascript";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "json") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "json"); 
-            selected_lang_id = "json";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "yaml"); 
-            selected_lang_id = "yaml";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "xml") == 0 || g_ascii_strcasecmp(ext, "html") == 0 || g_ascii_strcasecmp(ext, "svg") == 0 || g_ascii_strcasecmp(ext, "xsl") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "xml"); 
-            selected_lang_id = "xml";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "desktop") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "desktop"); 
-            selected_lang_id = "desktop";
-            lang_set = TRUE; 
-        }
-        else if (g_ascii_strcasecmp(ext, "rs") == 0) { 
-            editor_widget_set_language(EDITOR_WIDGET(editor), "rust"); 
-            selected_lang_id = "rust";
-            lang_set = TRUE; 
-        }
+             if (g_ascii_strcasecmp(ext, "c") == 0) selected_lang_id = "c";
+        else if (g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "cc") == 0) selected_lang_id = "c";
+        else if (g_ascii_strcasecmp(ext, "h") == 0) selected_lang_id = "c";
+        else if (g_ascii_strcasecmp(ext, "py") == 0) selected_lang_id = "python";
+        else if (g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "bash") == 0) selected_lang_id = "bash";
+        else if (g_ascii_strcasecmp(ext, "js") == 0 || g_ascii_strcasecmp(ext, "ts") == 0) selected_lang_id = "javascript";
+        else if (g_ascii_strcasecmp(ext, "json") == 0) selected_lang_id = "json";
+        else if (g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) selected_lang_id = "yaml";
+        else if (g_ascii_strcasecmp(ext, "xml") == 0 || g_ascii_strcasecmp(ext, "html") == 0 || g_ascii_strcasecmp(ext, "svg") == 0 || g_ascii_strcasecmp(ext, "xsl") == 0) selected_lang_id = "xml";
+        else if (g_ascii_strcasecmp(ext, "desktop") == 0) selected_lang_id = "desktop";
+        else if (g_ascii_strcasecmp(ext, "rs") == 0) selected_lang_id = "rust";
+        
+        if (selected_lang_id) lang_set = TRUE;
     }
 
-    if (!lang_set && EDITOR_IS_WIDGET(editor)) {
+    if (!lang_set) {
         /* Fallback: Content Detection (First 1KB) */
         char sample[1024];
         GFileInputStream *in_stream = g_file_read(file, NULL, NULL);
@@ -4381,14 +4410,16 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
             gssize bytes = g_input_stream_read(G_INPUT_STREAM(in_stream), sample, 1023, NULL, NULL);
             if (bytes > 0) {
                 sample[bytes] = '\0';
-                const char *detected = syntax_detect_language(sample);
-                if (detected) {
-                    editor_widget_set_language(EDITOR_WIDGET(editor), detected);
-                    selected_lang_id = detected;
-                    lang_set = TRUE;
-                }
+                selected_lang_id = syntax_detect_language(sample);
+                if (selected_lang_id) lang_set = TRUE;
             }
             g_object_unref(in_stream);
+        }
+    }
+
+    if (lang_set && selected_lang_id) {
+        for (guint i = 0; i < editors->len; i++) {
+            editor_widget_set_language(EDITOR_WIDGET(g_ptr_array_index(editors, i)), selected_lang_id);
         }
     }
 
@@ -4417,10 +4448,10 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
     }
 
     /* Setup Async Load */
-    /* Setup Async Load */
     /* Loading set earlier to capture title */
-    if (EDITOR_IS_WIDGET(editor)) {
-         gtk_widget_set_sensitive(editor, FALSE);
+    for (guint i = 0; i < editors->len; i++) {
+        GtkWidget *ed = g_ptr_array_index(editors, i);
+        gtk_widget_set_sensitive(ed, FALSE);
     }
     
     target_window->loading_count++;
@@ -4471,6 +4502,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
     g_free(uri);
     g_free(path);
     g_free(basename);
+    g_ptr_array_unref(editors);
 }
 
 
@@ -4718,14 +4750,19 @@ on_save_complete(GObject *source, GAsyncResult *res, gpointer user_data)
         vite_tab_set_progress(tab, 0.0);
         
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
-        GtkWidget *editor = get_editor_from_page(page);
-        if (EDITOR_IS_WIDGET(editor)) {
-            gtk_widget_set_sensitive(editor, TRUE);
-        }
+        GPtrArray *editors = find_all_editors_recursive(page);
+        Document *doc = NULL;
         
-        if (!error) {
-             /* Update Title/Recent */
-             Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+        for (guint i = 0; i < editors->len; i++) {
+            GtkWidget *ed = g_ptr_array_index(editors, i);
+            gtk_widget_set_sensitive(ed, TRUE);
+            if (i == 0) {
+                doc = editor_widget_get_document(EDITOR_WIDGET(ed));
+            }
+        }
+        g_ptr_array_unref(editors);
+        
+        if (!error && doc) {
              const char *new_path = document_get_file_path(doc);
              if (new_path) {
                  char *basename = g_path_get_basename(new_path);
@@ -4806,10 +4843,11 @@ save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const cha
         vite_tab_set_loading(tab, TRUE);
         vite_tab_set_operation_type(tab, VITE_OP_SAVING);
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
-        GtkWidget *editor = get_editor_from_page(page);
-        if (EDITOR_IS_WIDGET(editor)) {
-            gtk_widget_set_sensitive(editor, FALSE);
+        GPtrArray *editors = find_all_editors_recursive(page);
+        for (guint i = 0; i < editors->len; i++) {
+            gtk_widget_set_sensitive(GTK_WIDGET(g_ptr_array_index(editors, i)), FALSE);
         }
+        g_ptr_array_unref(editors);
     }
     
     if (win) {
