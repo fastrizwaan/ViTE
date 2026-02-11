@@ -29,6 +29,7 @@ static const FileTypeEntry file_types[] = {
     { "XML", "xml" },
     { "JavaScript", "javascript" },
     { "Desktop Entry", "desktop" },
+    { "Markdown", "markdown" },
     { NULL, NULL }
 };
 
@@ -2714,13 +2715,22 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
         if (dot) {
             const char *ext = dot + 1;
             /* Restricted list as requested by user */
-            if (g_ascii_strcasecmp(ext, "c") == 0 || g_ascii_strcasecmp(ext, "py") == 0 ||
-                g_ascii_strcasecmp(ext, "cpp") == 0 || g_ascii_strcasecmp(ext, "json") == 0 ||
-                g_ascii_strcasecmp(ext, "sh") == 0 || g_ascii_strcasecmp(ext, "rst") == 0 ||
-                g_ascii_strcasecmp(ext, "h") == 0 || g_ascii_strcasecmp(ext, "js") == 0 ||
-                g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) {
-                editor_widget_set_language(EDITOR_WIDGET(editor), ext);
-                selected_lang_id = ext;
+            if (g_ascii_strcasecmp(ext, "c") == 0) selected_lang_id = "c";
+            else if (g_ascii_strcasecmp(ext, "py") == 0) selected_lang_id = "python";
+            else if (g_ascii_strcasecmp(ext, "cpp") == 0) selected_lang_id = "cpp";
+            else if (g_ascii_strcasecmp(ext, "json") == 0) selected_lang_id = "json";
+            else if (g_ascii_strcasecmp(ext, "sh") == 0) selected_lang_id = "bash";
+            else if (g_ascii_strcasecmp(ext, "rst") == 0) selected_lang_id = "rust"; /* Assuming rst means Rust here based on previous code, or ReStructredText? Previous code treated rst as rust. */
+            else if (g_ascii_strcasecmp(ext, "rs") == 0) selected_lang_id = "rust";
+            else if (g_ascii_strcasecmp(ext, "h") == 0) selected_lang_id = "h";
+            else if (g_ascii_strcasecmp(ext, "js") == 0) selected_lang_id = "javascript";
+            else if (g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) selected_lang_id = "yaml";
+            else if (g_ascii_strcasecmp(ext, "xml") == 0) selected_lang_id = "xml";
+            else if (g_ascii_strcasecmp(ext, "desktop") == 0) selected_lang_id = "desktop";
+            else if (g_ascii_strcasecmp(ext, "md") == 0 || g_ascii_strcasecmp(ext, "markdown") == 0 || g_ascii_strcasecmp(ext, "mkd") == 0) selected_lang_id = "markdown";
+            
+            if (strcmp(selected_lang_id, "plain") != 0) {
+                editor_widget_set_language(EDITOR_WIDGET(editor), selected_lang_id);
             }
         }
     }
@@ -4412,6 +4422,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
         else if (g_ascii_strcasecmp(ext, "xml") == 0 || g_ascii_strcasecmp(ext, "html") == 0 || g_ascii_strcasecmp(ext, "svg") == 0 || g_ascii_strcasecmp(ext, "xsl") == 0) selected_lang_id = "xml";
         else if (g_ascii_strcasecmp(ext, "desktop") == 0) selected_lang_id = "desktop";
         else if (g_ascii_strcasecmp(ext, "rs") == 0) selected_lang_id = "rust";
+        else if (g_ascii_strcasecmp(ext, "md") == 0 || g_ascii_strcasecmp(ext, "markdown") == 0 || g_ascii_strcasecmp(ext, "mkd") == 0) selected_lang_id = "markdown";
         
         if (selected_lang_id) lang_set = TRUE;
     }

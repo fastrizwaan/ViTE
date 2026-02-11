@@ -43,6 +43,7 @@ sources = files(
   'src/syntax-xml.c',
   'src/syntax-desktop.c',
   'src/syntax-rust.c',
+  'src/syntax-markdown.c',
   'src/editor-minimap.c',
   'src/editor-print.c'
 )

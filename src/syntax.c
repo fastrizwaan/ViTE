@@ -237,6 +237,8 @@ syntax_context_set_language(SyntaxContext *ctx, const char *lang_name)
         ctx->lang = LANG_DESKTOP;
     } else if (strcmp(lang_name, "rust") == 0 || strcmp(lang_name, "rs") == 0 || strcmp(lang_name, "rst") == 0) {
         ctx->lang = LANG_RUST;
+    } else if (strcmp(lang_name, "markdown") == 0 || strcmp(lang_name, "md") == 0 || strcmp(lang_name, "mkd") == 0) {
+        ctx->lang = LANG_MARKDOWN;
     } else {
         ctx->lang = LANG_NONE;
     }
@@ -268,6 +270,7 @@ syntax_context_get_language_name(SyntaxContext *ctx)
         case LANG_XML: return "XML/HTML";
         case LANG_DESKTOP: return "Desktop Entry";
         case LANG_RUST: return "Rust";
+        case LANG_MARKDOWN: return "Markdown";
         case LANG_NONE: 
         default: return "Plain Text";
     }
@@ -610,6 +613,9 @@ syntax_process_line_len(SyntaxContext *ctx, size_t line_index, const char *text,
             break;
         case LANG_RUST:
             syntax_highlight_rust(ctx, attrs, text, len, start_state, line_index);
+            break;
+        case LANG_MARKDOWN:
+            syntax_highlight_markdown(ctx, attrs, text, len, start_state, line_index);
             break;
         default:
              /* Just save state if we don't have a handler (shouldn't happen if lang!=NONE) */
