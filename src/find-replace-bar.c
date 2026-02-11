@@ -426,14 +426,14 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
 }
 
 
-static void on_search_changed(GtkWidget *widget, gpointer user_data) {
+static void on_search_changed(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     if (self->search_timeout_id) g_source_remove(self->search_timeout_id);
     self->search_timeout_id = g_timeout_add(200, (GSourceFunc)perform_search, self);
 }
 
 /* Document modification handler */
-static void on_document_changed(Document *doc, gboolean modified, void *user_data) {
+static void on_document_changed(Document *doc G_GNUC_UNUSED, gboolean modified G_GNUC_UNUSED, void *user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     
     /* If a replace operation is running (or just finishing), don't auto-search. 
@@ -448,17 +448,17 @@ static void on_document_changed(Document *doc, gboolean modified, void *user_dat
     self->search_timeout_id = g_timeout_add(300, (GSourceFunc)perform_search, self);
 }
 
-static void on_next_clicked(GtkButton *btn, gpointer user_data) {
+static void on_next_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     editor_widget_next_match(self->editor);
 }
 
-static void on_prev_clicked(GtkButton *btn, gpointer user_data) {
+static void on_prev_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     editor_widget_prev_match(self->editor);
 }
 
-static void on_replace_clicked(GtkButton *btn, gpointer user_data) {
+static void on_replace_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     const char *repl = gtk_editable_get_text(GTK_EDITABLE(self->replace_entry));
     
@@ -518,7 +518,7 @@ static void on_replace_progress(int processed, int total, gboolean finished, voi
     }
 }
 
-static void on_replace_all_clicked(GtkButton *btn, gpointer user_data) {
+static void on_replace_all_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     
     /* Toggle / Cancel Logic - check both task types */
@@ -578,12 +578,12 @@ static void on_replace_all_clicked(GtkButton *btn, gpointer user_data) {
     }
 }
 
-static void on_close_clicked(GtkButton *btn, gpointer user_data) {
+static void on_close_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     vite_find_replace_bar_close(self);
 }
 
-static gboolean on_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data) {
+static gboolean on_key_pressed(GtkEventControllerKey *controller G_GNUC_UNUSED, guint keyval, guint keycode G_GNUC_UNUSED, GdkModifierType state, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     if (keyval == GDK_KEY_Escape) {
         vite_find_replace_bar_close(self);
@@ -640,7 +640,7 @@ static void vite_find_replace_bar_class_init(ViteFindReplaceBarClass *klass) {
     gtk_widget_class_set_css_name(widget_class, "findbar");
 }
 
-static void vite_find_replace_bar_init(ViteFindReplaceBar *self) {
+static void vite_find_replace_bar_init(ViteFindReplaceBar *self G_GNUC_UNUSED) {
     /* Constructed in new */
 }
 

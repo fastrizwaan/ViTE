@@ -27,6 +27,7 @@ static const char *bash_booleans[] = {
     "true", "false", "TRUE", "FALSE", NULL
 };
 
+#if 0
 static const char *bash_test_ops[] = {
     "-e", "-f", "-d", "-r", "-w", "-x",
     "-s", "-L", "-c", "-b",
@@ -34,6 +35,7 @@ static const char *bash_test_ops[] = {
     "-eq", "-ne", "-lt", "-le", "-gt", "-ge",
     NULL
 };
+#endif
 
 static gboolean
 match_word(const char *text, size_t start, size_t len, const char **list)
@@ -74,10 +76,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
     gboolean is_cmd_start = (BASH_CUR == STATE_ROOT || BASH_CUR == STATE_BASH_CMD_SUBST || BASH_CUR == STATE_SH_BACKTICK || BASH_CUR == STATE_BASH_CASE_BODY);
     if (was_continued) is_cmd_start = FALSE;
 
-    gboolean in_for_loop = FALSE;
-    gboolean in_for_items = FALSE;
     gboolean in_case_patterns = (BASH_CUR == STATE_BASH_CASE);
-    gboolean in_case_stmt = FALSE;
     gboolean in_export_context = FALSE;
     int paren_depth = 0;
 
@@ -186,7 +185,6 @@ syntax_highlight_bash(SyntaxContext *ctx,
 
         /* Delimiters and operators */
         if (strchr(";&|()<>[]{}", text[cur])) {
-            size_t start = cur;
             in_export_context = FALSE;
             if (cur + 1 < len && ((text[cur] == '&' && text[cur+1] == '&') || (text[cur] == '|' && text[cur+1] == '|'))) {
                 add_attr(attrs, cur, cur + 2, &d_variable_c);
@@ -320,7 +318,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
 
             if (is_word_in_list(text + start, w_len, (const char*[]){"if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac", "in", "function", NULL})) {
                 add_attr(attrs, start, cur, &d_keyword);
-                if (strncmp(text + start, "in", 2) == 0 && !in_for_items) in_case_patterns = TRUE;
+                if (strncmp(text + start, "in", 2) == 0) in_case_patterns = TRUE;
                 if (strncmp(text + start, "case", 4) == 0) {
                      BASH_PUSH(STATE_BASH_CASE);
                 }
@@ -372,6 +370,5 @@ syntax_highlight_bash(SyntaxContext *ctx,
     next_loop: ;
     }
 
-    if (in_case_stmt && BASH_CUR == STATE_ROOT) BASH_PUSH(STATE_BASH_CASE);
     set_line_end_state(ctx, line_index, (SyntaxState)state);
 }

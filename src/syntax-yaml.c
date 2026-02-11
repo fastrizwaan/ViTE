@@ -203,7 +203,7 @@ syntax_highlight_yaml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             
             gboolean is_number_special = FALSE;
             if (text[probe] == '.' && probe + 3 <= len) {
-                if (strncmp(text+probe, ".nan", 4) == 0 || strncmp(text+probe, ".inf", 4) == 0) match:
+                if (strncmp(text+probe, ".nan", 4) == 0 || strncmp(text+probe, ".inf", 4) == 0)
                 is_number_special = TRUE;
             }
             

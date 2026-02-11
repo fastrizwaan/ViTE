@@ -24,10 +24,10 @@ G_DEFINE_TYPE_WITH_CODE (EditorWidget, editor_widget, GTK_TYPE_WIDGET,
 /* Marshaler for (uint, uint) */
 static void
 _editor_marshal_VOID__UINT_UINT (GClosure     *closure,
-                                 GValue       *return_value,
+                                 GValue       *return_value G_GNUC_UNUSED,
                                  guint         n_param_values,
                                  const GValue *param_values,
-                                 gpointer      invocation_hint,
+                                 gpointer      invocation_hint G_GNUC_UNUSED,
                                  gpointer      marshal_data)
 {
   typedef void (*GMarshalFunc_VOID__UINT_UINT) (gpointer     data1,
@@ -50,7 +50,12 @@ _editor_marshal_VOID__UINT_UINT (GClosure     *closure,
       data1 = g_value_peek_pointer (param_values + 0);
       data2 = closure->data;
     }
-  callback = (GMarshalFunc_VOID__UINT_UINT) (marshal_data ? marshal_data : cc->callback);
+  union {
+    gpointer p;
+    GMarshalFunc_VOID__UINT_UINT f;
+  } u;
+  u.p = (marshal_data ? marshal_data : cc->callback);
+  callback = u.f;
 
   callback (data1,
             g_value_get_uint (param_values + 1),
@@ -203,7 +208,7 @@ syntax_scan_step(gpointer user_data)
 }
 
 static void
-on_document_edit(Document *doc, size_t offset, int64_t delta_len, gpointer user_data)
+on_document_edit(Document *doc G_GNUC_UNUSED, size_t offset, int64_t delta_len, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->search_matches || self->search_matches->len == 0) return;
@@ -290,7 +295,7 @@ shift_collapsed_folds(EditorWidget *self, size_t start_line, int line_delta)
 }
 
 static void
-on_document_update(Document *doc, size_t start_line, int line_delta, gpointer user_data)
+on_document_update(Document *doc G_GNUC_UNUSED, size_t start_line, int line_delta, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->syntax_ctx) return;
@@ -319,7 +324,7 @@ on_document_update(Document *doc, size_t start_line, int line_delta, gpointer us
 }
 
 static void
-on_system_font_changed(GSettings *settings, const char *key, gpointer user_data)
+on_system_font_changed(GSettings *settings G_GNUC_UNUSED, const char *key G_GNUC_UNUSED, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->use_custom_font) {
@@ -338,7 +343,7 @@ editor_widget_reset_cursor_blink(EditorWidget *self)
 }
 
 static gboolean
-cursor_blink_tick_callback(GtkWidget *widget, GdkFrameClock *frame_clock, gpointer user_data)
+cursor_blink_tick_callback(GtkWidget *widget, GdkFrameClock *frame_clock, gpointer user_data G_GNUC_UNUSED)
 {
     EditorWidget *self = EDITOR_WIDGET(widget);
     if (!gtk_widget_has_focus(widget)) return G_SOURCE_CONTINUE;
@@ -447,11 +452,11 @@ editor_widget_dispose(GObject *object)
 static void
 editor_widget_measure (GtkWidget      *widget,
                        GtkOrientation  orientation,
-                       int             for_size,
+                       int             for_size G_GNUC_UNUSED,
                        int            *minimum,
                        int            *natural,
-                       int            *minimum_baseline,
-                       int            *natural_baseline)
+                       int            *minimum_baseline G_GNUC_UNUSED,
+                       int            *natural_baseline G_GNUC_UNUSED)
 {
     EditorWidget *self = EDITOR_WIDGET(widget);
     editor_widget_ensure_metrics(self);
@@ -469,7 +474,7 @@ static void
 editor_widget_size_allocate (GtkWidget *widget,
                              int        width,
                              int        height,
-                             int        baseline)
+                             int        baseline G_GNUC_UNUSED)
 {
     EditorWidget *self = EDITOR_WIDGET(widget);
     editor_widget_update_adjustments(self, width, height);
@@ -488,7 +493,7 @@ static void
 editor_widget_set_property (GObject      *object,
                             guint         prop_id,
                             const GValue *value,
-                            GParamSpec   *pspec)
+                            GParamSpec   *pspec G_GNUC_UNUSED)
 {
     EditorWidget *self = EDITOR_WIDGET(object);
     switch (prop_id) {
@@ -591,7 +596,7 @@ static void
 editor_widget_get_property (GObject    *object,
                             guint       prop_id,
                             GValue     *value,
-                            GParamSpec *pspec)
+                            GParamSpec *pspec G_GNUC_UNUSED)
 {
     EditorWidget *self = EDITOR_WIDGET(object);
     switch (prop_id) {
@@ -760,7 +765,7 @@ editor_widget_class_init(EditorWidgetClass *klass)
 }
 
 static void
-editor_widget_scrollable_init(GtkScrollableInterface *iface)
+editor_widget_scrollable_init(GtkScrollableInterface *iface G_GNUC_UNUSED)
 {
     /* properties handled */
 }
@@ -905,7 +910,7 @@ editor_widget_new(void)
 }
 
 static void
-on_doc_content_changed(Document *doc, void *user_data)
+on_doc_content_changed(Document *doc G_GNUC_UNUSED, void *user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     /* Content changed externally (e.g. from another view). Queue redraw. */

@@ -278,13 +278,13 @@ vite_tab_bar_is_overflowing (ViteTabBar *self)
 
 /* Drop handler for flowbox (catches drops on empty space) */
 static GdkDragAction
-on_flowbox_drop_enter (GtkDropTarget *target, double x, double y, ViteTabBar *self)
+on_flowbox_drop_enter (GtkDropTarget *target G_GNUC_UNUSED, double x G_GNUC_UNUSED, double y G_GNUC_UNUSED, ViteTabBar *self G_GNUC_UNUSED)
 {
     return GDK_ACTION_MOVE;
 }
 
 static gboolean
-on_flowbox_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTabBar *self)
+on_flowbox_drop (GtkDropTarget *target G_GNUC_UNUSED, const GValue *value, double x G_GNUC_UNUSED, double y G_GNUC_UNUSED, ViteTabBar *self)
 {
     /* Stop edge scrolling */
     vite_tab_bar_stop_edge_scroll(self);
@@ -307,7 +307,7 @@ on_flowbox_drop (GtkDropTarget *target, const GValue *value, double x, double y,
 }
 
 static GdkDragAction
-on_tab_bar_drop_motion (GtkDropTarget *target, double x, double y, ViteTabBar *self)
+on_tab_bar_drop_motion (GtkDropTarget *target G_GNUC_UNUSED, double x, double y G_GNUC_UNUSED, ViteTabBar *self)
 {
     /* Handle edge scrolling */
     if (vite_tab_bar_is_overflowing(self)) {
@@ -326,7 +326,7 @@ on_tab_bar_drop_motion (GtkDropTarget *target, double x, double y, ViteTabBar *s
 }
 
 static void
-on_tab_bar_drop_leave (GtkDropTarget *target, ViteTabBar *self)
+on_tab_bar_drop_leave (GtkDropTarget *target G_GNUC_UNUSED, ViteTabBar *self)
 {
     vite_tab_bar_stop_edge_scroll(self);
 }
@@ -342,7 +342,7 @@ typedef struct {
 } TabAnimData;
 
 static gboolean
-tab_anim_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
+tab_anim_tick (GtkWidget *widget G_GNUC_UNUSED, GdkFrameClock *clock G_GNUC_UNUSED, gpointer user_data)
 {
     TabAnimData *anim = user_data;
     
@@ -468,8 +468,8 @@ vite_tab_bar_reorder_tab_to (ViteTabBar *self, ViteTab *tab, int new_position)
 }
 
 static gboolean
-on_scroll_controller_scroll (GtkEventControllerScroll *controller,
-                             double dx, double dy,
+on_scroll_controller_scroll (GtkEventControllerScroll *controller G_GNUC_UNUSED,
+                             double dx G_GNUC_UNUSED, double dy,
                              gpointer user_data)
 {
     ViteTabBar *self = VITE_TAB_BAR(user_data);
@@ -487,7 +487,7 @@ on_scroll_controller_scroll (GtkEventControllerScroll *controller,
 
 
 static void
-on_scroll_start_clicked (GtkButton *btn, ViteTabBar *self)
+on_scroll_start_clicked (GtkButton *btn G_GNUC_UNUSED, ViteTabBar *self)
 {
     GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
     double value = gtk_adjustment_get_value(adj);
@@ -495,7 +495,7 @@ on_scroll_start_clicked (GtkButton *btn, ViteTabBar *self)
 }
 
 static void
-on_scroll_end_clicked (GtkButton *btn, ViteTabBar *self)
+on_scroll_end_clicked (GtkButton *btn G_GNUC_UNUSED, ViteTabBar *self)
 {
     GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
     double value = gtk_adjustment_get_value(adj);

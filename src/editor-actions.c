@@ -476,7 +476,7 @@ editor_widget_indent_selection(EditorWidget *self)
     
     document_begin_undo_group(self->doc);
     
-    for (int i = lines->len - 1; i >= 0; i--) {
+    for (int i = (int)lines->len - 1; i >= 0; i--) {
         size_t line_idx = g_array_index(lines, size_t, i);
         size_t line_start = document_get_offset_of_line(self->doc, line_idx);
         
@@ -540,7 +540,7 @@ editor_widget_unindent_selection(EditorWidget *self)
     
     document_begin_undo_group(self->doc);
     
-    for (int i = lines->len - 1; i >= 0; i--) {
+    for (int i = (int)lines->len - 1; i >= 0; i--) {
         size_t line_idx = g_array_index(lines, size_t, i);
         size_t line_off = document_get_offset_of_line(self->doc, line_idx);
         
@@ -556,7 +556,7 @@ editor_widget_unindent_selection(EditorWidget *self)
                 delete_len = 1;
             } else if (line_text[0] == ' ') {
                 size_t spaces = 0;
-                while (spaces < self->indent_width && spaces < len && line_text[spaces] == ' ') {
+                while (spaces < (size_t)self->indent_width && spaces < len && line_text[spaces] == ' ') {
                     spaces++;
                 }
                 if (spaces > 0) {

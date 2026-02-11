@@ -439,8 +439,6 @@ editor_widget_ensure_metrics(EditorWidget *self)
     pango_context_set_font_description(context, self->font_desc);
     
     PangoFontMetrics *metrics = pango_context_get_metrics(context, self->font_desc, pango_context_get_language(context));
-    // int ascent = pango_font_metrics_get_ascent(metrics); /* Unused variable alert? It was in original code but unused? Original line 855: int ascent = ... */
-    /* original: int ascent = pango_font_metrics_get_ascent(metrics); */
     
     /* Create a temporary layout to measure "Hg" dimensions.
        "Hg" is chosen to capture both the ascender (H) and descender (g) 

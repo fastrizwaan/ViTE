@@ -100,7 +100,7 @@ begin_print(GtkPrintOperation *operation, GtkPrintContext *context, gpointer use
 }
 
 static void
-draw_page(GtkPrintOperation *operation, GtkPrintContext *context, gint page_nr, gpointer user_data)
+draw_page(GtkPrintOperation *operation G_GNUC_UNUSED, GtkPrintContext *context, gint page_nr, gpointer user_data)
 {
     PrintData *data = user_data;
     EditorWidget *self = data->editor;
@@ -273,7 +273,7 @@ editor_print_start(EditorWidget *self)
     /* Free data when done */
     g_signal_connect_swapped(op, "done", G_CALLBACK(print_data_free), data);
     
-    GtkPrintOperationResult res = gtk_print_operation_run(op, 
+    gtk_print_operation_run(op, 
         GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG, 
         GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(self))), 
         NULL);

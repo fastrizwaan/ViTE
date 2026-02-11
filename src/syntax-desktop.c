@@ -24,7 +24,6 @@ syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *t
         if (text[cur] == '[') {
             /* Check if it's a section line (starts with [) - usually matches regex ^\[...\] */
             /* We can enforce start of line logic if needed, but simplistic is fine */
-            size_t start = cur;
             add_attr(attrs, cur, cur+1, &d_number); /* [ -> orange */
             cur++;
             

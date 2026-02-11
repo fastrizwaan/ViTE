@@ -84,7 +84,7 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
         if (total_lines > 1500) {
             double total_sample_height = 0;
             int samples = 50;
-            if (samples > total_lines) samples = total_lines;
+            if ((size_t)samples > total_lines) samples = (int)total_lines;
             
             int step = total_lines / samples;
             if (step < 1) step = 1;
@@ -113,8 +113,7 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
                         PangoRectangle logical;
                         pango_layout_get_extents(layout, NULL, &logical);
                         double h = (double)logical.height / PANGO_SCALE;
-                        if (h < self->line_height) h = self->line_height; /* Sanity floor */
-                        
+                        if (h < self->line_height) h = self->line_height;
                         total_sample_height += h;
                         actual_samples++;
                         g_object_unref(layout);
@@ -167,16 +166,16 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
         }
     }
     
-    double overscroll = widget_height * 0.1;
-    double upper = MAX(content_height + overscroll, widget_height);
+    double overscroll = (double)widget_height * 0.1;
+    double upper = MAX(content_height + overscroll, (double)widget_height);
 
     gtk_adjustment_configure(self->vadjustment,
                              gtk_adjustment_get_value(self->vadjustment),
                              0,
                              upper,
                              self->line_height,      /* step */
-                             widget_height,          /* page */
-                             widget_height);         /* page_size */
+                             (double)widget_height,          /* page */
+                             (double)widget_height);         /* page_size */
 
     /* Horizontal Adjustment */
     double content_width = 0;
@@ -189,13 +188,13 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
             document_foreach_line(self->doc, calculate_max_line_len_cb, &mw_state);
             
             double gutter = get_effective_gutter_width(self);
-            content_width = mw_state.max_len_bytes * self->cached_char_width + gutter + self->padding_left * 2 + 50;
+            content_width = (double)mw_state.max_len_bytes * self->cached_char_width + gutter + self->padding_left * 2 + 50;
         } else {
-            content_width = widget_width * 2.0; 
+            content_width = (double)widget_width * 2.0; 
         }
     }
     
-    if (content_width < widget_width) content_width = widget_width;
+    if (content_width < (double)widget_width) content_width = (double)widget_width;
 
     if (self->hadjustment) {
         gtk_adjustment_configure(self->hadjustment,
@@ -203,8 +202,8 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
                                  0,
                                  content_width,
                                  self->cached_char_width, /* step */
-                                 widget_width,           /* page */
-                                 widget_width);          /* page_size */
+                                 (double)widget_width,           /* page */
+                                 (double)widget_width);          /* page_size */
     }
 }
 
@@ -271,11 +270,9 @@ editor_widget_scroll_to_cursor(EditorWidget *self)
 }
 
 gboolean
-editor_on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer user_data)
+editor_on_scroll(GtkEventControllerScroll *controller G_GNUC_UNUSED, double dx G_GNUC_UNUSED, double dy, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
-    (void)controller;
-    (void)dx;
     
     if (!self->vadjustment) return GDK_EVENT_PROPAGATE;
     
@@ -402,7 +399,7 @@ start_autoscroll(EditorWidget *self, int direction, double speed)
 }
 
 void
-editor_widget_scrollable_init(GtkScrollableInterface *iface)
+editor_widget_scrollable_init(GtkScrollableInterface *iface G_GNUC_UNUSED)
 {
 }
 

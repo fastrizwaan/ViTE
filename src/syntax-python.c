@@ -138,8 +138,6 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
         return;
     }
 
-    gboolean expect_func = FALSE;
-    gboolean expect_class = FALSE;
     gboolean in_lambda_def = FALSE;
     int paren_depth = 0;
     size_t cur = 0;

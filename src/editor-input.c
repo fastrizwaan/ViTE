@@ -18,14 +18,14 @@ static gboolean on_key_released(GtkEventControllerKey *controller, guint keyval,
 static void on_focus_enter(GtkEventControllerFocus *controller, gpointer user_data);
 static void on_focus_leave(GtkEventControllerFocus *controller, gpointer user_data);
 static void on_im_commit(GtkIMContext *context, const char *str, gpointer user_data);
-static void on_ctx_cut(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_cut(EDITOR_WIDGET(user_data)); }
-static void on_ctx_copy(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_copy(EDITOR_WIDGET(user_data)); }
-static void on_ctx_paste(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_paste(EDITOR_WIDGET(user_data)); }
-static void on_ctx_delete(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_delete(EDITOR_WIDGET(user_data)); }
-static void on_ctx_undo(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_undo(EDITOR_WIDGET(user_data)); }
-static void on_ctx_redo(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_redo(EDITOR_WIDGET(user_data)); }
-static void on_ctx_select_all(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_select_all(EDITOR_WIDGET(user_data)); }
-static void on_ctx_change_case(GSimpleAction *action, GVariant *param, gpointer user_data) { editor_widget_change_case(EDITOR_WIDGET(user_data), g_variant_get_int32(param)); }
+static void on_ctx_cut(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_cut(EDITOR_WIDGET(user_data)); }
+static void on_ctx_copy(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_copy(EDITOR_WIDGET(user_data)); }
+static void on_ctx_paste(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_paste(EDITOR_WIDGET(user_data)); }
+static void on_ctx_delete(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_delete(EDITOR_WIDGET(user_data)); }
+static void on_ctx_undo(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_undo(EDITOR_WIDGET(user_data)); }
+static void on_ctx_redo(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_redo(EDITOR_WIDGET(user_data)); }
+static void on_ctx_select_all(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_select_all(EDITOR_WIDGET(user_data)); }
+static void on_ctx_change_case(GSimpleAction *action G_GNUC_UNUSED, GVariant *param, gpointer user_data) { editor_widget_change_case(EDITOR_WIDGET(user_data), g_variant_get_int32(param)); }
 
 /* Undo/Redo Progress Callback */
 void
@@ -160,7 +160,7 @@ editor_widget_set_insert_mode(EditorWidget *self, gboolean insert)
 
 
 static void
-on_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data)
+on_motion(GtkEventControllerMotion *controller G_GNUC_UNUSED, double x, double y G_GNUC_UNUSED, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
 
@@ -197,8 +197,8 @@ on_motion(GtkEventControllerMotion *controller, double x, double y, gpointer use
     }
 }
 
-static void right_click(GtkGestureClick *gesture,
-                        int n_press,
+static void right_click(GtkGestureClick *gesture G_GNUC_UNUSED,
+                        int n_press G_GNUC_UNUSED,
                         double x,
                         double y,
                         gpointer user_data)
@@ -223,7 +223,7 @@ static void right_click(GtkGestureClick *gesture,
     gboolean can_redo = self->doc && document_can_redo(self->doc);
     /* For paste: System clipboard check is async, so we default to TRUE. 
        We could check internal clipboard content if we wanted. */
-    gboolean can_paste = TRUE; 
+    // gboolean can_paste = TRUE; 
 
     GMenu *menu = g_menu_new();
     GSimpleActionGroup *group = g_simple_action_group_new();
@@ -262,14 +262,14 @@ static void right_click(GtkGestureClick *gesture,
 
     /* Actions */
     const GActionEntry ctx_entries[] = {
-        { "cut", on_ctx_cut, NULL, NULL, NULL },
-        { "copy", on_ctx_copy, NULL, NULL, NULL },
-        { "paste", on_ctx_paste, NULL, NULL, NULL },
-        { "delete", on_ctx_delete, NULL, NULL, NULL },
-        { "undo", on_ctx_undo, NULL, NULL, NULL },
-        { "redo", on_ctx_redo, NULL, NULL, NULL },
-        { "select-all", on_ctx_select_all, NULL, NULL, NULL },
-        { "change-case", on_ctx_change_case, "i", NULL, NULL }
+        { "cut", on_ctx_cut, NULL, NULL, NULL, { 0 } },
+        { "copy", on_ctx_copy, NULL, NULL, NULL, { 0 } },
+        { "paste", on_ctx_paste, NULL, NULL, NULL, { 0 } },
+        { "delete", on_ctx_delete, NULL, NULL, NULL, { 0 } },
+        { "undo", on_ctx_undo, NULL, NULL, NULL, { 0 } },
+        { "redo", on_ctx_redo, NULL, NULL, NULL, { 0 } },
+        { "select-all", on_ctx_select_all, NULL, NULL, NULL, { 0 } },
+        { "change-case", on_ctx_change_case, "i", NULL, NULL, { 0 } }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(group), ctx_entries, G_N_ELEMENTS(ctx_entries), self);
 
@@ -417,7 +417,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
                 editor_minimap_get_params(self, height, &dummy_content_h, &dummy_scroll_y, &map_line_h);
 
                 double current_lens_y = (double)vis_start * map_line_h - dummy_scroll_y;
-                double current_lens_h = (double)(vis_end - vis_start) * map_line_h;
+                // double current_lens_h = (double)(vis_end - vis_start) * map_line_h;
 
                 /* Determine if click is above or below the lens */
                 if (clicked_y_in_minimap < current_lens_y) {
@@ -615,7 +615,7 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         } else {
              /* Check if clicking inside selection of ANY cursor */
              gboolean click_in_selection = FALSE;
-             EditorCursor *clicked_cursor = NULL;
+             // EditorCursor *clicked_cursor = NULL;
              
              for (guint c = 0; c < self->cursors->len; c++) {
                  EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
@@ -623,7 +623,6 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
                  size_t sel_end = MAX(cur->cursor_offset, cur->selection_anchor);
                  if (sel_start != sel_end && off >= sel_start && off < sel_end) {
                      click_in_selection = TRUE;
-                     clicked_cursor = cur;
                      break; 
                  }
              }
@@ -720,14 +719,14 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
 
             /* Actions */
             const GActionEntry ctx_entries[] = {
-                { "cut", on_ctx_cut, NULL, NULL, NULL },
-                { "copy", on_ctx_copy, NULL, NULL, NULL },
-                { "paste", on_ctx_paste, NULL, NULL, NULL },
-                { "delete", on_ctx_delete, NULL, NULL, NULL },
-                { "undo", on_ctx_undo, NULL, NULL, NULL },
-                { "redo", on_ctx_redo, NULL, NULL, NULL },
-                { "select-all", on_ctx_select_all, NULL, NULL, NULL },
-                { "change-case", on_ctx_change_case, "i", NULL, NULL }
+                { "cut", on_ctx_cut, NULL, NULL, NULL, {0} },
+                { "copy", on_ctx_copy, NULL, NULL, NULL, {0} },
+                { "paste", on_ctx_paste, NULL, NULL, NULL, {0} },
+                { "delete", on_ctx_delete, NULL, NULL, NULL, {0} },
+                { "undo", on_ctx_undo, NULL, NULL, NULL, {0} },
+                { "redo", on_ctx_redo, NULL, NULL, NULL, {0} },
+                { "select-all", on_ctx_select_all, NULL, NULL, NULL, {0} },
+                { "change-case", on_ctx_change_case, "i", NULL, NULL, {0} }
             };
             g_action_map_add_action_entries(G_ACTION_MAP(group), ctx_entries, G_N_ELEMENTS(ctx_entries), self);
 
@@ -1041,7 +1040,7 @@ editor_widget_drag_drop_finish(EditorWidget *self, size_t drop_off)
 }
 
 static void
-on_drag_end(GtkGestureDrag *gesture, double offset_x, double offset_y, gpointer user_data)
+on_drag_end(GtkGestureDrag *gesture G_GNUC_UNUSED, double offset_x G_GNUC_UNUSED, double offset_y G_GNUC_UNUSED, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     
@@ -1164,7 +1163,7 @@ editor_widget_update_im_cursor_location(EditorWidget *self)
 static gboolean
 on_key_pressed(GtkEventControllerKey *controller,
                guint                  keyval,
-               guint                  keycode,
+               guint                  keycode G_GNUC_UNUSED,
                GdkModifierType        state,
                gpointer               user_data)
 {
@@ -1589,10 +1588,10 @@ on_key_pressed(GtkEventControllerKey *controller,
 }
 
 static gboolean
-on_key_released(GtkEventControllerKey *controller,
+on_key_released(GtkEventControllerKey *controller G_GNUC_UNUSED,
                 guint                  keyval,
-                guint                  keycode,
-                GdkModifierType        state,
+                guint                  keycode G_GNUC_UNUSED,
+                GdkModifierType        state G_GNUC_UNUSED,
                 gpointer               user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -1607,7 +1606,7 @@ on_key_released(GtkEventControllerKey *controller,
 }
 
 static void
-on_focus_enter (GtkEventControllerFocus *controller,
+on_focus_enter (GtkEventControllerFocus *controller G_GNUC_UNUSED,
                 gpointer                 user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -1615,7 +1614,7 @@ on_focus_enter (GtkEventControllerFocus *controller,
 }
 
 static void
-on_focus_leave (GtkEventControllerFocus *controller,
+on_focus_leave (GtkEventControllerFocus *controller G_GNUC_UNUSED,
                 gpointer                 user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
@@ -1624,7 +1623,7 @@ on_focus_leave (GtkEventControllerFocus *controller,
 }
 
 static void
-on_im_commit(GtkIMContext *context, const char *str, gpointer user_data)
+on_im_commit(GtkIMContext *context G_GNUC_UNUSED, const char *str, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     if (!self->doc || !self->cursors) return;

@@ -69,6 +69,11 @@ typedef struct {
 } ContentCallbackData;
 
 typedef struct {
+    void (*func)(Document *doc, size_t start_line, int line_delta, void *user_data);
+    void *user_data;
+} UpdateCallbackData;
+
+typedef struct {
     void (*func)(Document *doc, size_t offset, int64_t delta, void *user_data);
     void *user_data;
 } EditCallbackNode;
@@ -202,8 +207,8 @@ document_get_length(Document *doc)
 void
 document_add_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data)
 {
-    ContentCallbackData *data = g_new(ContentCallbackData, 1);
-    data->func = (void (*)(Document*, void*))callback; /* Hacky cast but we know how to call it */
+    UpdateCallbackData *data = g_new(UpdateCallbackData, 1);
+    data->func = callback;
     data->user_data = user_data;
     doc->update_callbacks = g_list_append(doc->update_callbacks, data);
 }
@@ -212,8 +217,8 @@ void
 document_remove_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data)
 {
     for (GList *l = doc->update_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *data = l->data;
-        if (data->func == (void (*)(Document*, void*))callback && data->user_data == user_data) {
+        UpdateCallbackData *data = l->data;
+        if (data->func == callback && data->user_data == user_data) {
             doc->update_callbacks = g_list_delete_link(doc->update_callbacks, l);
             g_free(data);
             return;
@@ -252,9 +257,8 @@ document_emit_update(Document *doc, size_t start_line, int line_delta)
     }
     
     for (GList *l = doc->update_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *cb = l->data;
-        DocumentUpdateCallback func = (DocumentUpdateCallback)cb->func;
-        func(doc, start_line, line_delta, cb->user_data);
+        UpdateCallbackData *cb = l->data;
+        cb->func(doc, start_line, line_delta, cb->user_data);
     }
 }
 
@@ -1392,9 +1396,7 @@ document_replace_targeted_lines(Document *doc, GArray *target_lines,
             }
             
             const char *lookup_query = case_sensitive ? search_query : lower_query;
-            size_t query_len = strlen(search_query);
-            size_t repl_len = strlen(replacement);
-            
+            size_t query_len = strlen(lookup_query);
             const char *ptr = search;
             const char *orig_ptr = line;
             gboolean has_match = FALSE;
@@ -1407,7 +1409,6 @@ document_replace_targeted_lines(Document *doc, GArray *target_lines,
                 }
                 
                 size_t offset = found - search;
-                size_t orig_offset = orig_ptr - line;
                 size_t advance = offset - (ptr - search);
                 
                 g_string_append_len(new_line, orig_ptr, advance);
@@ -1515,9 +1516,8 @@ search_idle_step(gpointer user_data)
 
 
     
-    size_t query_len = 0;
     if (task->is_literal && task->query) {
-        query_len = strlen(task->query);
+        (void)strlen(task->query);
     }
     
     size_t lines_this_chunk = 0;
@@ -2622,7 +2622,7 @@ typedef struct {
 } DocLoadCtx;
 
 static void
-on_pt_loaded(GObject *source, GAsyncResult *res, gpointer user_data)
+on_pt_loaded(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user_data)
 {
     DocLoadCtx *ctx = user_data;
     

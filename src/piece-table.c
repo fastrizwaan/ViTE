@@ -406,12 +406,7 @@ count_newlines(const char *data, size_t len)
     return count;
 }
 
-static size_t
-piece_newlines(PieceTable *pt, Piece *p)
-{
-    const char *data = get_piece_data(pt, p);
-    return count_newlines(data + p->start, p->length);
-}
+
 
 /* -- Node logic -- */
 
@@ -734,9 +729,7 @@ piece_table_new(const char *filename)
             size_t chunk_size = UTF16_CONVERT_CHUNK_SIZE; /* 64KB chunks (must be even for UTF-16) */
             size_t total_written = 0;
             
-            /* UTF-8 pending bytes buffer for incomplete sequences */
-            char pending[6];
-            size_t pending_len = 0;
+
             
             gint64 work_budget_us = 0;
             while (src_remaining > 0) {
@@ -2322,7 +2315,7 @@ queue_load_progress(PieceTableLoadData *data, double progress, FileEncoding enco
 
 /* Thread worker */
 static void
-load_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable)
+load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer task_data, GCancellable *cancellable)
 {
     PieceTableLoadData *data = task_data;
     const char *filename = data->filename;
@@ -2872,7 +2865,7 @@ void piece_table_insert_from_fd_range(PieceTable *pt, size_t offset, int fd, siz
 }
 
 void
-piece_table_insert_from_fd(PieceTable *pt, size_t offset, int fd, size_t len, size_t lf_count)
+piece_table_insert_from_fd(PieceTable *pt, size_t offset, int fd, size_t len, size_t lf_count G_GNUC_UNUSED)
 {
     if (len == 0 || fd < 0) return;
     

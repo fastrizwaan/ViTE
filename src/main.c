@@ -85,7 +85,7 @@ static void create_new_tab (ViteWindow *win, const char *title, Document *doc);
 static ViteWindow *setup_window(AdwApplicationWindow *window);
 static void activate(GtkApplication *app, gpointer user_data);
 static void update_recent_files_list(GtkListBox *list_box, GtkApplication *app, GtkPopover *popover);
-static void on_action_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data);
+// static void on_action_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data);
 static gboolean filter_recent_items(GtkListBoxRow *row, gpointer user_data);
 static void on_recent_context_menu(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
 static void add_to_local_recents(const char *uri);
@@ -93,21 +93,25 @@ static GList* load_local_recents(void);
 static void save_local_recents(GList *uris);
 static void on_close_recent_btn_clicked(GtkButton *btn, gpointer user_data);
 static void on_open_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer user_data);
+static GtkWidget *get_active_editor(ViteWindow *win);
 
 static void move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position);
 
 
+/* Unused callback */
+#if 0
 static void
-on_file_opened (GObject* source_object, GAsyncResult* res, gpointer user_data)
+on_file_opened (GObject* source_object G_GNUC_UNUSED, GAsyncResult* res G_GNUC_UNUSED, gpointer user_data G_GNUC_UNUSED)
 {
     GtkFileDialog *dialog = GTK_FILE_DIALOG(source_object);
     GtkApplication *app = GTK_APPLICATION(user_data);
     GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
     if (file) {
-        open_file(app, NULL, file, TRUE);
+        open_file(app, NULL, file, FALSE);
         g_object_unref(file);
     }
 }
+#endif
 
 
 
@@ -185,8 +189,8 @@ page_set_document(GtkWidget *page, Document *new_doc)
 }
 
 static GtkWidget *get_editor_from_page(GtkWidget *page);
-static void on_tab_clicked (ViteTab *tab, gpointer user_data);
-static void on_new_tab_clicked_header(GtkButton *btn, gpointer user_data);
+static void on_tab_clicked (ViteTab *tab, gpointer user_data G_GNUC_UNUSED);
+static void on_new_tab_clicked_header(GtkButton *btn G_GNUC_UNUSED, gpointer user_data);
 static void on_new_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_preferences_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_overflow_changed(ViteTabBar *bar, gboolean overflowing, gpointer user_data);
@@ -196,7 +200,6 @@ static GtkWidget *create_view_container(ViteWindow *win, GtkWidget *editor);
 static void on_find_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_replace_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_save_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
-static void on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_discard_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_print_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
@@ -211,19 +214,16 @@ static void on_zoom_reset_action(GSimpleAction *action, GVariant *parameter, gpo
 static void check_close_when_done(ViteWindow *win);
 static void on_close_split_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_close_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
-static void on_reopen_closed_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
-static void on_quit_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+static void on_reopen_closed_tab_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data);
+static void on_quit_window_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data);
 
 static void on_document_modified(Document *doc, gboolean modified, void *user_data);
 static void on_document_content_changed(Document *doc, void *user_data);
 static void on_recent_item_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data);
 static void on_recent_popover_unmap(GtkWidget *popover, gpointer user_data);
-static void on_tab_close_clicked(ViteTab *tab, gpointer user_data);
-static void on_tab_move_to_new_window(ViteTab *tab, gpointer user_data);
+static void on_tab_close_clicked(ViteTab *tab, gpointer user_data G_GNUC_UNUSED);
+static void on_tab_move_to_new_window(ViteTab *tab, gpointer user_data G_GNUC_UNUSED);
 static void load_css(void);
-static GtkWidget *get_active_editor(ViteWindow *win);
-static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
-static GtkWidget *get_active_editor(ViteWindow *win);
 static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
 static void update_window_title_for_tab(ViteTab *tab);
@@ -292,7 +292,7 @@ pop_recently_closed_file(void)
 
 /* Discard Changes Implementation */
 static void
-on_discard_all_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
+on_discard_all_response(AdwAlertDialog *dialog G_GNUC_UNUSED, const char *response, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (g_strcmp0(response, "discard") == 0) {
@@ -316,7 +316,7 @@ on_discard_all_response(AdwAlertDialog *dialog, const char *response, gpointer u
 
 
 static void
-on_discard_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_discard_all_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     
@@ -352,7 +352,7 @@ on_discard_all_action(GSimpleAction *action, GVariant *parameter, gpointer user_
 }
 
 static void
-on_print_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_print_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     GtkWidget *editor = get_active_editor(win);
@@ -362,6 +362,7 @@ on_print_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
     }
 }
 
+#if 0
 static gboolean
 auto_hide_header(gpointer user_data)
 {
@@ -374,6 +375,7 @@ auto_hide_header(gpointer user_data)
     }
     return G_SOURCE_REMOVE;
 }
+#endif
 
 static void
 restore_ui_after_fullscreen_real(ViteWindow *win)
@@ -395,7 +397,7 @@ restore_ui_after_fullscreen_real(ViteWindow *win)
 }
 
 static void
-on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointer user_data)
+on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     gboolean is_fullscreen = gtk_window_is_fullscreen(window);
@@ -424,7 +426,7 @@ on_window_fullscreen_state_changed(GtkWindow *window, GParamSpec *pspec, gpointe
 }
 
 static void
-on_fullscreen_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_fullscreen_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win || !win->window) return;
@@ -438,11 +440,11 @@ on_fullscreen_action(GSimpleAction *action, GVariant *parameter, gpointer user_d
 }
 
 static void
-on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_shortcuts_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
 
-    const char *shortcuts_ui = 
+    const char *shortcuts_ui_1 = 
     "<?xml version='1.0' encoding='UTF-8'?>"
     "<interface>"
     "  <object class='GtkShortcutsWindow' id='shortcuts_window'>"
@@ -502,6 +504,13 @@ on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
     "                <property name='title' translatable='yes'>Reopen Closed Tab</property>"
     "              </object>"
     "            </child>"
+    "          </object>"
+    "        </child>";
+
+    const char *shortcuts_ui_2 = 
+    "        <child>"
+    "          <object class='GtkShortcutsGroup'>"
+    "            <property name='title' translatable='yes'>Editor Actions</property>"
     "            <child>"
     "              <object class='GtkShortcutsShortcut'>"
     "                <property name='accelerator'>&lt;ctrl&gt;P</property>"
@@ -514,11 +523,6 @@ on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
     "                <property name='title' translatable='yes'>Quit</property>"
     "              </object>"
     "            </child>"
-    "          </object>"
-    "        </child>"
-    "        <child>"
-    "          <object class='GtkShortcutsGroup'>"
-    "            <property name='title' translatable='yes'>Editor Actions</property>"
     "            <child>"
     "              <object class='GtkShortcutsShortcut'>"
     "                <property name='accelerator'>&lt;ctrl&gt;Z</property>"
@@ -574,7 +578,9 @@ on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
     "              </object>"
     "            </child>"
     "          </object>"
-    "        </child>"
+    "        </child>";
+
+    const char *shortcuts_ui_3 = 
     "        <child>"
     "          <object class='GtkShortcutsGroup'>"
     "            <property name='title' translatable='yes'>View Options</property>"
@@ -609,7 +615,11 @@ on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
     "  </object>"
     "</interface>";
 
+    char *tmp_ui = g_strconcat(shortcuts_ui_1, shortcuts_ui_2, NULL);
+    char *shortcuts_ui = g_strconcat(tmp_ui, shortcuts_ui_3, NULL);
+    g_free(tmp_ui);
     GtkBuilder *builder = gtk_builder_new_from_string(shortcuts_ui, -1);
+    g_free(shortcuts_ui);
     GtkWidget *win_shortcuts = GTK_WIDGET(gtk_builder_get_object(builder, "shortcuts_window"));
     
     if (win_shortcuts) {
@@ -622,7 +632,7 @@ on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
 }
 
 static void
-on_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_about_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     
@@ -657,7 +667,7 @@ on_open_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer us
 }
 
 static void
-on_open_btn_clicked(GtkButton *btn, gpointer user_data)
+on_open_btn_clicked(GtkButton *btn, gpointer user_data G_GNUC_UNUSED)
 {
     ViteWindow *win = NULL;
     if (btn) {
@@ -789,7 +799,7 @@ update_header_spinner(ViteWindow *win)
 }
 
 static void
-on_tab_bar_visible_changed(GObject *obj, GParamSpec *pspec, gpointer user_data)
+on_tab_bar_visible_changed(GObject *obj G_GNUC_UNUSED, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     update_header_spinner(win);
@@ -800,7 +810,7 @@ static void close_split_view(GtkWidget *overlay);
 static void update_window_title_for_tab(ViteTab *tab);
 
 static void
-on_close_split_clicked(GtkWidget *overlay, gpointer user_data)
+on_close_split_clicked(GtkWidget *overlay, gpointer user_data G_GNUC_UNUSED)
 {
     /* Overlay is the inner overlay. Helper finds the ViewContainer */
     GtkWidget *view_container = gtk_widget_get_parent(overlay);
@@ -810,7 +820,7 @@ on_close_split_clicked(GtkWidget *overlay, gpointer user_data)
 }
 
 static void
-on_overlay_focus_leave(GtkEventControllerFocus *controller, gpointer user_data)
+on_overlay_focus_leave(GtkEventControllerFocus *controller G_GNUC_UNUSED, gpointer user_data)
 {
     GtkWidget *overlay = GTK_WIDGET(user_data);
     GtkWidget *btn = g_object_get_data(G_OBJECT(overlay), "close-btn");
@@ -818,7 +828,7 @@ on_overlay_focus_leave(GtkEventControllerFocus *controller, gpointer user_data)
 }
 
 static void
-on_overlay_focus_enter(GtkEventControllerFocus *controller, gpointer user_data)
+on_overlay_focus_enter(GtkEventControllerFocus *controller G_GNUC_UNUSED, gpointer user_data)
 {
     GtkWidget *overlay = GTK_WIDGET(user_data);
     
@@ -877,7 +887,7 @@ on_overlay_focus_enter(GtkEventControllerFocus *controller, gpointer user_data)
 /* Retry logic with correct pre-fetch */
 
 static void
-on_find_bar_progress(ViteFindReplaceBar *bar, double progress, gboolean busy, gpointer user_data)
+on_find_bar_progress(ViteFindReplaceBar *bar, double progress, gboolean busy, gpointer user_data G_GNUC_UNUSED)
 {
     /* Find the tab containing this bar */
     GtkWidget *widget = GTK_WIDGET(bar);
@@ -914,7 +924,7 @@ on_find_bar_progress(ViteFindReplaceBar *bar, double progress, gboolean busy, gp
 }
 
 static void
-on_editor_undo_redo_progress(EditorWidget *editor, double progress, gboolean busy, gpointer user_data)
+on_editor_undo_redo_progress(EditorWidget *editor, double progress, gboolean busy, gpointer user_data G_GNUC_UNUSED)
 {
     /* Find the tab containing this editor */
     GtkWidget *widget = GTK_WIDGET(editor);
@@ -1047,6 +1057,7 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
     return root_box;
 }
 
+#if 0
 static gboolean
 refresh_all_windows_idle(gpointer user_data)
 {
@@ -1057,6 +1068,7 @@ refresh_all_windows_idle(gpointer user_data)
     }
     return G_SOURCE_REMOVE;
 }
+#endif
 
 static GtkWidget *
 get_scrolled_window_from_view(GtkWidget *view_root)
@@ -1083,7 +1095,7 @@ get_scrolled_window_from_view(GtkWidget *view_root)
 
 
 static void
-on_preferences_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_preferences_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     /* connected with window as user_data */
     ViteWindow *win = (ViteWindow *)user_data;
@@ -1206,12 +1218,14 @@ update_window_title_for_tab(ViteTab *tab)
     g_free(subtitle);
 }
 
+#if 0
 /* Backward compatibility wrapper if needed, but we should update call sites */
 static void
-update_window_title(Document *doc)
+update_window_title(Document *doc G_GNUC_UNUSED)
 {
     /* Deprecated - do nothing */
 }
+#endif
 
 static void
 on_document_content_changed(Document *doc, void *user_data)
@@ -1292,7 +1306,7 @@ on_document_content_changed(Document *doc, void *user_data)
 }
 
 static void
-on_document_modified(Document *doc, gboolean modified, void *user_data)
+on_document_modified(Document *doc G_GNUC_UNUSED, gboolean modified, void *user_data)
 {
     ViteTab *tab = VITE_TAB(user_data);
     vite_tab_set_modified(tab, modified);
@@ -1305,10 +1319,10 @@ on_document_modified(Document *doc, gboolean modified, void *user_data)
 
 /* Transformations for GBinding */
 static gboolean
-transform_boolean_to_variant (GBinding     *binding,
+transform_boolean_to_variant (GBinding     *binding G_GNUC_UNUSED,
                               const GValue *from_value,
                               GValue       *to_value,
-                              gpointer      user_data)
+                              gpointer      user_data G_GNUC_UNUSED)
 {
   gboolean value = g_value_get_boolean (from_value);
   g_value_set_variant (to_value, g_variant_new_boolean (value));
@@ -1316,10 +1330,10 @@ transform_boolean_to_variant (GBinding     *binding,
 }
 
 static gboolean
-transform_variant_to_boolean (GBinding     *binding,
+transform_variant_to_boolean (GBinding     *binding G_GNUC_UNUSED,
                               const GValue *from_value,
                               GValue       *to_value,
-                              gpointer      user_data)
+                              gpointer      user_data G_GNUC_UNUSED)
 {
   GVariant *variant = g_value_get_variant (from_value);
   if (variant && g_variant_is_of_type (variant, G_VARIANT_TYPE_BOOLEAN)) {
@@ -1689,21 +1703,21 @@ do_split(ViteWindow *win, GtkOrientation orientation)
 }
 
 static void
-on_split_right(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_split_right(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (win) do_split(win, GTK_ORIENTATION_HORIZONTAL);
 }
 
 static void
-on_split_down(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_split_down(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (win) do_split(win, GTK_ORIENTATION_VERTICAL);
 }
 
 static void
-on_close_split_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_close_split_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     
@@ -1928,7 +1942,7 @@ load_css(void)
 }
 
 static void
-on_tab_close_clicked (ViteTab *tab, gpointer user_data)
+on_tab_close_clicked (ViteTab *tab, gpointer user_data G_GNUC_UNUSED)
 {
     if (!tab || !VITE_IS_TAB(tab)) return;
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
@@ -2002,7 +2016,7 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data)
 }
 
 static void
-on_new_tab_clicked_header (GtkButton *btn, gpointer user_data)
+on_new_tab_clicked_header (GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
 {
     /* user_data was window in signal connect? */
     /* setup_window: g_signal_connect(btn_new, "clicked", G_CALLBACK(on_new_tab_clicked_header), window); */
@@ -2016,6 +2030,7 @@ on_new_tab_clicked_header (GtkButton *btn, gpointer user_data)
 }
 
 
+#if 0
 static void
 on_action_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data)
 {
@@ -2033,6 +2048,7 @@ on_action_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data
         gtk_popover_popdown(GTK_POPOVER(popover));
     }
 }
+#endif
 
 static void
 on_recent_item_activated(GtkListBox *list_box, GtkListBoxRow *row, gpointer user_data)
@@ -2147,7 +2163,7 @@ update_overflow_idle (gpointer data)
 }
 
 static void
-on_overflow_changed (ViteTabBar *bar, gboolean overflowing, gpointer user_data)
+on_overflow_changed (ViteTabBar *bar G_GNUC_UNUSED, gboolean overflowing, gpointer user_data)
 {
     GtkWidget *btn = GTK_WIDGET(user_data);
     
@@ -2158,7 +2174,7 @@ on_overflow_changed (ViteTabBar *bar, gboolean overflowing, gpointer user_data)
 }
 
 static void
-on_popover_tab_row_activated (GtkListBox *list, GtkListBoxRow *row, gpointer user_data)
+on_popover_tab_row_activated (GtkListBox *list, GtkListBoxRow *row, gpointer user_data G_GNUC_UNUSED)
 {
     ViteTab *tab = g_object_get_data(G_OBJECT(row), "tab");
     if (tab) {
@@ -2170,7 +2186,7 @@ on_popover_tab_row_activated (GtkListBox *list, GtkListBoxRow *row, gpointer use
 }
 
 static void
-update_open_tabs_list (GtkWidget *popover, gpointer user_data)
+update_open_tabs_list (GtkWidget *popover, gpointer user_data G_GNUC_UNUSED)
 {
     GtkListBox *list = GTK_LIST_BOX(user_data);
     if (!list) list = g_object_get_data(G_OBJECT(popover), "list");
@@ -2183,7 +2199,6 @@ update_open_tabs_list (GtkWidget *popover, gpointer user_data)
     }
     
     ViteWindow *win = NULL;
-    GtkRoot *root = gtk_widget_get_root(popover); /* Popover root might be window? No, attached to button. */
     /* Popover parent is set to list widget, which is inside popover? 
        Wait, `gtk_widget_set_parent(popover, GTK_WIDGET(list))` was for context menu. 
        This function `update_open_tabs_list` is for... what?
@@ -2236,12 +2251,12 @@ update_open_tabs_list (GtkWidget *popover, gpointer user_data)
     g_list_free(tabs);
     
     /* Connect activation */
-    g_signal_handlers_disconnect_by_func(list, on_popover_tab_row_activated, NULL);
-    g_signal_connect(list, "row-activated", G_CALLBACK(on_popover_tab_row_activated), NULL);
+    g_signal_handlers_disconnect_by_data(list, list);
+    g_signal_connect(list, "row-activated", G_CALLBACK(on_popover_tab_row_activated), list);
 }
 
 static void
-update_recent_files_list(GtkListBox *list_box, GtkApplication *app, GtkPopover *popover)
+update_recent_files_list(GtkListBox *list_box, GtkApplication *app G_GNUC_UNUSED, GtkPopover *popover G_GNUC_UNUSED)
 {
     /* Clear current list */
     GtkWidget *child;
@@ -2418,20 +2433,20 @@ remove_recent_item(GtkListBoxRow *row)
 }
 
 static void
-on_remove_recent_clicked(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_remove_recent_clicked(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     remove_recent_item(GTK_LIST_BOX_ROW(user_data));
 }
 
 static void
-on_close_recent_btn_clicked(GtkButton *btn, gpointer user_data)
+on_close_recent_btn_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
 {
     GtkListBoxRow *row = GTK_LIST_BOX_ROW(user_data);
     remove_recent_item(row);
 }
 
 static void
-on_clear_all_confirmed(GObject *source_object, GAsyncResult *res, gpointer user_data)
+on_clear_all_confirmed(GObject *source_object, GAsyncResult *res, gpointer user_data G_GNUC_UNUSED)
 {
     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(source_object);
     const char *response = adw_alert_dialog_choose_finish(dialog, res);
@@ -2454,7 +2469,7 @@ on_clear_all_confirmed(GObject *source_object, GAsyncResult *res, gpointer user_
 }
 
 static void
-on_clear_all_clicked(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_clear_all_clicked(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     GtkListBox *list = GTK_LIST_BOX(user_data);
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(list));
@@ -2472,14 +2487,14 @@ on_clear_all_clicked(GSimpleAction *action, GVariant *parameter, gpointer user_d
 }
 
 static void
-on_recent_popover_unmap(GtkWidget *popover, gpointer user_data)
+on_recent_popover_unmap(GtkWidget *popover G_GNUC_UNUSED, gpointer user_data G_GNUC_UNUSED)
 {
     GtkEditable *search_entry = GTK_EDITABLE(user_data);
     gtk_editable_set_text(search_entry, "");
 }
 
 static gboolean
-on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data)
+on_search_key_pressed(GtkEventControllerKey *controller G_GNUC_UNUSED, guint keyval, guint keycode G_GNUC_UNUSED, GdkModifierType state G_GNUC_UNUSED, gpointer user_data)
 {
     GtkPopover *popover = GTK_POPOVER(user_data);
     if (keyval == GDK_KEY_Escape) {
@@ -2490,7 +2505,7 @@ on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint key
 }
 
 static void
-on_recent_context_menu(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
+on_recent_context_menu(GtkGestureClick *gesture G_GNUC_UNUSED, int n_press G_GNUC_UNUSED, double x, double y, gpointer user_data)
 {
     GtkListBox *list = GTK_LIST_BOX(user_data);
     GtkListBoxRow *row = gtk_list_box_get_row_at_y(list, y);
@@ -2525,7 +2540,7 @@ on_recent_context_menu(GtkGestureClick *gesture, int n_press, double x, double y
 }
 
 static void
-on_new_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_new_window_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     GtkApplication *app = gtk_window_get_application(GTK_WINDOW(win->window));
@@ -2533,14 +2548,14 @@ on_new_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_d
 }
 
 static void
-on_new_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_new_tab_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     Document *doc = document_new(NULL);
     create_new_tab(win, "Untitled", doc);
 }
 static void
-on_tab_move_to_new_window (ViteTab *tab, gpointer user_data)
+on_tab_move_to_new_window (ViteTab *tab, gpointer user_data G_GNUC_UNUSED)
 {
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
     ViteWindow *current_win = g_object_get_data(G_OBJECT(root), "vite-window");
@@ -2627,14 +2642,14 @@ move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
 }
 
 static void
-on_tab_dropped(ViteTabBar *tab_bar, ViteTab *tab, int position, gpointer user_data)
+on_tab_dropped(ViteTabBar *tab_bar G_GNUC_UNUSED, ViteTab *tab, int position, gpointer user_data)
 {
     ViteWindow *target_win = (ViteWindow *)user_data;
     move_tab_to_window(target_win, tab, position);
 }
 
 static gboolean
-on_window_drop(GtkDropTarget *target, const GValue *value, double x, double y, ViteWindow *win)
+on_window_drop(GtkDropTarget *target G_GNUC_UNUSED, const GValue *value, double x G_GNUC_UNUSED, double y G_GNUC_UNUSED, ViteWindow *win)
 {
 
     if (value && G_VALUE_HOLDS(value, VITE_TYPE_TAB)) {
@@ -2692,7 +2707,6 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), editor);
     
     const char *doc_path = document_get_file_path(doc);
-    gboolean lang_set = FALSE;
     const char *selected_lang_id = "plain";  // Default to plain text
     
     if (doc_path) {
@@ -2707,7 +2721,6 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
                 g_ascii_strcasecmp(ext, "yaml") == 0 || g_ascii_strcasecmp(ext, "yml") == 0) {
                 editor_widget_set_language(EDITOR_WIDGET(editor), ext);
                 selected_lang_id = ext;
-                lang_set = TRUE;
             }
         }
     }
@@ -2743,7 +2756,7 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     gtk_box_append(GTK_BOX(page_root), overlay);
     
     char id[32];
-    sprintf(id, "page_%p", page_root);
+    sprintf(id, "page_%p", (void *)page_root);
     
     if (win->stack) {
         gtk_stack_add_named(win->stack, page_root, id);
@@ -2795,9 +2808,9 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     defer_focus(editor);
 }
 
+#if 0
 static void
-
-on_close_curr_tab_clicked (GtkButton *btn, gpointer user_data)
+on_close_curr_tab_clicked (GtkButton *btn, gpointer user_data G_GNUC_UNUSED)
 {
     ViteWindow *win = NULL;
     if (btn) {
@@ -2812,9 +2825,10 @@ on_close_curr_tab_clicked (GtkButton *btn, gpointer user_data)
         on_tab_close_clicked(active, NULL);
     }
 }
+#endif
 
 static void
-on_close_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_close_tab_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win || !win->tab_bar) return;
@@ -2825,7 +2839,7 @@ on_close_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_da
 }
 
 static void
-on_reopen_closed_tab_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_reopen_closed_tab_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win || !win->window) return;
@@ -2846,7 +2860,7 @@ on_reopen_closed_tab_action(GSimpleAction *action, GVariant *parameter, gpointer
 }
 
 static void
-on_quit_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_quit_window_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win || !win->window) return;
@@ -2860,7 +2874,7 @@ on_quit_window_action(GSimpleAction *action, GVariant *parameter, gpointer user_
 /* Go to Line Popover Implementation */
 
 static void
-on_goto_line_popever_closed(GtkPopover *popover, gpointer user_data)
+on_goto_line_popever_closed(GtkPopover *popover, gpointer user_data G_GNUC_UNUSED)
 {
     gtk_widget_unparent(GTK_WIDGET(popover));
 }
@@ -2946,7 +2960,7 @@ show_goto_line_popover(GtkWidget *parent_widget, EditorWidget *editor)
 }
 
 static void
-on_filter_action(GSimpleAction *action, GVariant *param, gpointer user_data)
+on_filter_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     GtkWidget *active = get_active_editor(win);
@@ -2962,7 +2976,7 @@ on_filter_action(GSimpleAction *action, GVariant *param, gpointer user_data)
         GtkWidget *find_bar = GTK_WIDGET(g_object_get_data(G_OBJECT(parent), "find_bar"));
         if (find_bar) {
             /* Check if we are already in filter mode and visible */
-            gboolean visible = gtk_widget_get_visible(find_bar);
+            // gboolean visible = gtk_widget_get_visible(find_bar);
             /* TODO: Check if currently in filter mode? 
                ViteFindReplaceBar doesn't expose a getter for mode easily, 
                but we can just show it. If it was find mode, it switches to filter.
@@ -3017,7 +3031,7 @@ on_filter_action(GSimpleAction *action, GVariant *param, gpointer user_data)
 }
 
 static void
-on_goto_line_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_goto_line_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     
@@ -3108,7 +3122,7 @@ get_active_editor(ViteWindow *win)
 }
 
 static void
-on_status_bar_file_type_changed(ViteStatusBar *bar, const char *lang_id, gpointer user_data)
+on_status_bar_file_type_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *lang_id, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
@@ -3135,7 +3149,7 @@ on_status_bar_file_type_changed(ViteStatusBar *bar, const char *lang_id, gpointe
 }
 
 static void
-on_status_bar_line_ending_changed(ViteStatusBar *bar, const char *line_ending_id, gpointer user_data)
+on_status_bar_line_ending_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *line_ending_id, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
@@ -3160,7 +3174,7 @@ on_status_bar_line_ending_changed(ViteStatusBar *bar, const char *line_ending_id
 }
 
 static void
-on_status_bar_encoding_changed(ViteStatusBar *bar, const char *encoding_id, gpointer user_data)
+on_status_bar_encoding_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *encoding_id, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
@@ -3240,7 +3254,7 @@ update_status_bar_from_editor(ViteWindow *win, GtkWidget *editor)
 }
 
 static void
-on_editor_notify_indentation(GObject *editor, GParamSpec *pspec, gpointer user_data)
+on_editor_notify_indentation(GObject *editor, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     
@@ -3252,7 +3266,7 @@ on_editor_notify_indentation(GObject *editor, GParamSpec *pspec, gpointer user_d
 }
 
 static void
-on_fullscreen_hover_motion(GtkEventControllerMotion *controller, double x, double y, gpointer user_data)
+on_fullscreen_hover_motion(GtkEventControllerMotion *controller G_GNUC_UNUSED, double x G_GNUC_UNUSED, double y, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win || !win->window || !win->titlebar_container) return;
@@ -3290,7 +3304,7 @@ on_fullscreen_hover_motion(GtkEventControllerMotion *controller, double x, doubl
 
 
 static void
-on_set_encoding(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_set_encoding(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     g_simple_action_set_state(action, value);
@@ -3307,7 +3321,7 @@ on_set_encoding(GSimpleAction *action, GVariant *value, gpointer user_data)
 }
 
 static void
-on_set_line_ending(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_set_line_ending(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     g_simple_action_set_state(action, value);
@@ -3324,7 +3338,7 @@ on_set_line_ending(GSimpleAction *action, GVariant *value, gpointer user_data)
 }
 
 static void
-on_set_file_type(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_set_file_type(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     g_simple_action_set_state(action, value);
@@ -3353,7 +3367,7 @@ on_set_file_type(GSimpleAction *action, GVariant *value, gpointer user_data)
 }
 
 static void
-on_show_line_numbers_toggled(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_show_line_numbers_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     gboolean state = g_variant_get_boolean(value);
@@ -3366,7 +3380,7 @@ on_show_line_numbers_toggled(GSimpleAction *action, GVariant *value, gpointer us
 }
 
 static void
-on_enable_word_wrap_toggled(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_enable_word_wrap_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     gboolean state = g_variant_get_boolean(value);
@@ -3379,7 +3393,7 @@ on_enable_word_wrap_toggled(GSimpleAction *action, GVariant *value, gpointer use
 }
 
 static void
-on_show_status_bar_toggled(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_show_status_bar_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     gboolean state = g_variant_get_boolean(value);
@@ -3391,7 +3405,7 @@ on_show_status_bar_toggled(GSimpleAction *action, GVariant *value, gpointer user
 }
 
 static void
-on_toggle_insert_mode(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_toggle_insert_mode(GSimpleAction *action G_GNUC_UNUSED, GVariant *value G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     GtkWidget *editor = get_active_editor(win);
@@ -3423,7 +3437,7 @@ check_close_when_done(ViteWindow *win)
 }
 
 static void
-on_select_all_action(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_select_all_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *value G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     GtkWidget *editor = get_active_editor(win);
@@ -3433,7 +3447,7 @@ on_select_all_action(GSimpleAction *action, GVariant *value, gpointer user_data)
 }
 
 static void
-on_zoom_in_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_zoom_in_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     GtkWidget *editor = get_active_editor(win);
@@ -3443,7 +3457,7 @@ on_zoom_in_action(GSimpleAction *action, GVariant *parameter, gpointer user_data
 }
 
 static void
-on_zoom_out_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_zoom_out_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     GtkWidget *editor = get_active_editor(win);
@@ -3453,7 +3467,7 @@ on_zoom_out_action(GSimpleAction *action, GVariant *parameter, gpointer user_dat
 }
 
 static void
-on_zoom_reset_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_zoom_reset_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     GtkWidget *editor = get_active_editor(win);
@@ -3463,7 +3477,7 @@ on_zoom_reset_action(GSimpleAction *action, GVariant *parameter, gpointer user_d
 }
 
 static void
-on_window_close_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
+on_window_close_response(AdwAlertDialog *dialog G_GNUC_UNUSED, const char *response, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     
@@ -3555,7 +3569,7 @@ on_window_close_request(GtkWindow *window, gpointer user_data)
 }
 
 static void
-on_enable_folding_toggled(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_enable_folding_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     gboolean enabled = g_variant_get_boolean(value);
@@ -3569,7 +3583,7 @@ on_enable_folding_toggled(GSimpleAction *action, GVariant *value, gpointer user_
 }
 
 static void
-on_enable_minimap_toggled(GSimpleAction *action, GVariant *value, gpointer user_data)
+on_enable_minimap_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     gboolean enabled = g_variant_get_boolean(value);
@@ -3585,7 +3599,7 @@ on_enable_minimap_toggled(GSimpleAction *action, GVariant *value, gpointer user_
 
 
 static void
-on_window_destroy(GtkWidget *widget, gpointer user_data)
+on_window_destroy(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win) return;
@@ -3682,41 +3696,41 @@ setup_window(AdwApplicationWindow *window)
 
 
     const GActionEntry win_entries[] = {
-        { "new-window", on_new_window_action, NULL, NULL, NULL },
-        { "new-tab", on_new_tab_action, NULL, NULL, NULL },
-        { "split-right", on_split_right, NULL, NULL, NULL },
-        { "split-down", on_split_down, NULL, NULL, NULL },
-        { "close-view", on_close_split_action, NULL, NULL, NULL },
-        { "close-tab", on_close_tab_action, NULL, NULL, NULL },
-        { "reopen-closed-tab", on_reopen_closed_tab_action, NULL, NULL, NULL },
-        { "quit-window", on_quit_window_action, NULL, NULL, NULL },
-        { "preferences", on_preferences_action, NULL, NULL, NULL },
-        { "goto-line", on_goto_line_action, NULL, NULL, NULL },
-        { "find", on_find_action, NULL, NULL, NULL },
-        { "replace", on_replace_action, NULL, NULL, NULL },
-        { "save", on_save_action, NULL, NULL, NULL },
-        { "save-as", on_save_as_action, NULL, NULL, NULL },
-        { "discard-changes", on_discard_all_action, NULL, NULL, NULL },
-        { "filter", on_filter_action, NULL, NULL, NULL },
-        { "print", on_print_action, NULL, NULL, NULL },
-        { "fullscreen", on_fullscreen_action, NULL, NULL, NULL },
-        { "shortcuts", on_shortcuts_action, NULL, NULL, NULL },
-        { "about", on_about_action, NULL, NULL, NULL },
-        { "zoom-in", on_zoom_in_action, NULL, NULL, NULL },
-        { "zoom-out", on_zoom_out_action, NULL, NULL, NULL },
-        { "zoom-reset", on_zoom_reset_action, NULL, NULL, NULL },
+        { "new-window", on_new_window_action, NULL, NULL, NULL, { 0 } },
+        { "new-tab", on_new_tab_action, NULL, NULL, NULL, { 0 } },
+        { "split-right", on_split_right, NULL, NULL, NULL, { 0 } },
+        { "split-down", on_split_down, NULL, NULL, NULL, { 0 } },
+        { "close-view", on_close_split_action, NULL, NULL, NULL, { 0 } },
+        { "close-tab", on_close_tab_action, NULL, NULL, NULL, { 0 } },
+        { "reopen-closed-tab", on_reopen_closed_tab_action, NULL, NULL, NULL, { 0 } },
+        { "quit-window", on_quit_window_action, NULL, NULL, NULL, { 0 } },
+        { "preferences", on_preferences_action, NULL, NULL, NULL, { 0 } },
+        { "goto-line", on_goto_line_action, NULL, NULL, NULL, { 0 } },
+        { "find", on_find_action, NULL, NULL, NULL, { 0 } },
+        { "replace", on_replace_action, NULL, NULL, NULL, { 0 } },
+        { "save", on_save_action, NULL, NULL, NULL, { 0 } },
+        { "save-as", on_save_as_action, NULL, NULL, NULL, { 0 } },
+        { "discard-changes", on_discard_all_action, NULL, NULL, NULL, { 0 } },
+        { "filter", on_filter_action, NULL, NULL, NULL, { 0 } },
+        { "print", on_print_action, NULL, NULL, NULL, { 0 } },
+        { "fullscreen", on_fullscreen_action, NULL, NULL, NULL, { 0 } },
+        { "shortcuts", on_shortcuts_action, NULL, NULL, NULL, { 0 } },
+        { "about", on_about_action, NULL, NULL, NULL, { 0 } },
+        { "zoom-in", on_zoom_in_action, NULL, NULL, NULL, { 0 } },
+        { "zoom-out", on_zoom_out_action, NULL, NULL, NULL, { 0 } },
+        { "zoom-reset", on_zoom_reset_action, NULL, NULL, NULL, { 0 } },
         
         /* Stateful Actions */
-        { "set-encoding", NULL, "s", "'utf-8'", on_set_encoding },
-        { "set-line-ending", NULL, "s", "'lf'", on_set_line_ending },
-        { "set-file-type", NULL, "s", "'plain'", on_set_file_type },
-        { "show-line-numbers", NULL, NULL, "true", on_show_line_numbers_toggled },
-        { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled },
-        { "enable-folding", NULL, NULL, "false", on_enable_folding_toggled },
-        { "enable-minimap", NULL, NULL, "false", on_enable_minimap_toggled },
-        { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled },
-        { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL },
-        { "select-all", on_select_all_action, NULL, NULL, NULL }
+        { "set-encoding", NULL, "s", "'utf-8'", on_set_encoding, { 0 } },
+        { "set-line-ending", NULL, "s", "'lf'", on_set_line_ending, { 0 } },
+        { "set-file-type", NULL, "s", "'plain'", on_set_file_type, { 0 } },
+        { "show-line-numbers", NULL, NULL, "true", on_show_line_numbers_toggled, { 0 } },
+        { "enable-word-wrap", NULL, NULL, "true", on_enable_word_wrap_toggled, { 0 } },
+        { "enable-folding", NULL, NULL, "false", on_enable_folding_toggled, { 0 } },
+        { "enable-minimap", NULL, NULL, "false", on_enable_minimap_toggled, { 0 } },
+        { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled, { 0 } },
+        { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL, { 0 } },
+        { "select-all", on_select_all_action, NULL, NULL, NULL, { 0 } }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
     
@@ -3750,7 +3764,7 @@ setup_window(AdwApplicationWindow *window)
         { GDK_KEY_KP_0, GDK_CONTROL_MASK, "win.zoom-reset" }
     };
 
-    for (int i = 0; i < G_N_ELEMENTS(keys); i++) {
+    for (int i = 0; i < (int)G_N_ELEMENTS(keys); i++) {
         GtkShortcut *sc = gtk_shortcut_new(gtk_keyval_trigger_new(keys[i].key, keys[i].mods), 
                                            gtk_named_action_new(keys[i].action));
         gtk_shortcut_controller_add_shortcut(shortcuts, sc);
@@ -4040,7 +4054,7 @@ setup_window(AdwApplicationWindow *window)
 
 
 static void
-activate(GtkApplication *app, gpointer user_data)
+activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
 {
     AdwApplicationWindow *window = ADW_APPLICATION_WINDOW(adw_application_window_new(app));
     ViteWindow *win = setup_window(window);
@@ -4508,7 +4522,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
 
 
 static void
-on_open(GtkApplication *app, GFile **files, int n_files, char *hint, gpointer user_data)
+on_open(GtkApplication *app, GFile **files, int n_files, char *hint G_GNUC_UNUSED, gpointer user_data G_GNUC_UNUSED)
 {
     for (int i = 0; i < n_files; i++) open_file(app, NULL, files[i], TRUE);
 }
@@ -4574,7 +4588,7 @@ get_active_overlay(ViteWindow *win) {
     return NULL;
 }
 
-static void on_find_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+static void on_find_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data) {
     ViteWindow *win = (ViteWindow *)user_data;
     GtkWidget *overlay = get_active_overlay(win);
     if (!overlay) return;
@@ -4597,7 +4611,7 @@ static void on_find_action(GSimpleAction *action, GVariant *parameter, gpointer 
     }
 }
 
-static void on_replace_action(GSimpleAction *action, GVariant *parameter, gpointer user_data) {
+static void on_replace_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data) {
     ViteWindow *win = (ViteWindow *)user_data;
     GtkWidget *overlay = get_active_overlay(win);
     if (!overlay) return;
@@ -4685,15 +4699,17 @@ on_save_progress_idle(gpointer user_data)
     return G_SOURCE_REMOVE;
 }
 
+#if 0
 /* Worker Thread */
 static void
 save_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable)
 {
     /* Unused in this implementation, wrapper below is used */
 }
+#endif
 
 static void
-save_worker_wrapper(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable)
+save_worker_wrapper(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer task_data, GCancellable *cancellable)
 {
     SaveWorkerData *data = task_data;
     DocumentSaveTask *save_task = data->task;
@@ -4733,7 +4749,7 @@ save_worker_wrapper(GTask *task, gpointer source_object, gpointer task_data, GCa
 }
 
 static void
-on_save_complete(GObject *source, GAsyncResult *res, gpointer user_data)
+on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user_data)
 {
     SaveWorkerData *data = user_data;
     GError *error = NULL;
@@ -4903,7 +4919,7 @@ on_save_as_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer
 }
 
 static void
-on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_save_as_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win) return;
@@ -4945,7 +4961,7 @@ on_save_as_action(GSimpleAction *action, GVariant *parameter, gpointer user_data
 }
 
 static void
-on_save_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_save_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     if (!win) return;

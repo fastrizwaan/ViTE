@@ -35,7 +35,6 @@ editor_minimap_get_params(EditorWidget *self, double viewport_h,
     /* Calculate Scroll Y */
     double map_scroll_y = 0;
 
-    double editor_h = gtk_widget_get_height(GTK_WIDGET(self));
     double editor_line_h = self->line_height;
 
     double total_editor_h = 0;
@@ -126,11 +125,6 @@ editor_minimap_draw(EditorWidget *self, GtkSnapshot *snapshot, double x, double 
     /* Get shared params */
     double map_content_h, map_scroll_y, map_line_h;
     editor_minimap_get_params(self, h, &map_content_h, &map_scroll_y, &map_line_h);
-
-    double editor_line_h = self->line_height;
-    double scroll_y = 0;
-    if (self->vadjustment) scroll_y = gtk_adjustment_get_value(self->vadjustment);
-    double editor_h = gtk_widget_get_height(GTK_WIDGET(self));
 
     /* Calculate start line index */
     size_t start_line = (size_t)(map_scroll_y / map_line_h);
@@ -229,8 +223,8 @@ editor_minimap_draw(EditorWidget *self, GtkSnapshot *snapshot, double x, double 
             do {
                 int start, end;
                 pango_attr_iterator_range(iter, &start, &end);
-                if (start >= len) break;
-                if (end > len) end = len;
+                if ((size_t)start >= len) break;
+                if ((size_t)end > len) end = (int)len;
 
                 GdkRGBA fg = self->color_text;
                 PangoAttribute *fg_attr = pango_attr_iterator_get(iter, PANGO_ATTR_FOREGROUND);

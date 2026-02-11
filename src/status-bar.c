@@ -118,7 +118,7 @@ create_line_ending_menu(ViteStatusBar *self)
     
     self->line_ending_group = g_simple_action_group_new();
     GActionEntry entries[] = {
-        { "set", NULL, "s", "'lf'", on_line_ending_activated }
+        { "set", NULL, "s", "'lf'", on_line_ending_activated, { 0 } }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(self->line_ending_group), entries, G_N_ELEMENTS(entries), self);
     gtk_widget_insert_action_group(self->line_ending_btn, "le", G_ACTION_GROUP(self->line_ending_group));
@@ -152,7 +152,7 @@ create_encoding_menu(ViteStatusBar *self)
     
     self->encoding_group = g_simple_action_group_new();
     GActionEntry entries[] = {
-        { "set", NULL, "s", "'utf-8'", on_encoding_activated }
+        { "set", NULL, "s", "'utf-8'", on_encoding_activated, { 0 } }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(self->encoding_group), entries, G_N_ELEMENTS(entries), self);
     gtk_widget_insert_action_group(self->encoding_btn, "enc", G_ACTION_GROUP(self->encoding_group));
@@ -180,7 +180,7 @@ create_separator(void)
 }
 
 static GtkWidget *
-create_menu_button(ViteStatusBar *self, GtkWidget **label_out, const char *tooltip, const char *default_text)
+create_menu_button(ViteStatusBar *self G_GNUC_UNUSED, GtkWidget **label_out, const char *tooltip, const char *default_text)
 {
     GtkWidget *btn = gtk_menu_button_new();
     gtk_widget_add_css_class(btn, "flat");
@@ -290,8 +290,8 @@ create_indent_menu(ViteStatusBar *self)
     
     /* Width Action (Stateful INT) */
     GActionEntry entries[] = {
-        { "set-width", NULL, "i", "4", on_indent_width_chk },
-        { "set-style", NULL, "i", "1", on_indent_style_chk }
+        { "set-width", NULL, "i", "4", on_indent_width_chk, { 0 } },
+        { "set-style", NULL, "i", "1", on_indent_style_chk, { 0 } }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(self->indent_group), entries, G_N_ELEMENTS(entries), self);
     gtk_widget_insert_action_group(self->tab_width_btn, "indent", G_ACTION_GROUP(self->indent_group));
@@ -317,7 +317,7 @@ create_indent_menu(ViteStatusBar *self)
 }
 
 static void
-on_search_changed(GtkEditable *entry, gpointer user_data)
+on_search_changed(GtkEditable *entry G_GNUC_UNUSED, gpointer user_data)
 {
     GtkListBox *listbox = GTK_LIST_BOX(user_data);
     gtk_list_box_invalidate_filter(listbox);

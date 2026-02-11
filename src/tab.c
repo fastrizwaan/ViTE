@@ -198,7 +198,7 @@ vite_tab_finalize (GObject *object)
 static void on_close_clicked (GtkButton *btn, gpointer user_data);
 
 static GdkContentProvider *
-on_drag_prepare (GtkDragSource *source, double x, double y, ViteTab *self)
+on_drag_prepare (GtkDragSource *source G_GNUC_UNUSED, double x, double y, ViteTab *self)
 {
     /* Store drag start position for use in on_drag_begin */
     self->drag_start_x = x;
@@ -237,7 +237,7 @@ vite_tab_get_last_focused_child(ViteTab *self)
 
 /* Tick callback for visual overlay - applies Y constraints */
 static gboolean
-on_visual_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer user_data)
+on_visual_tick (GtkWidget *widget G_GNUC_UNUSED, GdkFrameClock *clock G_GNUC_UNUSED, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     
@@ -387,7 +387,7 @@ on_drag_begin (GtkDragSource *source, GdkDrag *drag, ViteTab *self)
 }
 
 static void
-on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab *self)
+on_drag_end (GtkDragSource *source G_GNUC_UNUSED, GdkDrag *drag G_GNUC_UNUSED, gboolean delete_data, ViteTab *self)
 {
     /* Remove visual overlay */
     if (self->visual_tick_id) {
@@ -451,10 +451,10 @@ on_drag_end (GtkDragSource *source, GdkDrag *drag, gboolean delete_data, ViteTab
 
 
 static void
-pressed_cb(GtkGestureClick *gesture,
-           int n_press,
-           double x,
-           double y,
+pressed_cb(GtkGestureClick *gesture G_GNUC_UNUSED,
+           int n_press G_GNUC_UNUSED,
+           double x G_GNUC_UNUSED,
+           double y G_GNUC_UNUSED,
            gpointer user_data)
 {
     GtkWidget *tab = user_data;
@@ -462,10 +462,10 @@ pressed_cb(GtkGestureClick *gesture,
 }
 
 static void
-released_cb(GtkGestureClick *gesture,
-            int n_press,
-            double x,
-            double y,
+released_cb(GtkGestureClick *gesture G_GNUC_UNUSED,
+            int n_press G_GNUC_UNUSED,
+            double x G_GNUC_UNUSED,
+            double y G_GNUC_UNUSED,
             gpointer user_data)
 {
     GtkWidget *tab = user_data;
@@ -473,7 +473,7 @@ released_cb(GtkGestureClick *gesture,
 }
 
 static void
-on_click_pressed (GtkGestureClick *gesture, int n_press, double x, double y, ViteTab *self)
+on_click_pressed (GtkGestureClick *gesture, int n_press G_GNUC_UNUSED, double x, double y, ViteTab *self)
 {
     /* Use gtk_widget_pick to see if the close button is under the pointer */
     GtkWidget *picked = gtk_widget_pick(GTK_WIDGET(self), x, y, GTK_PICK_DEFAULT);
@@ -504,7 +504,7 @@ update_close_button_state (ViteTab *self)
 }
 
 static void
-on_enter (GtkEventControllerMotion *controller, double x, double y, ViteTab *self)
+on_enter (GtkEventControllerMotion *controller G_GNUC_UNUSED, double x G_GNUC_UNUSED, double y G_GNUC_UNUSED, ViteTab *self)
 {
     self->is_hovered = TRUE;
     update_close_button_state(self);
@@ -517,7 +517,7 @@ on_enter (GtkEventControllerMotion *controller, double x, double y, ViteTab *sel
 }
 
 static void
-on_leave (GtkEventControllerMotion *controller, ViteTab *self)
+on_leave (GtkEventControllerMotion *controller G_GNUC_UNUSED, ViteTab *self)
 {
     self->is_hovered = FALSE;
     update_close_button_state(self);
@@ -531,13 +531,13 @@ on_leave (GtkEventControllerMotion *controller, ViteTab *self)
 
 /* Drop target handlers for tab reordering */
 static GdkDragAction
-on_drop_enter (GtkDropTarget *target, double x, double y, ViteTab *self)
+on_drop_enter (GtkDropTarget *target G_GNUC_UNUSED, double x G_GNUC_UNUSED, double y G_GNUC_UNUSED, ViteTab *self G_GNUC_UNUSED)
 {
     return GDK_ACTION_MOVE;
 }
 
 static GdkDragAction
-on_drop_motion (GtkDropTarget *target, double x, double y, ViteTab *self)
+on_drop_motion (GtkDropTarget *target G_GNUC_UNUSED, double x, double y G_GNUC_UNUSED, ViteTab *self)
 {
     const GValue *value = gtk_drop_target_get_value(target);
     if (!value || !G_VALUE_HOLDS(value, VITE_TYPE_TAB)) return 0;
@@ -580,7 +580,7 @@ on_drop_motion (GtkDropTarget *target, double x, double y, ViteTab *self)
 }
 
 static void
-on_drop_leave (GtkDropTarget *target, ViteTab *self)
+on_drop_leave (GtkDropTarget *target G_GNUC_UNUSED, ViteTab *self)
 {
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
     if (tab_bar) {
@@ -589,7 +589,7 @@ on_drop_leave (GtkDropTarget *target, ViteTab *self)
 }
 
 static gboolean
-on_drop_drop (GtkDropTarget *target, const GValue *value, double x, double y, ViteTab *self)
+on_drop_drop (GtkDropTarget *target G_GNUC_UNUSED, const GValue *value, double x G_GNUC_UNUSED, double y G_GNUC_UNUSED, ViteTab *self)
 {
     /* Stop edge scrolling */
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
@@ -791,7 +791,7 @@ vite_tab_class_init (ViteTabClass *class)
 }
 
 static void
-on_context_menu_move_left (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_context_menu_move_left (GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
@@ -807,7 +807,7 @@ on_context_menu_move_left (GSimpleAction *action, GVariant *parameter, gpointer 
 }
 
 static void
-on_context_menu_move_right (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_context_menu_move_right (GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
 
     ViteTab *self = VITE_TAB(user_data);
@@ -825,14 +825,14 @@ on_context_menu_move_right (GSimpleAction *action, GVariant *parameter, gpointer
 }
 
 static void
-on_context_menu_move_new_window (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_context_menu_move_new_window (GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     g_signal_emit_by_name(self, "move-to-new-window");
 }
 
 static void
-on_context_menu_close_left (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_context_menu_close_left (GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
@@ -856,7 +856,7 @@ on_context_menu_close_left (GSimpleAction *action, GVariant *parameter, gpointer
 }
 
 static void
-on_context_menu_close_right (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_context_menu_close_right (GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
@@ -876,7 +876,7 @@ on_context_menu_close_right (GSimpleAction *action, GVariant *parameter, gpointe
 }
 
 static void
-on_context_menu_close_other (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_context_menu_close_other (GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     ViteTabBar *tab_bar = g_object_get_data(G_OBJECT(self), "tab-bar");
@@ -893,14 +893,14 @@ on_context_menu_close_other (GSimpleAction *action, GVariant *parameter, gpointe
 }
 
 static void
-on_context_menu_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
+on_context_menu_close (GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     g_signal_emit_by_name(self, "close-clicked");
 }
 
 static void
-on_close_response(AdwAlertDialog *dialog, const char *response, gpointer user_data)
+on_close_response(AdwAlertDialog *dialog G_GNUC_UNUSED, const char *response, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     g_object_ref(self); /* Ensure alive */
@@ -924,7 +924,7 @@ on_close_response(AdwAlertDialog *dialog, const char *response, gpointer user_da
 }
 
 static void
-on_close_clicked (GtkButton *btn, gpointer user_data)
+on_close_clicked (GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     
@@ -970,7 +970,7 @@ on_close_clicked (GtkButton *btn, gpointer user_data)
 static void on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data);
 
 static void
-on_context_menu (GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
+on_context_menu (GtkGestureClick *gesture G_GNUC_UNUSED, int n_press G_GNUC_UNUSED, double x, double y, gpointer user_data)
 {
     ViteTab *self = VITE_TAB(user_data);
     

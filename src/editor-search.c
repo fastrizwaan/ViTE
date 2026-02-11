@@ -375,7 +375,7 @@ editor_widget_replace_current(EditorWidget *self, const char *replacement, gbool
     }
 
     /* Check if current selection matches the match (safety) */
-    EditorCursor *c = editor_widget_get_primary_cursor(self);
+    // EditorCursor *c = editor_widget_get_primary_cursor(self);
     /* Strict check: cursor must wrap the match */
     /* Relaxed check: just replace at location */
     
