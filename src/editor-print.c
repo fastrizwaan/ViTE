@@ -200,7 +200,7 @@ draw_page(GtkPrintOperation *operation, GtkPrintContext *context, gint page_nr, 
         
         /* Text */
         size_t len;
-        char *text = document_get_line_truncated(self->doc, i, &len, 4096);
+        char *text = document_get_line_truncated(self->doc, i, &len, 4096, NULL);
         if (!text) {
              text = g_strdup("");
              len = 0;

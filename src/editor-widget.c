@@ -160,7 +160,7 @@ syntax_scan_step(gpointer user_data)
     
     for (size_t i = processed; i < limit; i++) {
         size_t len;
-        char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN);
+        char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN, NULL);
         if (text) {
              size_t tlen = len;
              while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;
@@ -956,7 +956,7 @@ editor_widget_set_document(EditorWidget *self, Document *doc)
         /* Scan everything for state correctness (separate loop from rendering) */
         for (size_t i = 0; i < total; i++) {
              size_t len;
-             char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN);
+             char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN, NULL);
              if (text) {
                  size_t tlen = len;
                  while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;
@@ -999,7 +999,7 @@ editor_widget_set_language(EditorWidget *self, const char *lang)
             /* Scan ENTIRE file for state */
             for (size_t i = 0; i < total; i++) {
                  size_t len;
-                 char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN);
+                 char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN, NULL);
                  if (text) {
                      size_t tlen = len;
                      while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;

@@ -158,7 +158,7 @@ size_t piece_table_get_offset_of_line(PieceTable *pt, size_t line_index);
    We will return a freshly allocated string for the line. */
 char *piece_table_get_line(PieceTable *pt, size_t line_index, size_t *out_len);
 size_t piece_table_get_line_into(PieceTable *pt, size_t line_index, char *buf, size_t buf_len);
-char *piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_len, size_t max_len);
+char *piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_len, size_t max_len, size_t *out_full_len);
 size_t piece_table_get_line_length(PieceTable *pt, size_t line_index);
 void piece_table_foreach_line(PieceTable *pt, void (*func)(size_t line_len, void *user_data), void *user_data);
 

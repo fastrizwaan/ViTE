@@ -182,6 +182,12 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         pango_tab_array_set_tab(tab_array, 0, PANGO_TAB_LEFT, tab_width_pango);
     }
 
+    /* Per-frame PangoLayout Reuse (Optimization) */
+    PangoLayout *layout = pango_layout_new(context);
+    PangoLayout *lnum_layout = self->show_line_numbers ? pango_layout_new(context) : NULL;
+    PangoLayout *fold_layout = self->enable_folding ? pango_layout_new(context) : NULL;
+    PangoLayout *temp_layout = pango_layout_new(context); /* Reusable temp layout */
+
     for (size_t i = 0; i < count_lines; ++i) {
         size_t visual_line_idx = start_line + i;
         if (visual_line_idx >= max_lines) break;
@@ -199,7 +205,19 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         double render_y_offset = 0; /* Y offset (for vertical virtualization) */
         double virtual_full_height = 0; /* Full height of a massive wrapped line */
 
-        size_t full_len = document_get_line_length(self->doc, phys_line);
+        /* Optimization: Get text and full length in one go to avoid double-scan */
+        size_t fetched_len = 0;
+        size_t full_len = 0;
+        char *pre_fetched_text = document_get_line_truncated(self->doc, phys_line, &fetched_len, 4096, &full_len);
+        
+        if (full_len <= 4096) {
+            text = pre_fetched_text;
+            len = fetched_len;
+        } else {
+            g_free(pre_fetched_text);
+        }
+
+        /* size_t full_len = document_get_line_length(self->doc, phys_line); -- Removed */
 
         /* Optimization for Long Lines (> 4KB) */
         if (full_len > 4096) {
@@ -319,7 +337,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
              
              /* UTF-8 Safety */
         } else {
-             text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024);
+             text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024, NULL);
         }
         // fprintf(stderr, "[DEBUG] snapshot loop: len=%zu virtualized=%d\n", len, is_virtualized);
 
@@ -343,7 +361,12 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             len--;
         }
 
-        PangoLayout *layout = pango_layout_new(context);
+        /* Reuse cached layout */
+        // PangoLayout *layout = pango_layout_new(context); 
+        pango_layout_set_attributes(layout, NULL); /* Clear old attributes */
+        pango_layout_set_width(layout, -1); /* Reset width default */
+        pango_layout_set_indent(layout, 0);
+        
         pango_layout_set_font_description(layout, self->font_desc);
         int pango_len = (len > MAX_PANGO_LINE_LEN) ? MAX_PANGO_LINE_LEN : (int)len;
         pango_layout_set_text(layout, text, pango_len);
@@ -501,7 +524,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             char lnum_buf[32];
             snprintf(lnum_buf, sizeof(lnum_buf), "%zu", phys_line + 1);
             
-            PangoLayout *lnum_layout = pango_layout_new(context);
+            if (!lnum_layout) lnum_layout = pango_layout_new(context);
+            /* PangoLayout *lnum_layout = pango_layout_new(context); -- Reused */
             pango_layout_set_font_description(lnum_layout, self->font_desc);
             
             pango_layout_set_text(lnum_layout, lnum_buf, -1);
@@ -524,7 +548,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
             gtk_snapshot_append_layout(snapshot, lnum_layout, &gutter_fg);
             gtk_snapshot_restore(snapshot);
             
-            g_object_unref(lnum_layout);
+            /* g_object_unref(lnum_layout); -- Reused */
             
             /* Draw Fold Marker - In its own column on the right */
             if (self->enable_folding && self->fold_ranges) {
@@ -535,7 +559,8 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                     /* Show if collapsed (always) OR if mouse is hovering in gutter */
                     if (is_collapsed || self->mouse_in_gutter) {
                         const char *marker = is_collapsed ? "▶" : "▼";
-                        PangoLayout *fold_layout = pango_layout_new(context);
+                        if (!fold_layout) fold_layout = pango_layout_new(context);
+                        /* PangoLayout *fold_layout = pango_layout_new(context); -- Reused */
                         pango_layout_set_font_description(fold_layout, self->font_desc);
                         pango_layout_set_text(fold_layout, marker, -1);
                         pango_layout_set_alignment(fold_layout, PANGO_ALIGN_CENTER);
@@ -551,7 +576,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                         gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(gutter_w - fold_w + 2, current_y_pos + self->padding_top + centering_offset));
                         gtk_snapshot_append_layout(snapshot, fold_layout, &fold_fg);
                         gtk_snapshot_restore(snapshot);
-                        g_object_unref(fold_layout);
+                        /* g_object_unref(fold_layout); -- Reused */
                     }
                 }
             }
@@ -935,11 +960,14 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                              
                          /* 3. Draw Inverted Text (Background Color) on top */
                          if (char_len > 0 && char_text) {
-                             /* Create temp layout for the single character */
-                             PangoLayout *char_layout = pango_layout_new(context);
-                             pango_layout_set_font_description(char_layout, self->font_desc);
-                             if (tab_array) pango_layout_set_tabs(char_layout, tab_array);
-                             pango_layout_set_text(char_layout, char_text, char_len);
+                            /* Reuse temp layout */
+                            PangoLayout *char_layout = temp_layout; 
+                            pango_layout_set_attributes(char_layout, NULL);
+                            pango_layout_set_width(char_layout, -1);
+                            
+                            pango_layout_set_font_description(char_layout, self->font_desc);
+                            if (tab_array) pango_layout_set_tabs(char_layout, tab_array);
+                            pango_layout_set_text(char_layout, char_text, char_len);
                              
                              GdkRGBA inv_text_color = bg_color;
                              inv_text_color.alpha = self->cursor_alpha;
@@ -985,7 +1013,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
                              gtk_snapshot_append_layout(snapshot, char_layout, &inv_text_color);
                              
                              gtk_snapshot_restore(snapshot);
-                             g_object_unref(char_layout);
+                             /* g_object_unref(char_layout); -- Reused */
                          }
                      }
                 }
@@ -1030,7 +1058,7 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         
         gtk_snapshot_pop(snapshot);
         gtk_snapshot_restore(snapshot);
-        g_object_unref(layout);
+        /* g_object_unref(layout); -- Reused */
         g_free(text);
 
         if (current_y_pos > height) {
@@ -1038,6 +1066,11 @@ editor_widget_snapshot(GtkWidget *widget, GtkSnapshot *snapshot)
         }
     }
     // fprintf(stderr, "[DEBUG] snapshot: Loop finished\n");
+    if (layout) g_object_unref(layout);
+    if (lnum_layout) g_object_unref(lnum_layout);
+    if (fold_layout) g_object_unref(fold_layout);
+    if (temp_layout) g_object_unref(temp_layout);
+    
     if (tab_array) pango_tab_array_free(tab_array);
 
     /* Draw DnD Overlays */

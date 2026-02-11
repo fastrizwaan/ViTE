@@ -195,7 +195,7 @@ editor_minimap_draw(EditorWidget *self, GtkSnapshot *snapshot, double x, double 
             physical_line_idx = line_idx;
         }
 
-        text = document_get_line_truncated(self->doc, physical_line_idx, &len, 1024);
+        text = document_get_line_truncated(self->doc, physical_line_idx, &len, 1024, NULL);
         if (!text) continue;
 
         while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r')) len--;

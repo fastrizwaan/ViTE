@@ -533,7 +533,7 @@ PangoLayout *
 create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len)
 {
     size_t len;
-    char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024);
+    char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024, NULL);
     if (!text) return NULL;
     
     /* SAFETY: Embedded nulls can confuse Pango if we pass explict length > strlen. */

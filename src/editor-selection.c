@@ -102,7 +102,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             continue;
         }
         size_t len;
-        char *text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024);
+        char *text = document_get_line_truncated(self->doc, phys_line, &len, MAX_PANGO_LINE_LEN + 1024, NULL);
         
         if (!g_utf8_validate(text, len, NULL)) {
              char *safe = g_utf8_make_valid(text, len);

@@ -169,9 +169,9 @@ document_get_line(Document *doc, size_t line_index, size_t *len)
 }
 
 char *
-document_get_line_truncated(Document *doc, size_t line_index, size_t *out_len, size_t max_len)
+document_get_line_truncated(Document *doc, size_t line_index, size_t *out_len, size_t max_len, size_t *out_full_len)
 {
-    return piece_table_get_line_truncated(doc->pt, line_index, out_len, max_len);
+    return piece_table_get_line_truncated(doc->pt, line_index, out_len, max_len, out_full_len);
 }
 
 size_t

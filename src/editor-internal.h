@@ -161,6 +161,9 @@ struct _EditorWidget {
     
     /* UI State */
     gboolean mouse_in_gutter;
+    
+    /* Performance Caches */
+    PangoLayout *cached_layout;
 };
 
 /* Helper Functions */

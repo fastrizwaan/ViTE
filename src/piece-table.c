@@ -353,21 +353,42 @@ detect_newline_style_raw(const char *data, size_t size, FileEncoding enc, Newlin
 static const char *
 find_next_newline(const char *ptr, const char *end, int *nl_len)
 {
-    while (ptr < end) {
-        if (*ptr == '\n') {
-            if (nl_len) *nl_len = 1;
-            return ptr;
-        } else if (*ptr == '\r') {
-            if (ptr + 1 < end && *(ptr + 1) == '\n') {
-                if (nl_len) *nl_len = 2;
-                return ptr;
-            } else {
-                if (nl_len) *nl_len = 1;
-                return ptr;
-            }
+    if (ptr >= end) return NULL;
+    
+    size_t len = end - ptr;
+    const char *p_lf = (const char *)memchr(ptr, '\n', len);
+    
+    if (p_lf) {
+        /* Check if there's a CR before the LF */
+        size_t len_to_lf = p_lf - ptr;
+        const char *p_cr = (const char *)memchr(ptr, '\r', len_to_lf);
+        
+        if (p_cr) {
+             /* CR found before LF */
+             if (p_cr + 1 < end && p_cr[1] == '\n') {
+                 if (nl_len) *nl_len = 2;
+             } else {
+                 if (nl_len) *nl_len = 1; /* Lone CR */
+             }
+             return p_cr;
         }
-        ptr++;
+        
+        /* No CR before LF. LF is the winner. */
+        if (nl_len) *nl_len = 1;
+        return p_lf;
+    } else {
+        /* No LF. Only CR possible. */
+        const char *p_cr = (const char *)memchr(ptr, '\r', len);
+        if (p_cr) {
+             /* Check for CRLF - but we know no LF in this range?
+                Wait, if LF was found past 'end'? p_lf is NULL means no LF in [ptr, end).
+                So CR cannot be followed by LF within range.
+             */
+             if (nl_len) *nl_len = 1;
+             return p_cr;
+        }
     }
+    
     return NULL;
 }
 
@@ -2120,18 +2141,21 @@ piece_table_iter_advance(PieceTableIter *iter, size_t len)
         size_t excess = iter->offset_in_node - iter->current_node->piece.length;
         
         iter->current_node = node_next_in_order(iter->current_node);
+
         iter->offset_in_node = excess; /* Should be 0 usually if we consume exactly chunk, 
                                           but if we advanced arbitrary amount, we carry over */
     }
 }
 char *
-piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_len, size_t max_len)
+piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_len, size_t max_len, size_t *out_full_len)
 {
+    size_t total_scanned_len = 0;
     size_t start_lf, start_byte;
     PieceNode *node = find_node_for_line(pt, line_index, &start_lf, &start_byte);
     
     if (!node) {
         *out_len = 0;
+        if (out_full_len) *out_full_len = 0;
         return g_strdup("");
     }
     
@@ -2159,57 +2183,59 @@ piece_table_get_line_truncated(PieceTable *pt, size_t line_index, size_t *out_le
     const char *ptr = data + internal_offset;
     const char *node_end = data + len;
     
-    const char *eol = find_next_newline(ptr, node_end, &nl_len);
-    if (eol) {
-        size_t chunk = eol - ptr + nl_len;
-        if (chunk > max_len) chunk = max_len;
-        g_string_append_len(res, ptr, chunk); 
-        *out_len = res->len;
-        return g_string_free(res, FALSE);
-    }
-    
-    size_t chunk = node_end - ptr;
-    if (chunk > max_len) chunk = max_len;
-    g_string_append_len(res, ptr, chunk);
-    
-    if (res->len >= max_len) {
-        *out_len = res->len;
-        return g_string_free(res, FALSE);
-    }
-    
     PieceNode *curr = node;
-    while (res->len < max_len) {
-        if (curr->right) {
-            curr = curr->right;
-            while (curr->left) curr = curr->left;
-        } else {
-            while (curr->parent && curr == curr->parent->right) {
-                curr = curr->parent;
-            }
-            curr = curr->parent;
-            if (!curr) break;
-        }
+    /* gboolean found_eol = FALSE; -- Unused */
+    
+    /* Loop through nodes until EOL found */
+    while (curr) {
+        const char *eol = find_next_newline(ptr, node_end, &nl_len);
         
-        data = get_piece_data(pt, &curr->piece);
-        data += curr->piece.start;
-        len = curr->piece.length;
-        ptr = data;
-        node_end = data + len;
-        
-        eol = find_next_newline(ptr, node_end, &nl_len);
         if (eol) {
             size_t chunk = eol - ptr + nl_len;
-            if (res->len + chunk > max_len) chunk = max_len - res->len;
-            g_string_append_len(res, ptr, chunk);
-            break; /* Found newline, stop */
+            total_scanned_len += chunk;
+            
+            if (res->len < max_len) {
+                size_t append_len = chunk;
+                if (res->len + append_len > max_len) append_len = max_len - res->len;
+                g_string_append_len(res, ptr, append_len);
+            }
+            /* found_eol = TRUE; */
+            break;
         } else {
             size_t chunk = node_end - ptr;
-            if (res->len + chunk > max_len) chunk = max_len - res->len;
-            g_string_append_len(res, ptr, chunk);
+            total_scanned_len += chunk;
+            
+            if (res->len < max_len) {
+                size_t append_len = chunk;
+                if (res->len + append_len > max_len) append_len = max_len - res->len;
+                g_string_append_len(res, ptr, append_len);
+            } else if (!out_full_len) {
+                /* Buffer full and no need to calculate full length */
+                break;
+            }
+            
+            /* Advance to next node */
+            if (curr->right) {
+                curr = curr->right;
+                while (curr->left) curr = curr->left;
+            } else {
+                while (curr->parent && curr == curr->parent->right) {
+                    curr = curr->parent;
+                }
+                curr = curr->parent;
+            }
+            
+            if (!curr) break;
+            
+            data = get_piece_data(pt, &curr->piece);
+            ptr = data + curr->piece.start;
+            node_end = ptr + curr->piece.length;
         }
     }
     
     *out_len = res->len;
+    if (out_full_len) *out_full_len = total_scanned_len;
+    
     return g_string_free(res, FALSE);
 }
 

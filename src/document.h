@@ -82,7 +82,7 @@ void document_remove_edit_callback(Document *doc, DocumentEditCallback callback,
 /* Content Access */
 char *document_get_line(Document *doc, size_t line_index, size_t *len);
 size_t document_get_line_into(Document *doc, size_t line_index, char *buf, size_t buf_len);
-char *document_get_line_truncated(Document *doc, size_t line_index, size_t *out_len, size_t max_len);
+char *document_get_line_truncated(Document *doc, size_t line_index, size_t *out_len, size_t max_len, size_t *out_full_len);
 size_t document_get_line_length(Document *doc, size_t line_index);
 void document_foreach_line(Document *doc, void (*func)(size_t line_len, void *user_data), void *user_data);
 size_t document_get_line_count(Document *doc);
