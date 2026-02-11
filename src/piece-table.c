@@ -483,13 +483,23 @@ splay(PieceTable *pt, PieceNode *x)
             rotate_left(pt, x->parent->parent);
             rotate_left(pt, x->parent);
         } else if (x->parent->left == x && x->parent->parent->right == x->parent) {
+            /* RL Case */
             rotate_right(pt, x->parent);
-            rotate_left(pt, x->parent); /* Note: Parent of x changes after first rotate */
-            /* Wait, standard splay double rotation */
-            /* If x is left child of right child */
+            rotate_left(pt, x->parent);
+        } else if (x->parent->right == x && x->parent->parent->left == x->parent) {
+            /* LR Case */
+            rotate_left(pt, x->parent);
+            rotate_right(pt, x->parent);
         } else {
-             /* x is right child of left child, or left of right */
-             // Just doing simple splay steps is easiest
+             /* Should not happen if all cases covered? 
+                Actually, this handles the Zig case (no grandparent) but we check that at top.
+                Wait, if we have grandparent, one of the above 4 cases MUST match.
+                So this else is unreachable if grandparent exists?
+                Top check: if (!x->parent->parent) ...
+                So here grandparent exists.
+                LL, RR, RL, LR are the only 4 possibilities.
+                So we can just put the LR logic here or as else if.
+                Safe to leave else as fallback/unreachable or for safety. */
              if (x == x->parent->left) {
                  rotate_right(pt, x->parent);
              } else {

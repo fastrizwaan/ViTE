@@ -112,7 +112,7 @@ resource_can_allocate(size_t size)
     size_t max_alloc = (size_t)(available * MAX_ALLOC_FRACTION);
     
     /* Also ensure we leave MIN_FREE_RAM after allocation */
-    if (size > available - MIN_FREE_RAM) {
+    if (available < MIN_FREE_RAM || size > available - MIN_FREE_RAM) {
         g_debug("resource_can_allocate: Would leave too little free RAM");
         return FALSE;
     }
@@ -139,7 +139,7 @@ resource_can_write_disk(const char *path, size_t size)
     }
     
     /* Ensure we leave MIN_FREE_DISK after write */
-    if (size > available - MIN_FREE_DISK) {
+    if (available < MIN_FREE_DISK || size > available - MIN_FREE_DISK) {
         g_debug("resource_can_write_disk: Would leave too little free disk space");
         return FALSE;
     }

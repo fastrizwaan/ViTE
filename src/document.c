@@ -68,6 +68,11 @@ typedef struct {
     void *user_data;
 } ContentCallbackData;
 
+typedef struct {
+    void (*func)(Document *doc, size_t offset, int64_t delta, void *user_data);
+    void *user_data;
+} EditCallbackNode;
+
 static void
 check_modification_state(Document *doc)
 {
@@ -259,9 +264,8 @@ document_emit_edit(Document *doc, size_t offset, int64_t delta_len)
     if (doc->callbacks_suspended) return;
     
     for (GList *l = doc->edit_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *cb = l->data;
-        DocumentEditCallback func = (DocumentEditCallback)cb->func;
-        func(doc, offset, delta_len, cb->user_data);
+        EditCallbackNode *cb = l->data;
+        cb->func(doc, offset, delta_len, cb->user_data);
     }
 }
 
@@ -821,8 +825,8 @@ document_remove_content_callback(Document *doc, DocumentContentCallback callback
 void
 document_add_edit_callback(Document *doc, DocumentEditCallback callback, void *user_data)
 {
-    ContentCallbackData *cb = g_new(ContentCallbackData, 1);
-    cb->func = (void (*)(Document *, void *))callback;
+    EditCallbackNode *cb = g_new(EditCallbackNode, 1);
+    cb->func = callback;
     cb->user_data = user_data;
     doc->edit_callbacks = g_list_append(doc->edit_callbacks, cb);
 }
@@ -831,8 +835,8 @@ void
 document_remove_edit_callback(Document *doc, DocumentEditCallback callback, void *user_data)
 {
     for (GList *l = doc->edit_callbacks; l != NULL; l = l->next) {
-        ContentCallbackData *cb = l->data;
-        if (cb->func == (void (*)(Document *, void *))callback && cb->user_data == user_data) {
+        EditCallbackNode *cb = l->data;
+        if (cb->func == callback && cb->user_data == user_data) {
             doc->edit_callbacks = g_list_delete_link(doc->edit_callbacks, l);
             g_free(cb);
             return;
@@ -1991,6 +1995,8 @@ struct _ReplaceTask {
     guint idle_id;
     ReplaceProgressCallback callback;
     void *user_data;
+    
+    uint64_t start_change_count; /* Fix for Race Condition */
 };
 
 /* Helper to count newlines in a string */
@@ -2018,6 +2024,23 @@ static gboolean replace_idle_step(gpointer user_data) {
     if (!task) return G_SOURCE_REMOVE;
     
     Document *doc = task->doc;
+    
+    /* Time Budget: 15ms (slightly higher for bulk throughput) */
+    /* Race Condition Check: Abort if document modified by user/other actions */
+    if (doc->pt && doc->pt->change_count != task->start_change_count) {
+        /* Document modified externally! Cancel and notify? 
+           We just silently abort or print warning. */
+        g_warning("Async replace aborted: Document modified concurrently.");
+        
+        if (task->callback) {
+             /* -1 signals generic failure/abort */
+            task->callback(0, task->total_count, FALSE, task->user_data); 
+        }
+        
+        task->idle_id = 0;
+        replace_task_free(task);
+        return G_SOURCE_REMOVE;
+    }
     
     /* Time Budget: 15ms (slightly higher for bulk throughput) */
     gint64 start_time = g_get_monotonic_time();
@@ -2181,6 +2204,9 @@ document_replace_async_start(Document *doc, GArray *matches, const char *replace
     task->callback = callback;
     task->user_data = user_data;
     
+    /* Record starting version to detect concurrent modifications */
+    task->start_change_count = doc->pt->change_count;
+    
     /* Do NOT suspend callbacks or begin undo group yet. 
        We are just building the string in background. 
        We will do the actual replace (and suspend/undo) in the final step.
@@ -2264,6 +2290,8 @@ struct _StreamingReplaceTask {
     guint idle_id;
     ReplaceProgressCallback callback;
     void *user_data;
+    
+    uint64_t start_change_count; /* Fix for Race Condition */
 };
 
 static void streaming_replace_task_free(StreamingReplaceTask *task) {
@@ -2286,6 +2314,18 @@ static gboolean streaming_replace_idle_step(gpointer user_data) {
     if (!task) return G_SOURCE_REMOVE;
     
     Document *doc = task->doc;
+    
+    /* Race Condition Check */
+    if (doc->pt && doc->pt->change_count != task->start_change_count) {
+        /* Document modified externally! Cancel and notify? */
+        g_warning("Streaming replace aborted: Document modified concurrently.");
+        if (task->callback) {
+            task->callback(0, task->total_lines, FALSE, task->user_data); 
+        }
+        task->idle_id = 0;
+        streaming_replace_task_free(task);
+        return G_SOURCE_REMOVE;
+    }
     
     /* Time Budget: 50ms (increased for speed) */
     gint64 start_time = g_get_monotonic_time();
@@ -2543,6 +2583,8 @@ document_replace_streaming_start(Document *doc, const char *raw_query, const cha
     task->replace_count = 0;
     task->output_size = 0;
     task->lf_count = 0;
+    
+    task->start_change_count = doc->pt->change_count;
     
     task->idle_id = g_idle_add(streaming_replace_idle_step, task);
     return task;
