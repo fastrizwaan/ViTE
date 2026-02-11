@@ -21,8 +21,8 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:zoom="1"
-     inkscape:cx="115.5"
-     inkscape:cy="42"
+     inkscape:cx="98.5"
+     inkscape:cy="41"
      inkscape:window-width="2560"
      inkscape:window-height="1371"
      inkscape:window-x="0"
@@ -34,21 +34,13 @@
     <linearGradient
        id="linearGradient27">
       <stop
-         offset="0"
+         offset="0.3198736"
          stop-color="#c0bfbc"
          id="stop22" />
       <stop
-         offset="0.52539539"
+         offset="0.68496948"
          stop-color="#fff"
          id="stop23" />
-      <stop
-         offset="0.70797205"
-         stop-color="#deddda"
-         id="stop24" />
-      <stop
-         offset=".9"
-         stop-color="#deddda"
-         id="stop25" />
       <stop
          offset="1"
          stop-color="#fff"
@@ -56,7 +48,8 @@
       <stop
          offset="1"
          stop-color="#c0bfbc"
-         id="stop27" />
+         id="stop27"
+         style="stop-color:#ffffff;stop-opacity:1;" />
     </linearGradient>
     <linearGradient
        id="a">
@@ -212,6 +205,15 @@
          stop-color="#cb2b31"
          id="stop10-5" />
     </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient27"
+       id="linearGradient12"
+       x1="-0.17724131"
+       y1="231.59209"
+       x2="50.729805"
+       y2="231.61368"
+       gradientUnits="userSpaceOnUse" />
   </defs>
   <g
      transform="translate(0 -172)"
@@ -381,7 +383,7 @@
          x="-17.233816"
          transform="matrix(-0.99999631,-0.00271764,-0.00180237,0.99999838,0,0)" />
       <path
-         style="fill:#f6f5f4;stroke-width:0.466924"
+         style="fill:url(#linearGradient12);stroke-width:0.466924"
          d="m -0.17724131,228.5593 50.89524031,0.0432 0.02361,6.02235 c -1.6e-4,-0.0408 -50.89524113,-0.0432 -50.89524113,-0.0432 z"
          id="path39"
          sodipodi:nodetypes="ccccc" />
