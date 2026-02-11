@@ -974,7 +974,7 @@ on_drag_update(GtkGestureDrag *gesture, double offset_x, double offset_y, gpoint
     
     if (allow_autoscroll) {
         int widget_height = gtk_widget_get_height(GTK_WIDGET(self));
-        int edge_zone = 100; /* Pixels from edge to trigger scroll */
+        int edge_zone = 25; /* Pixels from edge to trigger scroll (reduced from 100) */
         
         if (self->drag_y < edge_zone) {
             /* Top edge */
