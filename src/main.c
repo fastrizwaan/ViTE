@@ -2339,12 +2339,14 @@ update_recent_files_list(GtkListBox *list_box, GtkApplication *app G_GNUC_UNUSED
         GtkWidget *title_label = gtk_label_new(display_name);
         gtk_widget_set_halign(title_label, GTK_ALIGN_START);
         gtk_label_set_ellipsize(GTK_LABEL(title_label), PANGO_ELLIPSIZE_END);
+        gtk_label_set_max_width_chars(GTK_LABEL(title_label), 60);
         gtk_box_append(GTK_BOX(vbox), title_label);
 
         if (subtitle) {
             GtkWidget *subtitle_label = gtk_label_new(subtitle);
             gtk_widget_set_halign(subtitle_label, GTK_ALIGN_START);
             gtk_label_set_ellipsize(GTK_LABEL(subtitle_label), PANGO_ELLIPSIZE_END);
+            gtk_label_set_max_width_chars(GTK_LABEL(subtitle_label), 60);
             gtk_widget_add_css_class(subtitle_label, "dim-label");
             gtk_widget_add_css_class(subtitle_label, "caption");
             gtk_box_append(GTK_BOX(vbox), subtitle_label);
@@ -3883,6 +3885,7 @@ setup_window(AdwApplicationWindow *window)
 
     /* Scrolled Window */
     GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 400);
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scrolled), 400);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scrolled), TRUE);
     gtk_widget_add_css_class(scrolled, "recent-list");
