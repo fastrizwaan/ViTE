@@ -483,6 +483,7 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
                     double ry = pango_units_to_double(lr.y) + centering_offset, rh = pango_units_to_double(lr.height);
                     if (l_idx == 0) { rh += ry; ry = 0; }
                     if (l_idx == l_cnt - 1) rh = layout_h - ry;
+                    
                     if (si2 >= (size_t)ls && si1 <= (size_t)le) {
                         int *rs, nrs; pango_layout_line_get_x_ranges(pl, (int)MAX(si1, (size_t)ls), (int)MIN(si2, (size_t)le), &rs, &nrs);
                         for (int r = 0; r < nrs; r++) {
@@ -491,8 +492,16 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
                         }
                         g_free(rs);
                         if (s2 > line_start_off + chunk_padding + (size_t)le) {
-                            int xp; pango_layout_line_index_to_x(pl, le, FALSE, &xp);
-                            double dx = pango_units_to_double(xp), ew = (pl->resolved_dir == PANGO_DIRECTION_RTL) ? dx : (width + scroll_x) - dx, ex = (pl->resolved_dir == PANGO_DIRECTION_RTL) ? 0 : dx;
+                            double dx, ew, ex;
+                            if (pl->resolved_dir == PANGO_DIRECTION_RTL) {
+                                dx = pango_units_to_double(lr.x);
+                                ew = dx;
+                                ex = 0;
+                            } else {
+                                dx = pango_units_to_double(lr.x + lr.width);
+                                ew = (width + scroll_x) - dx;
+                                ex = dx;
+                            }
                             if (ew > 0) gtk_snapshot_append_color(snapshot, &(GdkRGBA){0.2, 0.4, 0.8, 0.35}, &GRAPHENE_RECT_INIT((float)ex, (float)ry, (float)ew, (float)rh));
                         }
                     }
