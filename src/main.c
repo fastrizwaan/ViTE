@@ -3156,6 +3156,12 @@ on_status_bar_file_type_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *la
             g_simple_action_set_state(G_SIMPLE_ACTION(action), g_variant_new_string(action_lang_id));
         }
     }
+    
+    /* Grab focus back to editor */
+    GtkWidget *active_editor = get_active_editor(win);
+    if (active_editor && GTK_IS_WIDGET(active_editor)) {
+         gtk_widget_grab_focus(active_editor);
+    }
 }
 
 static void
@@ -3181,6 +3187,12 @@ on_status_bar_line_ending_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *
         /* ID should match keys: lf, crlf, cr */
         g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(line_ending_id));
     }
+    
+    /* Grab focus back to editor */
+    GtkWidget *active_editor = get_active_editor(win);
+    if (active_editor && GTK_IS_WIDGET(active_editor)) {
+         gtk_widget_grab_focus(active_editor);
+    }
 }
 
 static void
@@ -3205,6 +3217,12 @@ on_status_bar_encoding_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *enc
     if (act) {
         g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(encoding_id));
     }
+    
+    /* Grab focus back to editor */
+    GtkWidget *active_editor = get_active_editor(win);
+    if (active_editor && GTK_IS_WIDGET(active_editor)) {
+         gtk_widget_grab_focus(active_editor);
+    }
 }
 
 static void
@@ -3228,6 +3246,12 @@ on_status_bar_indent_width_changed(ViteStatusBar *bar, int width, gpointer user_
             g_ptr_array_unref(editors);
         }
     }
+    
+    /* Grab focus back to editor */
+    GtkWidget *active_editor = get_active_editor(win);
+    if (active_editor && GTK_IS_WIDGET(active_editor)) {
+         gtk_widget_grab_focus(active_editor);
+    }
 }
 
 static void
@@ -3249,6 +3273,12 @@ on_status_bar_indent_style_changed(ViteStatusBar *bar, int style, gpointer user_
             }
             g_ptr_array_unref(editors);
         }
+    }
+    
+    /* Grab focus back to editor */
+    GtkWidget *active_editor = get_active_editor(win);
+    if (active_editor && GTK_IS_WIDGET(active_editor)) {
+         gtk_widget_grab_focus(active_editor);
     }
 }
 
@@ -3328,6 +3358,10 @@ on_set_encoding(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer u
     /* Pass ID directly; Status Bar handles text mapping */
     /* Update Status Bar regardless of editor presence to maintain UI consistency */
     vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), encoding);
+    
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        gtk_widget_grab_focus(editor);
+    }
 }
 
 static void
@@ -3345,6 +3379,10 @@ on_set_line_ending(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointe
     /* Pass ID directly */
     /* Update Status Bar regardless of editor presence */
     vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), le_id);
+
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         gtk_widget_grab_focus(editor);
+    }
 }
 
 static void
@@ -3374,6 +3412,10 @@ on_set_file_type(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer 
     if (win->status_bar) {
         vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), display_name);
     }
+    
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        gtk_widget_grab_focus(editor);
+    }
 }
 
 static void
@@ -3386,6 +3428,7 @@ on_show_line_numbers_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *valu
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
          editor_widget_set_show_line_numbers(EDITOR_WIDGET(editor), state);
+         gtk_widget_grab_focus(editor);
     }
 }
 
@@ -3399,6 +3442,7 @@ on_enable_word_wrap_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
          editor_widget_set_word_wrap(EDITOR_WIDGET(editor), state);
+         gtk_widget_grab_focus(editor);
     }
 }
 
@@ -3411,6 +3455,11 @@ on_show_status_bar_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value,
     
     if (win->status_bar) {
         gtk_widget_set_visible(win->status_bar, state);
+    }
+    
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         gtk_widget_grab_focus(editor);
     }
 }
 
@@ -3453,6 +3502,7 @@ on_select_all_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *value G_GNUC
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
          editor_widget_select_all(EDITOR_WIDGET(editor));
+         gtk_widget_grab_focus(editor);
     }
 }
 
@@ -3463,6 +3513,7 @@ on_zoom_in_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNU
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
         editor_widget_zoom_in(EDITOR_WIDGET(editor));
+        gtk_widget_grab_focus(editor);
     }
 }
 
@@ -3473,6 +3524,7 @@ on_zoom_out_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GN
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
         editor_widget_zoom_out(EDITOR_WIDGET(editor));
+        gtk_widget_grab_focus(editor);
     }
 }
 
@@ -3483,6 +3535,7 @@ on_zoom_reset_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
         editor_widget_zoom_reset(EDITOR_WIDGET(editor));
+        gtk_widget_grab_focus(editor);
     }
 }
 
@@ -3587,6 +3640,7 @@ on_enable_folding_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, 
     GtkWidget *editor = get_active_editor(win);
     if (EDITOR_IS_WIDGET(editor)) {
          g_object_set(editor, "enable-folding", enabled, NULL);
+         gtk_widget_grab_focus(editor);
     }
     
     g_simple_action_set_state(action, value);
@@ -3601,6 +3655,7 @@ on_enable_minimap_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, 
     GtkWidget *editor = get_active_editor(win);
     if (EDITOR_IS_WIDGET(editor)) {
          g_object_set(editor, "minimap-enabled", enabled, NULL);
+         gtk_widget_grab_focus(editor);
     }
 
     g_simple_action_set_state(action, value);

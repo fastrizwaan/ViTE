@@ -228,12 +228,12 @@ on_file_type_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_da
     /* Update label */
     vite_status_bar_set_file_type(self, name);
     
-    /* Emit signal */
-    g_signal_emit(self, signals[FILE_TYPE_CHANGED], 0, id);
-    
-    /* Close popover */
+    /* Close popover first to release focus */
     GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(box), GTK_TYPE_POPOVER);
     if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
+    
+    /* Emit signal to trigger focus grab in main.c */
+    g_signal_emit(self, signals[FILE_TYPE_CHANGED], 0, id);
 }
 
 static gboolean
