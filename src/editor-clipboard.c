@@ -502,6 +502,15 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
     size_t len = strlen(text);
     if (len > 0) {
         document_begin_undo_group(self->doc);
+        
+        /* Save Selection State */
+        if (self->cursors && self->cursors->len > 0) {
+             EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+             if (primary->cursor_offset != primary->selection_anchor) {
+                 document_set_undo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
+             }
+        }
+        
         /* If we have a selection, delete it first */
         editor_widget_delete_selection(self);
         
@@ -579,6 +588,10 @@ on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer us
             EditorCursor *primary = editor_widget_get_primary_cursor(self);
             if (primary) {
                 document_begin_undo_group(self->doc);
+                
+                if (primary->cursor_offset != primary->selection_anchor) {
+                     document_set_undo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
+                }
                 
                 /* Zero-RAM strategy for large system clipboard content */
                 if (len >= SYSTEM_PASTE_ZERO_RAM_THRESHOLD) {

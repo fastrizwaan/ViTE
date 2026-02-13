@@ -1667,6 +1667,14 @@ on_im_commit(GtkIMContext *context G_GNUC_UNUSED, const char *str, gpointer user
     
     self->last_char_was_separator = is_separator;
 
+    /* Save selection state before modification to ensure undo restores it. */
+    if (self->cursors->len > 0) {
+        EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+        if (primary->cursor_offset != primary->selection_anchor) {
+             document_set_undo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
+        }
+    }
+
     /* Basic multi-cursor insert logic for IM commit */
     /* Often IM input implies single cursor, but if we have multiple, we insert at all */
     g_array_sort(self->cursors, compare_cursors_desc);

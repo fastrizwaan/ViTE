@@ -407,24 +407,38 @@ get_command_info(UndoCommand *cmd, gboolean undo, UndoInfo *info)
     info->success = TRUE;
     
     if (cmd->type == UNDO_OP_GROUP) {
-        if (undo) {
-             /* Last executed is the first in list */
-             GList *first = cmd->group_commands;
-             if (first) get_command_info((UndoCommand*)first->data, undo, info);
-        } else {
-             GList *last = g_list_last(cmd->group_commands);
-             if (last) get_command_info((UndoCommand*)last->data, undo, info);
+        /* If the group has explicit selection info, prioritize it */
+        gboolean group_has_sel = (undo && cmd->has_selection) || (!undo && cmd->has_redo_selection);
+        
+        if (group_has_sel) {
+            info->success = TRUE; /* implicit */
+            info->has_selection = TRUE;
+            if (undo) {
+                info->selection_start = cmd->selection_start;
+                info->selection_end = cmd->selection_end;
+            } else {
+                info->selection_start = cmd->redo_selection_start;
+                info->selection_end = cmd->redo_selection_end;
+            }
         }
         
-        /* If the group has explicit selection info, use it (overriding sub-commands) */
-        if (cmd->has_selection && undo) {
-            info->has_selection = TRUE;
-            info->selection_start = cmd->selection_start;
-            info->selection_end = cmd->selection_end;
-        } else if (cmd->has_redo_selection && !undo) {
-             info->has_selection = TRUE;
-             info->selection_start = cmd->redo_selection_start;
-             info->selection_end = cmd->redo_selection_end;
+        /* Check sub-commands for other metadata, but prioritize group selection. */
+        UndoInfo child_info = {0};
+        if (undo) {
+             GList *first = cmd->group_commands;
+             if (first) get_command_info((UndoCommand*)first->data, undo, &child_info);
+        } else {
+             GList *last = g_list_last(cmd->group_commands);
+             if (last) get_command_info((UndoCommand*)last->data, undo, &child_info);
+        }
+        
+        if (!group_has_sel) {
+            *info = child_info;
+        } else {
+            /* Merge non-selection info (start, length, type) from child */
+            info->start = child_info.start;
+            info->length = child_info.length;
+            info->is_insert = child_info.is_insert;
         }
         return;
     }

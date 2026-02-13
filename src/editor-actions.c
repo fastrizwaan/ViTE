@@ -597,6 +597,28 @@ editor_widget_backspace(EditorWidget *self)
     
     document_begin_undo_group(self->doc);
     
+    /* Save the primary selection state before sorting cursors (which may reorder them). 
+       We prioritize saving an active selection range if one exists. */
+    {
+         EditorCursor *primary = NULL;
+         /* Try to find a selection */
+         for (guint i = 0; i < self->cursors->len; i++) {
+             EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, i);
+             if (cur->cursor_offset != cur->selection_anchor) {
+                 primary = cur;
+                 break;
+             }
+         }
+         /* Fallback: save the first cursor's position */
+         if (!primary && self->cursors->len > 0) {
+             primary = &g_array_index(self->cursors, EditorCursor, 0);
+         }
+         
+         if (primary && primary->cursor_offset != primary->selection_anchor) {
+             document_set_undo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
+         }
+    }
+
     for (guint c = 0; c < self->cursors->len; c++) {
         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
         
@@ -669,6 +691,25 @@ editor_widget_delete(EditorWidget *self)
     g_array_sort(self->cursors, compare_cursors_desc);
     
     document_begin_undo_group(self->doc);
+    
+    /* Save Primary Selection State */
+    {
+         EditorCursor *primary = NULL;
+         for (guint i = 0; i < self->cursors->len; i++) {
+             EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, i);
+             if (cur->cursor_offset != cur->selection_anchor) {
+                 primary = cur;
+                 break;
+             }
+         }
+         if (!primary && self->cursors->len > 0) {
+             primary = &g_array_index(self->cursors, EditorCursor, 0);
+         }
+         
+         if (primary && primary->cursor_offset != primary->selection_anchor) {
+             document_set_undo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
+         }
+    }
     
     for (guint c = 0; c < self->cursors->len; c++) {
         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
