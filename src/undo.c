@@ -23,6 +23,7 @@ undo_stack_new(void)
     s->redo_stack = NULL;
     s->in_undo_redo = FALSE;
     s->current_group = NULL;
+    s->group_depth = 0;
     
     /* Create log file for text storage */
     /* Create log file for text storage */
@@ -271,7 +272,11 @@ undo_stack_push_restore_path(UndoStack *stack, const char *undo_path, const char
 void
 undo_stack_begin_group(UndoStack *stack)
 {
-    if (stack->current_group) return; /* No nested groups for now */
+    stack->group_depth++;
+    if (stack->group_depth > 1) return;
+    
+    /* If for some reason current_group is already set (should differ from depth > 1 check), abort */
+    if (stack->current_group) return; 
     
     UndoCommand *group = g_malloc0(sizeof(UndoCommand));
     group->type = UNDO_OP_GROUP;
@@ -282,6 +287,10 @@ undo_stack_begin_group(UndoStack *stack)
 void
 undo_stack_end_group(UndoStack *stack)
 {
+    if (stack->group_depth > 0) stack->group_depth--;
+    
+    if (stack->group_depth > 0) return; /* Still nested */
+    
     if (!stack->current_group) return;
     
     UndoCommand *group = stack->current_group;

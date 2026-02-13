@@ -37,14 +37,15 @@ editor_widget_on_undo_redo_progress(double progress, gboolean finished, UndoInfo
         /* Operation complete - clear task and update UI */
         self->undo_redo_task = NULL;
         
-        if (info) {
+        if (info && self->cursors && self->cursors->len > 0) {
             editor_widget_clear_cursors(self);
-            EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0); // Directly access since we cleared
+            EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
             
             if (info->has_selection) {
                 primary->selection_anchor = info->selection_start;
                 primary->cursor_offset = info->selection_end;
-            } else {
+            } else if (info->success) {
+                /* Fallback if no explicit selection info but operation succeeded */
                 if (info->is_insert) {
                     /* Was insert (or redo insert) -> place at end */
                     primary->cursor_offset = info->start + info->length;

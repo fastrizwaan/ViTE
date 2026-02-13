@@ -488,7 +488,19 @@ editor_widget_cut(EditorWidget *self)
              vite_clipboard_persist_to_file(clip);
         }
         
+        document_begin_undo_group(self->doc);
+        
+        /* Save Selection State */
+        if (self->cursors && self->cursors->len > 0) {
+             EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+             if (primary->cursor_offset != primary->selection_anchor) {
+                 document_set_undo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
+             }
+        }
+        
         editor_widget_delete_selection(self);
+        
+        document_end_undo_group(self->doc);
     }
 }
 
