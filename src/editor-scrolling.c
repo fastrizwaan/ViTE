@@ -166,8 +166,8 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
         }
     }
     
-    double overscroll = (double)widget_height * 0.1;
-    double upper = MAX(content_height + overscroll, (double)widget_height);
+    /* Remove overscroll to prevent scrollbar from appearing when content fits */
+    double upper = MAX(content_height, (double)widget_height);
 
     gtk_adjustment_configure(self->vadjustment,
                              gtk_adjustment_get_value(self->vadjustment),
