@@ -1014,6 +1014,9 @@ editor_widget_drag_drop_finish(EditorWidget *self, size_t drop_off)
     
     document_begin_undo_group(self->doc);
     
+    /* Save UNDO selection state (Original Selection) */
+    document_set_undo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
+    
     /* If moving, delete original first */
     /* Be careful if drop_off is after delete point, it shifts */
     if (!self->drag_copy_mode) {
@@ -1036,6 +1039,9 @@ editor_widget_drag_drop_finish(EditorWidget *self, size_t drop_off)
     update_target_x(self);
     
     self->alt_word_mode = FALSE;
+    
+    /* Save REDO selection state (Dropped Selection) */
+    document_set_redo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
     
     document_end_undo_group(self->doc);
     
