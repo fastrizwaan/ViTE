@@ -4886,6 +4886,20 @@ on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user
                  update_header_spinner(win);
              }
              
+             /* Restore focus if the current tab is the one we saved */
+             ViteTab *current_tab = vite_tab_bar_get_active_tab(win->tab_bar);
+             ViteTab *saved_tab = g_weak_ref_get(&data->tab_ref);
+             
+             if (saved_tab) {
+                 if (current_tab == saved_tab) {
+                      GtkWidget *active_editor = get_active_editor(win);
+                      if (active_editor && gtk_widget_get_visible(active_editor) && gtk_widget_get_sensitive(active_editor)) {
+                          gtk_widget_grab_focus(active_editor);
+                      }
+                 }
+                 g_object_unref(saved_tab);
+             }
+
              if (error && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
                  GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(win->window));
                  if (root) {
