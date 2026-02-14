@@ -246,7 +246,7 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
             }
             double relative_start = scroll_y - line_doc_y;
             size_t start_row = (relative_start > 0) ? (size_t)(relative_start / self->line_height) : 0;
-            int available_w = width - text_start_x - 20; 
+            int available_w = width - text_start_x - self->active_right_padding; 
             if (available_w < 50) available_w = 50;
             int chars_per_line = (int)((double)available_w / cw);
             if (chars_per_line < 1) chars_per_line = 1;
@@ -294,7 +294,7 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
     if (ctx->tab_array) pango_layout_set_tabs(layout, ctx->tab_array);
     
     if (self->wrap_lines) {
-        int avail = width - text_start_x - 20 - (int)minimap_w;
+        int avail = width - text_start_x - self->active_right_padding - (int)minimap_w;
         pango_layout_set_width(layout, (avail < 50 ? 50 : avail) * PANGO_SCALE);
         pango_layout_set_wrap(layout, is_virtualized ? PANGO_WRAP_CHAR : PANGO_WRAP_WORD_CHAR);
     }

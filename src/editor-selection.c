@@ -169,7 +169,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                 if (minimap_w > width / 2) minimap_w = width / 2;
             }
 
-            int available_w = width - text_start_x - 20 - (int)minimap_w; /* Buffer + Minimap */
+            int available_w = width - text_start_x - self->active_right_padding - (int)minimap_w; /* Buffer + Minimap */
             if (available_w < 50) available_w = 50; 
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
@@ -188,7 +188,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                 if (minimap_w > width / 2) minimap_w = width / 2;
             }
             
-            int available_w = width - text_start_x - 20 - (int)minimap_w; 
+            int available_w = width - text_start_x - self->active_right_padding - (int)minimap_w; 
             if (available_w < 50) available_w = 50;
             int chars_per_line = (int)((double)available_w / cw);
             if (chars_per_line < 1) chars_per_line = 1;
@@ -242,7 +242,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                     if (minimap_w > width / 2) minimap_w = width / 2;
                 }
 
-                int available_w = width - text_start_x - 20 - (int)minimap_w;
+                int available_w = width - text_start_x - self->active_right_padding - (int)minimap_w;
                 if (available_w < 50) available_w = 50;
                 int chars_per_line = (int)((double)available_w / cw);
                 if (chars_per_line < 1) chars_per_line = 1;

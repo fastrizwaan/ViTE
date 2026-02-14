@@ -45,19 +45,10 @@ calculate_line_height_cb(size_t len, void *user_data)
     state->current_y += (double)visual_lines * state->line_height;
 }
 
-void
-editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widget_height)
+static double
+calculate_total_content_height(EditorWidget *self, int widget_width, int widget_height)
 {
-    if (!self->vadjustment || !self->doc) return;
-    
-    /* If called with -1, use current */
-    if (widget_width < 0) widget_width = gtk_widget_get_width(GTK_WIDGET(self));
-    if (widget_height < 0) widget_height = gtk_widget_get_height(GTK_WIDGET(self));
-
-    editor_widget_ensure_metrics(self);
-
     size_t total_lines = get_visual_line_count(self);
-    
     double content_height = 0;
 
     if (!self->wrap_lines || total_lines == 0) {
@@ -77,7 +68,8 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
             if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
         }
         
-        double wrap_width = (double)widget_width - text_start_x - 20.0 - minimap_w; /* Match renderer buffer */
+        /* Use active_right_padding instead of hardcoded 20.0 */
+        double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
         
         if (wrap_width < 1.0) wrap_width = 1.0;
         
@@ -117,6 +109,10 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
                     char *text = NULL;
                     PangoLayout *layout = create_pango_layout_for_line(self, phys_idx, &text, NULL);
                     if (layout) {
+                        /* Must set width to simulate wrapping for accurate height */
+                         pango_layout_set_width(layout, (int)(wrap_width * PANGO_SCALE));
+                         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+
                         PangoRectangle logical;
                         pango_layout_get_extents(layout, NULL, &logical);
                         double h = (double)logical.height / PANGO_SCALE;
@@ -173,6 +169,32 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
         }
     }
     
+    return content_height;
+}
+
+void
+editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widget_height)
+{
+    if (!self->vadjustment || !self->doc) return;
+    
+    /* If called with -1, use current */
+    if (widget_width < 0) widget_width = gtk_widget_get_width(GTK_WIDGET(self));
+    if (widget_height < 0) widget_height = gtk_widget_get_height(GTK_WIDGET(self));
+
+    editor_widget_ensure_metrics(self);
+
+    /* Dynamic Margin Pass 1: Assume 0 padding */
+    self->active_right_padding = 0;
+    double content_height = calculate_total_content_height(self, widget_width, widget_height);
+    
+    /* Check if scrollbar is needed */
+    if (content_height > (double)widget_height) {
+        /* Scrollbar needed! Switch to 20 padding */
+        self->active_right_padding = 20;
+        /* Re-calculate height with new width constraint */
+        content_height = calculate_total_content_height(self, widget_width, widget_height);
+    }
+    
     /* Remove overscroll to prevent scrollbar from appearing when content fits */
     double upper = MAX(content_height, (double)widget_height);
 
@@ -190,6 +212,7 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
     if (self->wrap_lines) {
         content_width = (double)widget_width;
     } else {
+        size_t total_lines = get_visual_line_count(self);
         if (total_lines < 50000) {
             MaxWidthCalcState mw_state = {0};
             document_foreach_line(self->doc, calculate_max_line_len_cb, &mw_state);
@@ -247,7 +270,12 @@ scroll_to_cursor(EditorWidget *self)
     if (self->wrap_lines) {
         int widget_width = gtk_widget_get_width(GTK_WIDGET(self));
         double text_start_x = get_effective_gutter_width(self) + self->padding_left;
-        double wrap_width = (double)widget_width - text_start_x - 20.0;
+        double minimap_w = 0;
+        if (self->minimap_enabled) {
+            minimap_w = self->minimap_width;
+            if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
+        }
+        double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
         if (wrap_width < 1.0) wrap_width = 1.0;
         double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
         int chars_per_line = (int)(wrap_width / cw);

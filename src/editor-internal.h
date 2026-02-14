@@ -68,6 +68,7 @@ struct _EditorWidget {
     
     int padding_left;
     int padding_top;
+    int active_right_padding;
 
     /* Caches */
     GArray *line_y_offsets; /* double */
