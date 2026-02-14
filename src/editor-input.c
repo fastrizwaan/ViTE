@@ -1027,8 +1027,14 @@ editor_widget_drag_drop_finish(EditorWidget *self, size_t drop_off)
     
     /* Select dropped text */
     primary = editor_widget_get_primary_cursor(self);
-    primary->selection_anchor = drop_off;
-    primary->cursor_offset = drop_off + sel_len;
+    primary->cursor_offset = drop_off;
+    primary->selection_anchor = drop_off + sel_len; /* Reverse selection: anchor at end, caret at start */
+    
+    /* Sync cached values so subsequent moves (like Alt+Right) work on the new position */
+    self->cursor_offset = primary->cursor_offset;
+    self->selection_anchor = primary->selection_anchor;
+    update_target_x(self);
+    
     self->alt_word_mode = FALSE;
     
     document_end_undo_group(self->doc);

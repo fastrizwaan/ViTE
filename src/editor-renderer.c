@@ -602,7 +602,11 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
             int di = (int)MIN(self->drag_drop_offset - (line_start_off + chunk_padding), len);
             PangoRectangle sp; pango_layout_get_cursor_pos(layout, di, &sp, NULL);
             GdkRGBA dc = self->drag_copy_mode ? (GdkRGBA){0.18, 0.76, 0.49, 1.0} : (GdkRGBA){1.0, 0.647, 0.0, 1.0};
-            gtk_snapshot_append_color(snapshot, &dc, &GRAPHENE_RECT_INIT((float)pango_units_to_double(sp.x), (float)(pango_units_to_double(sp.y) + centering_offset), 2.0f, (float)layout_h));
+            
+            double ch = pango_units_to_double(sp.height);
+            if (ch < self->line_height) ch = self->line_height;
+            
+            gtk_snapshot_append_color(snapshot, &dc, &GRAPHENE_RECT_INIT((float)pango_units_to_double(sp.x), (float)(pango_units_to_double(sp.y) + centering_offset), 2.0f, (float)ch));
         }
     }
 
