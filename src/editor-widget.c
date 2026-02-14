@@ -868,6 +868,15 @@ editor_widget_init(EditorWidget *self)
     
     self->last_theme_dark_mode = -1; /* Force initial theme sync */
     
+    /* Default Theme Colors (will be updated by theme logic or CSS later) */
+    /* Light theme defaults */
+    self->color_background = (GdkRGBA){1.0, 1.0, 1.0, 1.0};
+    self->color_text = (GdkRGBA){0.0, 0.0, 0.0, 1.0};
+    self->color_cursor = (GdkRGBA){0.0, 0.0, 0.0, 1.0};
+    self->color_line_highlight = (GdkRGBA){0.0, 0.0, 0.0, 0.05};
+    self->color_line_number = (GdkRGBA){0.0, 0.0, 0.0, 0.5};
+    self->color_gutter_bg = (GdkRGBA){0.95, 0.95, 0.95, 1.0};
+    
     /* Viewport padding */
     self->padding_left = 4;
     self->padding_top = 8;

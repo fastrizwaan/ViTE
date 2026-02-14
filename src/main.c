@@ -1769,7 +1769,6 @@ load_css(void)
     "}"
     "statusbar {"
     "    background-color: alpha(@headerbar_bg_color, 1);"
-    "    border-top: 1px solid alpha(@window_fg_color, 0.04);"
     "    min-height: 1px;"
     "    padding-top: 1px;"
     "    padding-bottom: 2px;"
@@ -1789,21 +1788,21 @@ load_css(void)
     "}"
     "statusbar button.flat {"
     "    min-height: 0;"
-    "    padding-left: 6px;"
-    "    padding-right: 6px;"
+    "    padding-left: 10px;"
+    "    padding-right: 10px;"
     "    padding-top: 4px;"
     "    padding-bottom: 4px;"
-    "    margin-top: 0px;"
+    "    margin-top: 1px;"
     "    margin-bottom: 2px;"
 
     "}"
     "statusbar menubutton > button {"
     "    min-height: 0;"
-    "    padding-left: 6px;"
-    "    padding-right: 6px;"
+    "    padding-left: 10px;"
+    "    padding-right: 10px;"
     "    padding-top: 4px;"
     "    padding-bottom: 4px;"
-    "    margin-top: 0px;"
+    "    margin-top: 1px;"
     "    margin-bottom: 2px;"
 
     "}"
@@ -3701,6 +3700,7 @@ setup_window(AdwApplicationWindow *window)
     /* Use AdwToolbarView as main container for proper RAISED styling */
     GtkWidget *toolbar_view = adw_toolbar_view_new();
     adw_toolbar_view_set_top_bar_style(ADW_TOOLBAR_VIEW(toolbar_view), ADW_TOOLBAR_RAISED);
+    adw_toolbar_view_set_bottom_bar_style(ADW_TOOLBAR_VIEW(toolbar_view), ADW_TOOLBAR_RAISED);
     win->titlebar_container = toolbar_view;
     gtk_widget_add_css_class(toolbar_view, "titlebar-box");
     

@@ -55,6 +55,12 @@ struct _EditorWidget {
     GdkRGBA color_text;
     GdkRGBA color_cursor;
     
+    /* Theme Colors */
+    GdkRGBA color_background;
+    GdkRGBA color_line_highlight;
+    GdkRGBA color_line_number;
+    GdkRGBA color_gutter_bg;
+    
     double line_height;
     double ascent;
     double cached_char_width;

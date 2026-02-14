@@ -76,8 +76,33 @@ render_context_init(SnapshotRenderContext *ctx, EditorWidget *self, GtkSnapshot 
     ctx->bg_color = (GdkRGBA){1, 1, 1, 1};
     ctx->is_dark = FALSE;
     if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
-        ctx->bg_color = (GdkRGBA){0.11, 0.11, 0.11, 1.0};
+        /* #1d1d20 = 29, 29, 32 */
+        ctx->bg_color = (GdkRGBA){0.113725, 0.113725, 0.12549, 1.0};
         ctx->is_dark = TRUE;
+    }
+    
+    /* Update Theme Colors (Auto-Theme Logic for now) */
+    self->color_background = ctx->bg_color;
+    /* Gutter same as background */
+    self->color_gutter_bg = self->color_background;
+    
+    if (ctx->is_dark) {
+        /* Use 'd_variable_c' (Light Grey #d1d1d1) for plain text as requested */
+        self->color_text = (GdkRGBA){0.82, 0.82, 0.82, 1.0};
+        
+        self->color_line_highlight = self->color_text; 
+        self->color_line_highlight.alpha = 0.04; /* Reduced from 0.1 */
+        
+        self->color_line_number = self->color_text;
+        self->color_line_number.alpha = 0.5;
+    } else {
+        /* Keep original text color for light mode (likely black) */
+        
+        self->color_line_highlight = self->color_text; 
+        self->color_line_highlight.alpha = 0.03; /* Reduced from 0.05 */
+        
+        self->color_line_number = self->color_text;
+        self->color_line_number.alpha = 0.5;
     }
     
     if (self->last_theme_dark_mode != ctx->is_dark) {
@@ -94,8 +119,7 @@ draw_editor_background(SnapshotRenderContext *ctx)
         &GRAPHENE_RECT_INIT(0, 0, (float)ctx->width, (float)ctx->height));
     
     if (ctx->self->show_line_numbers) {
-        GdkRGBA gutter_bg = ctx->is_dark ? (GdkRGBA){0.15, 0.15, 0.15, 1.0} : (GdkRGBA){0.95, 0.95, 0.95, 1.0};
-        gtk_snapshot_append_color(ctx->snapshot, &gutter_bg, 
+        gtk_snapshot_append_color(ctx->snapshot, &ctx->self->color_gutter_bg, 
             &GRAPHENE_RECT_INIT(0, 0, (float)ctx->gutter_w, (float)ctx->height));
     }
 }
@@ -288,27 +312,38 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
     double centering_offset = floor((layout_h - pixel_h) / 2.0);
 
     /* Line Highlights */
+    gboolean is_highlighted = FALSE;
     if (self->highlight_current_line) {
-         gboolean highlight = FALSE;
          for (guint c = 0; c < ctx->num_cursors; c++) {
              EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
-             if (ctx->cursor_lines[c] == phys_line && cur->cursor_offset == cur->selection_anchor) { highlight = TRUE; break; }
+             if (ctx->cursor_lines[c] == phys_line && cur->cursor_offset == cur->selection_anchor) { is_highlighted = TRUE; break; }
          }
-         if (highlight) {
-             GdkRGBA hl = self->color_text; hl.alpha = ctx->is_dark ? 0.1 : 0.05;
-             gtk_snapshot_append_color(snapshot, &hl, &GRAPHENE_RECT_INIT(text_start_x, (float)(current_y_pos + self->padding_top), (float)(width - text_start_x), (float)layout_h));
+         if (is_highlighted) {
+             /* Highlight full width including gutter */
+             gtk_snapshot_append_color(snapshot, &self->color_line_highlight, &GRAPHENE_RECT_INIT(0, (float)(current_y_pos + self->padding_top), (float)(width), (float)layout_h));
          }
     }
 
     if (self->show_line_numbers) {
         char lnum[32]; snprintf(lnum, sizeof(lnum), "%zu", phys_line + 1);
-        pango_layout_set_font_description(ctx->lnum_layout, self->font_desc);
+        
+        PangoFontDescription *desc = pango_font_description_copy(self->font_desc);
+        if (is_highlighted) {
+            pango_font_description_set_weight(desc, PANGO_WEIGHT_BOLD);
+        }
+        pango_layout_set_font_description(ctx->lnum_layout, desc);
+        pango_font_description_free(desc);
+        
         pango_layout_set_text(ctx->lnum_layout, lnum, -1);
         pango_layout_set_alignment(ctx->lnum_layout, PANGO_ALIGN_RIGHT);
         double fold_w = editor_widget_get_fold_gutter_width(self);
         double lnum_w = gutter_w - fold_w - 8.0;
         pango_layout_set_width(ctx->lnum_layout, (int)(MAX(lnum_w, 1.0) * PANGO_SCALE));
-        GdkRGBA gfg = self->color_text; gfg.alpha = 0.5;
+        GdkRGBA gfg = self->color_line_number; /* Use distinct color (alpha handled in init) */
+        
+        /* Ensure distinct color for highlighted line number if needed, currently just bold */
+        if (is_highlighted) gfg.alpha = 0.9;
+        
         gtk_snapshot_save(snapshot);
         gtk_snapshot_translate(snapshot, &GRAPHENE_POINT_INIT(4, (float)(current_y_pos + self->padding_top + centering_offset)));
         gtk_snapshot_append_layout(snapshot, ctx->lnum_layout, &gfg);
