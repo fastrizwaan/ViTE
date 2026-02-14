@@ -70,7 +70,14 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
     } else {
         /* Accurate calculation for wrapped lines */
         double text_start_x = get_effective_gutter_width(self) + self->padding_left;
-        double wrap_width = (double)widget_width - text_start_x - 20.0; /* Match renderer buffer */
+        
+        double minimap_w = 0;
+        if (self->minimap_enabled) {
+            minimap_w = self->minimap_width;
+            if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
+        }
+        
+        double wrap_width = (double)widget_width - text_start_x - 20.0 - minimap_w; /* Match renderer buffer */
         
         if (wrap_width < 1.0) wrap_width = 1.0;
         
