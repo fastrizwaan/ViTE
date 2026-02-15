@@ -751,7 +751,6 @@ void
 document_mark_saved(Document *doc)
 {
     doc->saved_command = undo_stack_peek(doc->undo_stack);
-    doc->saved_command = undo_stack_peek(doc->undo_stack);
     check_modification_state(doc);
 }
 

@@ -504,7 +504,11 @@ undo_stack_redo(UndoStack *stack, PieceTable *pt)
 void *
 undo_stack_peek(UndoStack *stack)
 {
-    if (!stack || !stack->undo_stack) return NULL;
+    if (!stack) return NULL;
+    if (stack->current_group && stack->current_group->group_commands) {
+        return stack->current_group;
+    }
+    if (!stack->undo_stack) return NULL;
     return stack->undo_stack->data;
 }
 

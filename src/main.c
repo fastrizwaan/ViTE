@@ -46,6 +46,7 @@ struct _ViteWindow {
     GtkWidget *last_active_editor; /* Fallback when focus is lost (e.g. to a popover) */
     int loading_count;
     gboolean close_when_done;
+    gboolean force_close_once;
     GWeakRef active_dialog_ref;
     
     /* Fullscreen Support */
@@ -228,9 +229,378 @@ static void load_css(void);
 static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
 static void update_window_title_for_tab(ViteTab *tab);
+static gboolean tab_has_unsaved_changes(ViteTab *tab);
+static void close_tab_now(ViteWindow *win, ViteTab *tab);
 
 #define MAX_RECENTLY_CLOSED 20
 static GList *recently_closed_files = NULL;
+
+typedef struct _SaveChangesDialogData SaveChangesDialogData;
+typedef void (*SaveChangesDialogCallback)(const char *response, SaveChangesDialogData *dialog, gpointer user_data);
+
+struct _SaveChangesDialogData {
+    GWeakRef win_ref;
+    GtkWindow *window;
+    GtkWidget *save_button;
+    GPtrArray *tabs;     /* strong refs: ViteTab* */
+    GPtrArray *checks;   /* GtkCheckButton* by row index */
+    GPtrArray *entries;  /* GtkEntry* by row index */
+    SaveChangesDialogCallback callback;
+    gpointer user_data;
+    gboolean handled;
+    gboolean closing_programmatically;
+};
+
+static void save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const char *path);
+static gboolean save_changes_dialog_tab_selected(SaveChangesDialogData *dialog, ViteTab *tab);
+static char *save_changes_dialog_filename_for_tab(SaveChangesDialogData *dialog, ViteTab *tab);
+static void show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCallback callback, gpointer user_data);
+
+static void
+save_changes_dialog_data_free(SaveChangesDialogData *dialog)
+{
+    if (!dialog) return;
+    g_weak_ref_clear(&dialog->win_ref);
+    if (dialog->tabs) g_ptr_array_unref(dialog->tabs);
+    if (dialog->checks) g_ptr_array_unref(dialog->checks);
+    if (dialog->entries) g_ptr_array_unref(dialog->entries);
+    g_free(dialog);
+}
+
+static Document *
+get_tab_document(ViteTab *tab)
+{
+    if (!tab || !VITE_IS_TAB(tab)) return NULL;
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    GtkWidget *editor = get_editor_from_page(page);
+    if (!EDITOR_IS_WIDGET(editor)) return NULL;
+    return editor_widget_get_document(EDITOR_WIDGET(editor));
+}
+
+static gboolean
+tab_has_unsaved_changes(ViteTab *tab)
+{
+    Document *doc = get_tab_document(tab);
+    return doc && document_is_modified(doc);
+}
+
+static char *
+path_with_tilde(const char *path)
+{
+    if (!path) return g_strdup("");
+    const char *home = g_get_home_dir();
+    if (home && g_str_has_prefix(path, home)) {
+        return g_strconcat("~", path + strlen(home), NULL);
+    }
+    return g_strdup(path);
+}
+
+static gboolean
+is_valid_filename_char(char c)
+{
+    return g_ascii_isalnum(c) || c == ' ' || c == '-' || c == '_' || c == '.';
+}
+
+static char *
+sanitize_filename(const char *text)
+{
+    if (!text) return g_strdup("untitled");
+    GString *out = g_string_new(NULL);
+    for (const char *p = text; *p; p++) {
+        if (is_valid_filename_char(*p)) {
+            g_string_append_c(out, *p);
+        }
+    }
+    char *trimmed = g_strstrip(g_string_free(out, FALSE));
+    if (!trimmed || !*trimmed) {
+        g_free(trimmed);
+        return g_strdup("untitled");
+    }
+    if (strlen(trimmed) > 50) {
+        trimmed[50] = '\0';
+    }
+    return trimmed;
+}
+
+static char *
+default_save_directory(void)
+{
+    char *docs = g_build_filename(g_get_home_dir(), "Documents", NULL);
+    if (g_file_test(docs, G_FILE_TEST_IS_DIR)) return docs;
+    g_free(docs);
+    return g_strdup(g_get_home_dir());
+}
+
+static char *
+suggest_untitled_filename(ViteTab *tab, Document *doc)
+{
+    size_t len = 0;
+    char *line = document_get_line(doc, 0, &len);
+    char *from_line = NULL;
+    if (line && len > 0) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+        char *clean = sanitize_filename(line);
+        if (clean && *clean && g_strcmp0(clean, "untitled") != 0) {
+            from_line = clean;
+        } else {
+            g_free(clean);
+        }
+    }
+    g_free(line);
+
+    if (from_line) {
+        char *name = g_str_has_suffix(from_line, ".txt") ? from_line : g_strconcat(from_line, ".txt", NULL);
+        if (name != from_line) g_free(from_line);
+        return name;
+    }
+
+    const char *title = vite_tab_get_title(tab);
+    char *clean_title = sanitize_filename(title && *title ? title : "untitled");
+    char *name = g_str_has_suffix(clean_title, ".txt") ? clean_title : g_strconcat(clean_title, ".txt", NULL);
+    if (name != clean_title) g_free(clean_title);
+    return name;
+}
+
+static char *
+display_path_for_tab(ViteTab *tab)
+{
+    Document *doc = get_tab_document(tab);
+    if (!doc) return g_strdup("");
+    const char *path = document_get_file_path(doc);
+    if (path && *path) {
+        char *dir = g_path_get_dirname(path);
+        char *shown = path_with_tilde(dir);
+        g_free(dir);
+        return shown;
+    }
+    char *def = default_save_directory();
+    char *shown = path_with_tilde(def);
+    g_free(def);
+    return shown;
+}
+
+static void
+save_changes_dialog_finish(SaveChangesDialogData *dialog, const char *response)
+{
+    if (!dialog || dialog->handled) return;
+    dialog->handled = TRUE;
+
+    if (dialog->callback) {
+        dialog->callback(response, dialog, dialog->user_data);
+    }
+
+    if (dialog->window && GTK_IS_WINDOW(dialog->window) && !dialog->closing_programmatically) {
+        dialog->closing_programmatically = TRUE;
+        gtk_window_destroy(dialog->window);
+    }
+}
+
+static void
+on_save_changes_button_clicked(GtkButton *btn, gpointer user_data)
+{
+    SaveChangesDialogData *dialog = user_data;
+    const char *response = g_object_get_data(G_OBJECT(btn), "save-dialog-response");
+    save_changes_dialog_finish(dialog, response ? response : "cancel");
+}
+
+static gboolean
+on_save_changes_close_request(GtkWindow *window G_GNUC_UNUSED, gpointer user_data)
+{
+    SaveChangesDialogData *dialog = user_data;
+    if (dialog->closing_programmatically) return FALSE;
+    save_changes_dialog_finish(dialog, "cancel");
+    return TRUE;
+}
+
+static void
+on_save_changes_dialog_destroy(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data)
+{
+    save_changes_dialog_data_free((SaveChangesDialogData *)user_data);
+}
+
+static void
+on_save_changes_dialog_map(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data)
+{
+    SaveChangesDialogData *dialog = user_data;
+    if (dialog->save_button) gtk_widget_grab_focus(dialog->save_button);
+}
+
+static gboolean
+save_changes_dialog_tab_selected(SaveChangesDialogData *dialog, ViteTab *tab)
+{
+    if (!dialog || !tab) return FALSE;
+    for (guint i = 0; i < dialog->tabs->len; i++) {
+        if (g_ptr_array_index(dialog->tabs, i) == tab) {
+            GtkCheckButton *check = GTK_CHECK_BUTTON(g_ptr_array_index(dialog->checks, i));
+            return gtk_check_button_get_active(check);
+        }
+    }
+    return FALSE;
+}
+
+static char *
+save_changes_dialog_filename_for_tab(SaveChangesDialogData *dialog, ViteTab *tab)
+{
+    if (!dialog || !tab) return g_strdup("untitled.txt");
+    for (guint i = 0; i < dialog->tabs->len; i++) {
+        if (g_ptr_array_index(dialog->tabs, i) == tab) {
+            GtkEntry *entry = GTK_ENTRY(g_ptr_array_index(dialog->entries, i));
+            const char *text = gtk_editable_get_text(GTK_EDITABLE(entry));
+            char *name = sanitize_filename(text);
+            if (!strchr(name, '.')) {
+                char *with_ext = g_strconcat(name, ".txt", NULL);
+                g_free(name);
+                return with_ext;
+            }
+            return name;
+        }
+    }
+    return g_strdup("untitled.txt");
+}
+
+static void
+show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCallback callback, gpointer user_data)
+{
+    if (!win || !tabs || tabs->len == 0) return;
+
+    SaveChangesDialogData *dialog = g_new0(SaveChangesDialogData, 1);
+    g_weak_ref_init(&dialog->win_ref, win->window);
+    dialog->callback = callback;
+    dialog->user_data = user_data;
+    dialog->tabs = g_ptr_array_new_with_free_func(g_object_unref);
+    dialog->checks = g_ptr_array_new();
+    dialog->entries = g_ptr_array_new();
+
+    GtkWidget *window = adw_window_new();
+    dialog->window = GTK_WINDOW(window);
+    gtk_window_set_modal(GTK_WINDOW(window), TRUE);
+    gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(win->window));
+    gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
+    gtk_window_set_default_size(GTK_WINDOW(window), 440, -1);
+
+    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+    /* Header */
+    GtkWidget *header = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_set_margin_top(header, 12);
+    gtk_widget_set_margin_bottom(header, 12);
+    gtk_widget_set_margin_start(header, 12);
+    gtk_widget_set_margin_end(header, 12);
+    gtk_box_append(GTK_BOX(main_box), header);
+
+    GtkWidget *title = gtk_label_new("Save Changes?");
+    gtk_widget_add_css_class(title, "title-2");
+    gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(header), title);
+
+    GtkWidget *body = gtk_label_new("Open documents contain unsaved changes.\nChanges which are not saved will be permanently lost.");
+    gtk_widget_add_css_class(body, "dim-label");
+    gtk_label_set_wrap(GTK_LABEL(body), TRUE);
+    gtk_label_set_justify(GTK_LABEL(body), GTK_JUSTIFY_CENTER);
+    gtk_widget_set_halign(body, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(header), body);
+
+    /* File List with ScrolledWindow */
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 400);
+    gtk_box_append(GTK_BOX(main_box), scroll);
+
+    GtkWidget *files_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(files_box, 12);
+    gtk_widget_set_margin_bottom(files_box, 12);
+    gtk_widget_set_margin_start(files_box, 24);
+    gtk_widget_set_margin_end(files_box, 24);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), files_box);
+
+    for (guint i = 0; i < tabs->len; i++) {
+        ViteTab *tab = VITE_TAB(g_ptr_array_index(tabs, i));
+        Document *doc = get_tab_document(tab);
+        if (!doc) continue;
+
+        g_ptr_array_add(dialog->tabs, g_object_ref(tab));
+
+        GtkWidget *file_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+        
+        GtkWidget *check = gtk_check_button_new();
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(check), TRUE);
+        gtk_widget_set_focus_on_click(check, FALSE);
+        gtk_box_append(GTK_BOX(file_row), check);
+        g_ptr_array_add(dialog->checks, check);
+
+        GtkWidget *info_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+        gtk_widget_set_hexpand(info_box, TRUE);
+
+        const char *path = document_get_file_path(doc);
+        char *entry_text = NULL;
+        if (path && *path) {
+            entry_text = g_path_get_basename(path);
+        } else {
+            entry_text = suggest_untitled_filename(tab, doc);
+        }
+
+        GtkWidget *entry = gtk_entry_new();
+        gtk_editable_set_text(GTK_EDITABLE(entry), entry_text);
+        gtk_widget_set_hexpand(entry, TRUE);
+        g_ptr_array_add(dialog->entries, entry);
+        gtk_box_append(GTK_BOX(info_box), entry);
+        g_free(entry_text);
+
+        char *path_text = display_path_for_tab(tab);
+        GtkWidget *path_label = gtk_label_new(path_text);
+        gtk_widget_add_css_class(path_label, "dim-label");
+        gtk_widget_add_css_class(path_label, "caption");
+        gtk_widget_set_halign(path_label, GTK_ALIGN_START);
+        gtk_label_set_ellipsize(GTK_LABEL(path_label), PANGO_ELLIPSIZE_MIDDLE);
+        gtk_label_set_max_width_chars(GTK_LABEL(path_label), 40);
+        gtk_box_append(GTK_BOX(info_box), path_label);
+        g_free(path_text);
+
+        gtk_box_append(GTK_BOX(file_row), info_box);
+        gtk_box_append(GTK_BOX(files_box), file_row);
+    }
+
+    /* Buttons */
+    GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_set_homogeneous(GTK_BOX(button_box), TRUE);
+    gtk_widget_set_margin_top(button_box, 12);
+    gtk_widget_set_margin_bottom(button_box, 24);
+    gtk_widget_set_margin_start(button_box, 24);
+    gtk_widget_set_margin_end(button_box, 24);
+    gtk_box_append(GTK_BOX(main_box), button_box);
+
+    GtkWidget *cancel_btn = gtk_button_new_with_label("Cancel");
+    GtkWidget *discard_btn = gtk_button_new_with_label("Discard All");
+    GtkWidget *save_btn = gtk_button_new_with_label("Save");
+    
+    gtk_widget_add_css_class(discard_btn, "destructive-action");
+    gtk_widget_add_css_class(save_btn, "suggested-action");
+    
+    g_object_set_data(G_OBJECT(cancel_btn), "save-dialog-response", "cancel");
+    g_object_set_data(G_OBJECT(discard_btn), "save-dialog-response", "discard");
+    g_object_set_data(G_OBJECT(save_btn), "save-dialog-response", "save");
+    
+    g_signal_connect(cancel_btn, "clicked", G_CALLBACK(on_save_changes_button_clicked), dialog);
+    g_signal_connect(discard_btn, "clicked", G_CALLBACK(on_save_changes_button_clicked), dialog);
+    g_signal_connect(save_btn, "clicked", G_CALLBACK(on_save_changes_button_clicked), dialog);
+    dialog->save_button = save_btn;
+
+    gtk_box_append(GTK_BOX(button_box), cancel_btn);
+    gtk_box_append(GTK_BOX(button_box), discard_btn);
+    gtk_box_append(GTK_BOX(button_box), save_btn);
+
+    GtkWidget *handle = gtk_window_handle_new();
+    gtk_window_handle_set_child(GTK_WINDOW_HANDLE(handle), main_box);
+    adw_window_set_content(ADW_WINDOW(window), handle);
+    
+    g_signal_connect(window, "close-request", G_CALLBACK(on_save_changes_close_request), dialog);
+    g_signal_connect(window, "destroy", G_CALLBACK(on_save_changes_dialog_destroy), dialog);
+    g_signal_connect(window, "map", G_CALLBACK(on_save_changes_dialog_map), dialog);
+    
+    gtk_window_present(GTK_WINDOW(window));
+}
 
 static void
 reset_tab_to_empty(ViteWindow *win, ViteTab *tab)
@@ -1942,20 +2312,70 @@ load_css(void)
 }
 
 static void
-on_tab_close_clicked (ViteTab *tab, gpointer user_data G_GNUC_UNUSED)
+on_close_modified_tab_response(const char *response, SaveChangesDialogData *dialog, gpointer user_data)
 {
+    ViteTab *tab = VITE_TAB(user_data);
     if (!tab || !VITE_IS_TAB(tab)) return;
+
     GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
     if (!root) return;
-    
+
     ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
     if (!win) return;
 
-    /* Get the page widget associated with this tab */
+    if (g_strcmp0(response, "discard") == 0) {
+        close_tab_now(win, tab);
+        return;
+    }
+
+    if (g_strcmp0(response, "save") == 0) {
+        Document *doc = get_tab_document(tab);
+        if (!doc) return;
+
+        if (!save_changes_dialog_tab_selected(dialog, tab)) {
+            close_tab_now(win, tab);
+            return;
+        }
+
+        char *filename = save_changes_dialog_filename_for_tab(dialog, tab);
+        const char *current_path = document_get_file_path(doc);
+        char *final_path = NULL;
+
+        if (current_path && *current_path) {
+            char *current_basename = g_path_get_basename(current_path);
+            if (g_strcmp0(filename, current_basename) != 0) {
+                /* Filename changed - Save As in same directory */
+                char *dir = g_path_get_dirname(current_path);
+                final_path = g_build_filename(dir, filename, NULL);
+                g_free(dir);
+            } else {
+                /* Save normally */
+                final_path = g_strdup(current_path);
+            }
+            g_free(current_basename);
+        } else {
+            /* Untitled file - Save to default directory */
+            char *dir = default_save_directory();
+            final_path = g_build_filename(dir, filename, NULL);
+            g_free(dir);
+        }
+
+        vite_tab_set_close_when_done(tab, TRUE);
+        save_async_with_progress(win, tab, doc, final_path);
+        
+        g_free(final_path);
+        g_free(filename);
+    }
+}
+
+static void
+close_tab_now(ViteWindow *win, ViteTab *tab)
+{
+    if (!win || !tab || !VITE_IS_TAB(tab)) return;
+
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     GtkWidget *parent = NULL;
-    
-    /* Get the document before we destroy the page so we can free it */
+
     Document *doc_to_free = NULL;
     if (page && GTK_IS_WIDGET(page)) {
         GtkWidget *editor = get_editor_from_page(page);
@@ -1967,30 +2387,23 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data G_GNUC_UNUSED)
     } else {
         page = NULL;
     }
-    
+
     if (doc_to_free) {
         const char *path = document_get_file_path(doc_to_free);
         if (path) remember_recently_closed_file(path);
     }
 
-    /* If this is the last tab, reset it instead of closing the app */
     if (vite_tab_bar_get_n_tabs(win->tab_bar) == 1) {
         reset_tab_to_empty(win, tab);
         if (page) g_object_unref(page);
-        if (doc_to_free) {
-            /* reset_tab_to_empty already freed old doc */
-            doc_to_free = NULL;
-        }
         return;
     }
 
-    /* Clear data to prevent dangling pointers before tab removal */
     g_object_set_data(G_OBJECT(tab), "page", NULL);
+    vite_tab_set_close_when_done(tab, FALSE);
 
-    /* Remove tab from tab bar (this triggers selection change) */
     vite_tab_bar_remove_tab(win->tab_bar, tab);
-    
-    /* Safely remove page from stack */
+
     if (page && parent) {
         if (GTK_IS_STACK(parent)) {
             stack_safe_remove_child(GTK_STACK(parent), page);
@@ -1998,21 +2411,35 @@ on_tab_close_clicked (ViteTab *tab, gpointer user_data G_GNUC_UNUSED)
             gtk_widget_unparent(page);
         }
     }
-    
-    if (page) {
-        g_object_unref(page);
-    }
-    
-    /* Free the document (this frees the piece table and releases mmap) */
-    if (doc_to_free) {
-        document_free(doc_to_free);
-    }
-    
-    /* If no tabs remain, create a fresh empty tab instead of closing the app */
+
+    if (page) g_object_unref(page);
+    if (doc_to_free) document_free(doc_to_free);
+
     if (vite_tab_bar_get_n_tabs(win->tab_bar) == 0) {
-         Document *doc = document_new(NULL);
-         create_new_tab(win, "Untitled", doc);
+        Document *doc = document_new(NULL);
+        create_new_tab(win, "Untitled", doc);
     }
+}
+
+static void
+on_tab_close_clicked (ViteTab *tab, gpointer user_data G_GNUC_UNUSED)
+{
+    if (!tab || !VITE_IS_TAB(tab)) return;
+    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
+    if (!root) return;
+
+    ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
+    if (!win) return;
+
+    if (tab_has_unsaved_changes(tab)) {
+        GPtrArray *single = g_ptr_array_new();
+        g_ptr_array_add(single, tab);
+        show_save_changes_dialog(win, single, on_close_modified_tab_response, tab);
+        g_ptr_array_unref(single);
+        return;
+    }
+
+    close_tab_now(win, tab);
 }
 
 static void
@@ -3540,6 +3967,84 @@ on_zoom_reset_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_
     }
 }
 
+static GPtrArray *
+collect_modified_tabs(ViteWindow *win)
+{
+    GPtrArray *modified = g_ptr_array_new_with_free_func(g_object_unref);
+    if (!win || !win->tab_bar) return modified;
+
+    GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+    for (GList *l = tabs; l != NULL; l = l->next) {
+        ViteTab *tab = VITE_TAB(l->data);
+        if (tab_has_unsaved_changes(tab)) {
+            g_ptr_array_add(modified, g_object_ref(tab));
+        }
+    }
+    g_list_free(tabs);
+    return modified;
+}
+
+static void
+on_unsaved_window_close_response(const char *response, SaveChangesDialogData *dialog, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win) return;
+
+    if (g_strcmp0(response, "discard") == 0) {
+        win->force_close_once = TRUE;
+        gtk_window_close(GTK_WINDOW(win->window));
+        return;
+    }
+
+    if (g_strcmp0(response, "save") == 0) {
+        gboolean started_saves = FALSE;
+        for (guint i = 0; i < dialog->tabs->len; i++) {
+            ViteTab *tab = VITE_TAB(g_ptr_array_index(dialog->tabs, i));
+            if (!save_changes_dialog_tab_selected(dialog, tab)) continue;
+
+            Document *doc = get_tab_document(tab);
+            if (!doc || !document_is_modified(doc)) continue;
+
+            char *filename = save_changes_dialog_filename_for_tab(dialog, tab);
+            const char *current_path = document_get_file_path(doc);
+            char *final_path = NULL;
+
+            if (current_path && *current_path) {
+                char *current_basename = g_path_get_basename(current_path);
+                if (g_strcmp0(filename, current_basename) != 0) {
+                    /* Filename changed - Save As in same directory */
+                    char *dir = g_path_get_dirname(current_path);
+                    final_path = g_build_filename(dir, filename, NULL);
+                    g_free(dir);
+                } else {
+                    /* Save normally */
+                    final_path = g_strdup(current_path);
+                }
+                g_free(current_basename);
+            } else {
+                /* Untitled file - Save to default directory */
+                char *dir = default_save_directory();
+                final_path = g_build_filename(dir, filename, NULL);
+                g_free(dir);
+            }
+
+            save_async_with_progress(win, tab, doc, final_path);
+            g_free(final_path);
+            g_free(filename);
+            started_saves = TRUE;
+        }
+
+        if (!started_saves) {
+            win->force_close_once = TRUE;
+            gtk_window_close(GTK_WINDOW(win->window));
+            return;
+        }
+
+        win->close_when_done = TRUE;
+        check_close_when_done(win);
+    }
+}
+
 static void
 on_window_close_response(AdwAlertDialog *dialog G_GNUC_UNUSED, const char *response, gpointer user_data)
 {
@@ -3580,6 +4085,11 @@ static gboolean
 on_window_close_request(GtkWindow *window, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
+
+    if (win->force_close_once) {
+        win->force_close_once = FALSE;
+        return FALSE;
+    }
     
     if (win->loading_count > 0) {
         GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(window));
@@ -3628,6 +4138,14 @@ on_window_close_request(GtkWindow *window, gpointer user_data)
         
         return TRUE; /* Prevent close */
     }
+
+    GPtrArray *modified_tabs = collect_modified_tabs(win);
+    if (modified_tabs->len > 0) {
+        show_save_changes_dialog(win, modified_tabs, on_unsaved_window_close_response, win);
+        g_ptr_array_unref(modified_tabs);
+        return TRUE;
+    }
+    g_ptr_array_unref(modified_tabs);
     
     return FALSE; /* Allow close */
 }
@@ -4104,8 +4622,12 @@ setup_window(AdwApplicationWindow *window)
     /* Set main_overlay as the AdwToolbarView's content for RAISED shadow effect */
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(win->titlebar_container), GTK_WIDGET(main_overlay));
     
+    /* Make the entire content area draggable (where children don't handle it) */
+    GtkWidget *window_handle = gtk_window_handle_new();
+    gtk_window_handle_set_child(GTK_WINDOW_HANDLE(window_handle), GTK_WIDGET(win->titlebar_container));
+    
     /* Set the toolbar view (which contains header + content) as the window content */
-    adw_application_window_set_content(window, GTK_WIDGET(win->titlebar_container));
+    adw_application_window_set_content(window, window_handle);
     
     /* Create Initial Tab if needed? 
        Actually activate() might do nothing? 
@@ -4866,9 +5388,11 @@ on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user
         }
         
          if (vite_tab_get_close_when_done(tab)) {
-             /* Use g_idle_add ensures we don't close while inside signal emission or similar? 
-                Signal emission is fine. But let's do it directly. */
-             g_signal_emit_by_name(tab, "close-clicked", NULL);
+             if (!error) {
+                 g_signal_emit_by_name(tab, "close-clicked", NULL);
+             } else {
+                 vite_tab_set_close_when_done(tab, FALSE);
+             }
          }
          
         g_object_unref(tab);
