@@ -183,6 +183,7 @@ size_t word_start_or_prev_end_left(EditorWidget *self, size_t offset);
 gboolean is_alt_word_char_at(Document *doc, size_t offset);
 
 double get_effective_gutter_width(EditorWidget *self);
+int get_stable_width(EditorWidget *self);
 void find_line_at_offset(Document *doc, size_t offset, size_t *line_start, size_t *line_end);
 PangoLayout *create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_text, size_t *out_len);
 void update_target_x(EditorWidget *self);

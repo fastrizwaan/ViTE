@@ -43,6 +43,17 @@ get_effective_gutter_width(EditorWidget *self)
     return (digits * char_w) + 8.0 + editor_widget_get_fold_gutter_width(self); 
 }
 
+int
+get_stable_width(EditorWidget *self)
+{
+    GtkWidget *parent = gtk_widget_get_parent(GTK_WIDGET(self));
+    /* If we are inside a ScrolledWindow, the parent width is the stable width to wrap against. */
+    if (parent) {
+        return gtk_widget_get_width(parent);
+    }
+    return gtk_widget_get_width(GTK_WIDGET(self));
+}
+
 /* UTF-8 grapheme cluster navigation helpers */
 
 /* Move cursor right by one grapheme cluster */
@@ -583,7 +594,13 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     double gutter_w = get_effective_gutter_width(self);
 
     if (self->wrap_lines) {
-        int available_w = width - (gutter_w + self->padding_left);
+        int width = get_stable_width(self);
+        double minimap_w = 0;
+        if (self->minimap_enabled) {
+            minimap_w = self->minimap_width;
+            if (minimap_w > (double)width / 2.0) minimap_w = (double)width / 2.0;
+        }
+        int available_w = (int)((double)width - (double)gutter_w - (double)self->padding_left - (double)self->active_right_padding - minimap_w);
         if (available_w < 50) available_w = 50; /* Safe min width */
         pango_layout_set_width(layout, available_w * PANGO_SCALE);
         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);

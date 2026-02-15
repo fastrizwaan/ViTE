@@ -177,8 +177,8 @@ editor_widget_update_adjustments(EditorWidget *self, int widget_width, int widge
 {
     if (!self->vadjustment || !self->doc) return;
     
-    /* If called with -1, use current */
-    if (widget_width < 0) widget_width = gtk_widget_get_width(GTK_WIDGET(self));
+    /* If called with -1, use current. Use STABLE width from parent to avoid scrollbar flip-flop. */
+    if (widget_width < 0) widget_width = get_stable_width(self);
     if (widget_height < 0) widget_height = gtk_widget_get_height(GTK_WIDGET(self));
 
     editor_widget_ensure_metrics(self);
@@ -268,7 +268,7 @@ scroll_to_cursor(EditorWidget *self)
 
     /* If wrapping, adjust y to the cursor's visual row within the line. */
     if (self->wrap_lines) {
-        int widget_width = gtk_widget_get_width(GTK_WIDGET(self));
+        int widget_width = get_stable_width(self);
         double text_start_x = get_effective_gutter_width(self) + self->padding_left;
         double minimap_w = 0;
         if (self->minimap_enabled) {

@@ -54,7 +54,7 @@ render_context_init(SnapshotRenderContext *ctx, EditorWidget *self, GtkSnapshot 
     ctx->snapshot = snapshot;
     ctx->pango_ctx = gtk_widget_get_pango_context(GTK_WIDGET(self));
     
-    ctx->width = gtk_widget_get_width(GTK_WIDGET(self));
+    ctx->width = get_stable_width(self);
     ctx->height = gtk_widget_get_height(GTK_WIDGET(self));
     
     ctx->scroll_x = self->hadjustment ? gtk_adjustment_get_value(self->hadjustment) : 0;
@@ -246,9 +246,9 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
             }
             double relative_start = scroll_y - line_doc_y;
             size_t start_row = (relative_start > 0) ? (size_t)(relative_start / self->line_height) : 0;
-            int available_w = width - text_start_x - self->active_right_padding; 
-            if (available_w < 50) available_w = 50;
-            int chars_per_line = (int)((double)available_w / cw);
+            int avail = (int)((double)width - text_start_x - (double)self->active_right_padding - minimap_w); 
+            if (avail < 50) avail = 50;
+            int chars_per_line = (int)((double)avail / cw);
             if (chars_per_line < 1) chars_per_line = 1;
             
             size_t full_rows = (full_len + chars_per_line - 1) / chars_per_line;

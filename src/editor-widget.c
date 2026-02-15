@@ -462,11 +462,18 @@ editor_widget_measure (GtkWidget      *widget,
     editor_widget_ensure_metrics(self);
 
     if (orientation == GTK_ORIENTATION_HORIZONTAL) {
-        *minimum = 100;
-        *natural = 400; 
+        /* Minimum width should accommodate at least some text content */
+        double gutter_width = get_effective_gutter_width(self);
+        *minimum = (int)(gutter_width + self->cached_char_width * 10 + 20); /* 10 chars + padding */
+        
+        /* Natural width should be larger to show content properly */
+        *natural = (int)(gutter_width + self->cached_char_width * 80 + 20); /* 80 chars + padding */
     } else {
-        *minimum = 100;
-        *natural = 400;
+        /* Minimum height should be at least one line */
+        *minimum = (int)(self->line_height + 20); /* One line + padding */
+        
+        /* Natural height should be multiple lines */
+        *natural = (int)(self->line_height * 10 + 20); /* 10 lines + padding */
     }
 }
 

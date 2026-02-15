@@ -56,10 +56,9 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
     double click_y = y - self->padding_top; /* Adjust for padding in click space */
     size_t max_lines = get_visual_line_count(self);
     PangoContext *context = gtk_widget_get_pango_context(GTK_WIDGET(self));
-    int width = gtk_widget_get_width(GTK_WIDGET(self));
+    int width = get_stable_width(self);
     int height = gtk_widget_get_height(GTK_WIDGET(self));
-    double gutter_w = get_effective_gutter_width(self);
-    double text_start_x = gutter_w + self->padding_left;
+    double text_start_x = get_effective_gutter_width(self) + self->padding_left;
 
     double scroll_x = 0;
     if (self->hadjustment)
@@ -169,7 +168,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                 if (minimap_w > width / 2) minimap_w = width / 2;
             }
 
-            int available_w = width - text_start_x - self->active_right_padding - (int)minimap_w; /* Buffer + Minimap */
+            int available_w = (int)((double)width - text_start_x - (double)self->active_right_padding - minimap_w); /* Buffer + Minimap */
             if (available_w < 50) available_w = 50; 
             pango_layout_set_width(layout, available_w * PANGO_SCALE);
             pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
@@ -188,7 +187,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                 if (minimap_w > width / 2) minimap_w = width / 2;
             }
             
-            int available_w = width - text_start_x - self->active_right_padding - (int)minimap_w; 
+            int available_w = (int)((double)width - text_start_x - (double)self->active_right_padding - minimap_w); 
             if (available_w < 50) available_w = 50;
             int chars_per_line = (int)((double)available_w / cw);
             if (chars_per_line < 1) chars_per_line = 1;
