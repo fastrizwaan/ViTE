@@ -589,8 +589,7 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
             pango_attr_list_unref(attrs);
         }
     }
-    
-    int width = gtk_widget_get_width(GTK_WIDGET(self));
+
     double gutter_w = get_effective_gutter_width(self);
 
     if (self->wrap_lines) {

@@ -46,7 +46,7 @@ calculate_line_height_cb(size_t len, void *user_data)
 }
 
 static double
-calculate_total_content_height(EditorWidget *self, int widget_width, int widget_height)
+calculate_total_content_height(EditorWidget *self, int widget_width, int widget_height G_GNUC_UNUSED)
 {
     size_t total_lines = get_visual_line_count(self);
     double content_height = 0;
