@@ -55,7 +55,8 @@ struct _ViteWindow {
     GtkWidget *titlebar_container; 
     GtkWidget *fullscreen_restore_btn;
     AdwHeaderBar *header_bar;
-    
+    GtkWidget *save_button; /* Reference to the save button */
+
     guint auto_hide_source_id;
 };
 
@@ -2304,6 +2305,22 @@ load_css(void)
     "scrollbar trough > slider:active, "
     "scrollbar:active slider {"
     "    background-color: rgb(53, 132, 228);"
+    "}"
+    ".header-button {"
+    "    border: none;"
+    "    box-shadow: none;"
+    "    outline: none;"
+    "    background: alpha(@window_fg_color, 0.05);"
+    "    border-radius: 10px;"
+    "    margin: 0px;"
+    "    padding-left: 15px;"
+    "    padding-right: 15px;"
+    "}"
+    ".header-button:hover {"
+    "    background: alpha(@window_fg_color, 0.12);"
+    "}"
+    ".header-button:active {"
+    "    background: alpha(@window_fg_color, 0.18);"
     "}";
     GtkCssProvider *provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(provider, css);
@@ -3884,10 +3901,43 @@ on_show_status_bar_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value,
     if (win->status_bar) {
         gtk_widget_set_visible(win->status_bar, state);
     }
-    
+
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
          gtk_widget_grab_focus(editor);
+    }
+}
+
+static void
+on_show_save_button_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow*)user_data;
+    gboolean state = g_variant_get_boolean(value);
+    g_simple_action_set_state(action, value);
+
+    if (win->save_button) {
+        gtk_widget_set_visible(win->save_button, state);
+    }
+
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+         gtk_widget_grab_focus(editor);
+    }
+}
+
+/* Function to update save button visibility from preferences dialog */
+void update_save_button_visibility_from_preferences(GtkWindow *window, gboolean visible) {
+    if (!window) return;
+    
+    ViteWindow *win = g_object_get_data(G_OBJECT(window), "vite-window");
+    if (win && win->save_button) {
+        gtk_widget_set_visible(win->save_button, visible);
+        
+        /* Also update the corresponding action state */
+        GAction *action = g_action_map_lookup_action(G_ACTION_MAP(window), "show-save-button");
+        if (action) {
+            g_simple_action_set_state(G_SIMPLE_ACTION(action), g_variant_new_boolean(visible));
+        }
     }
 }
 
@@ -4314,6 +4364,7 @@ setup_window(AdwApplicationWindow *window)
         { "enable-folding", NULL, NULL, "false", on_enable_folding_toggled, { 0 } },
         { "enable-minimap", NULL, NULL, "false", on_enable_minimap_toggled, { 0 } },
         { "show-status-bar", NULL, NULL, "true", on_show_status_bar_toggled, { 0 } },
+        { "show-save-button", NULL, NULL, "true", on_show_save_button_toggled, { 0 } },
         { "toggle-insert-mode", on_toggle_insert_mode, NULL, NULL, NULL, { 0 } },
         { "select-all", on_select_all_action, NULL, NULL, NULL, { 0 } }
     };
@@ -4482,6 +4533,7 @@ setup_window(AdwApplicationWindow *window)
     g_menu_append(view_menu, "Minimap", "win.enable-minimap");
     g_menu_append(view_menu, "Word Wrap", "win.enable-word-wrap");
     g_menu_append(view_menu, "Show Status Bar", "win.show-status-bar");
+    g_menu_append(view_menu, "Show Save Button", "win.show-save-button");
     
     GMenu *split_menu = g_menu_new();
     g_menu_append(split_menu, "Split Right", "win.split-right");
@@ -4556,6 +4608,14 @@ setup_window(AdwApplicationWindow *window)
     gtk_widget_set_tooltip_text(btn_menu, "Main Menu");
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_menu);
     g_object_unref(main_menu);
+    /* Save Button */
+    GtkWidget *btn_save = gtk_button_new_with_label("Save");
+    gtk_widget_set_tooltip_text(btn_save, "Save (Ctrl+S)");
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(btn_save), "win.save");
+    gtk_widget_add_css_class(btn_save, "header-button"); /* Use header button style */
+    adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_save);
+    win->save_button = btn_save; /* Store reference to the save button */
+
 
     /* main_tab_bar = NULL; Removed */
     win->tab_bar = VITE_TAB_BAR(vite_tab_bar_new());

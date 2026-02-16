@@ -1,19 +1,46 @@
 #include "preferences.h"
 #include <adwaita.h>
 
+/* Forward declaration */
+static void on_save_button_visibility_toggled(GObject *object, GParamSpec *pspec, gpointer user_data);
+
 static GtkWidget*
 create_spin_row(const char *title, EditorWidget *editor, const char *property_name, int min, int max, int step)
 {
     GtkWidget *row = adw_action_row_new();
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
-    
+
     GtkWidget *spin = gtk_spin_button_new_with_range(min, max, step);
     gtk_widget_set_valign(spin, GTK_ALIGN_CENTER);
-    
+
     g_object_bind_property(editor, property_name, spin, "value", G_BINDING_BIDIRECTIONAL | G_BINDING_SYNC_CREATE);
-    
+
     adw_action_row_add_suffix(ADW_ACTION_ROW(row), spin);
     return row;
+}
+
+static void on_save_button_visibility_toggled(GObject *object, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
+{
+    AdwSwitchRow *switch_row = ADW_SWITCH_ROW(object);
+    EditorWidget *editor = EDITOR_WIDGET(user_data);
+    gboolean visible = adw_switch_row_get_active(switch_row);
+    
+    /* Get the parent window to update the save button */
+    GtkWidget *parent = GTK_WIDGET(editor);
+    GtkWindow *window = NULL;
+    
+    /* Traverse up the widget hierarchy to find the window */
+    while (parent) {
+        if (GTK_IS_WINDOW(parent)) {
+            window = GTK_WINDOW(parent);
+            break;
+        }
+        parent = gtk_widget_get_parent(parent);
+    }
+    
+    if (window) {
+        update_save_button_visibility_from_preferences(window, visible);
+    }
 }
 
 static GtkWidget*
@@ -121,6 +148,15 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Enable Code Folding", editor, "enable-folding"));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Enable Minimap", editor, "minimap-enabled"));
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row("Highlight Current Line", editor, "highlight-current-line"));
+    
+    /* Add a new switch for save button visibility */
+    GtkWidget *save_btn_row = adw_switch_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(save_btn_row), "Show Save Button");
+    g_object_set_data(G_OBJECT(save_btn_row), "editor", editor); /* Store editor reference for later use */
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), save_btn_row);
+    
+    /* Connect the switch to update the save button visibility */
+    g_signal_connect(save_btn_row, "notify::active", G_CALLBACK(on_save_button_visibility_toggled), editor);
     
     /* Group: Typography/Font */
     GtkWidget *group_font = adw_preferences_group_new();
