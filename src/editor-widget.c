@@ -493,6 +493,8 @@ editor_widget_size_allocate (GtkWidget *widget,
 static void
 editor_widget_map (GtkWidget *widget)
 {
+    /* Force LTR direction for code editing, regardless of system locale */
+    gtk_widget_set_direction(widget, GTK_TEXT_DIR_LTR);
     GTK_WIDGET_CLASS(editor_widget_parent_class)->map(widget);
 }
 
