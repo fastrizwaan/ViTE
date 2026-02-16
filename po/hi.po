@@ -90,7 +90,7 @@ msgstr ""
 
 #: src/main.c:4568
 msgid "Encoding"
-msgstr "पंक्ति समाप्ति:"
+msgstr "एन्कोडिंग"
 
 #: src/main.c:4591
 msgid "File Type"
