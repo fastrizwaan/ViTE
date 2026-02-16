@@ -2117,7 +2117,10 @@ on_close_split_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G
 static void
 load_css(void)
 {
-    const char *css = 
+    GString *css = g_string_new("");
+
+    /* Part 1: Base styles and Findbar */
+    g_string_append(css,
     "label {"
     "    min-width: 20px;"
     "}"
@@ -2138,6 +2141,40 @@ load_css(void)
     "    padding-left: 4px;"
     "    padding-right: 4px;"
     "}"
+    ".find-entry-wrapper:focus-within {"
+    "    border-color: @theme_selected_bg_color;"
+    "    box-shadow: 0 0 0 1px @theme_selected_bg_color;"
+    "}"
+    ".transparent-entry, .transparent-entry:focus {"
+    "    background: transparent;"
+    "    border: none;"
+    "    box-shadow: none;"
+    "    outline: none;"
+    "}"
+    "findbar button.flat {"
+    "    min-width: 28px;"
+    "    min-height: 28px;"
+    "    padding: 0;"
+    "    border-radius: 6px;"
+    "}"
+    "findbar .dim-label {"
+    "    color: alpha(@window_fg_color, 0.5);"
+    "    font-size: 0.9em;"
+    "    margin-left: 8px;"
+    "    margin-right: 8px;"
+    "}"
+    "findbar .linked > button:first-child {"
+    "    border-top-left-radius: 6px;"
+    "    border-bottom-left-radius: 6px;"
+    "}"
+    "findbar .linked > button:last-child {"
+    "    border-top-right-radius: 6px;"
+    "    border-bottom-right-radius: 6px;"
+    "}"
+    );
+
+    /* Part 2: Statusbar and Popovers */
+    g_string_append(css,
     "statusbar {"
     "    background-color: alpha(@headerbar_bg_color, 1);"
     "    min-height: 1px;"
@@ -2165,7 +2202,6 @@ load_css(void)
     "    padding-bottom: 4px;"
     "    margin-top: 1px;"
     "    margin-bottom: 2px;"
-
     "}"
     "statusbar menubutton > button {"
     "    min-height: 0;"
@@ -2175,39 +2211,11 @@ load_css(void)
     "    padding-bottom: 4px;"
     "    margin-top: 1px;"
     "    margin-bottom: 2px;"
+    "}"
+    );
 
-    "}"
-    ".find-entry-wrapper:focus-within {"
-    "    border-color: @theme_selected_bg_color;"
-    "    box-shadow: 0 0 0 1px @theme_selected_bg_color;"
-    "}"
-    ".transparent-entry, .transparent-entry:focus {"
-    "    background: transparent;"
-    "    border: none;"
-    "    box-shadow: none;"
-    "    outline: none;"
-    "}"
-    "findbar button.flat {"
-    "    min-width: 28px;"
-    "    min-height: 28px;"
-    "    padding: 0;"
-    "    border-radius: 6px;"
-    "}"
-    "findbar .dim-label {"
-    "    color: alpha(@window_fg_color, 0.5);"
-    "    font-size: 0.9em;"
-    "    margin-left: 8px;"
-    "    margin-right: 8px;"
-    "}"
-    /* Linked group override for findbar if needed */
-    "findbar .linked > button:first-child {"
-    "    border-top-left-radius: 6px;"
-    "    border-bottom-left-radius: 6px;"
-    "}"
-    "findbar .linked > button:last-child {"
-    "    border-top-right-radius: 6px;"
-    "    border-bottom-right-radius: 6px;"
-    "}"
+    /* Part 3: Headerbar elements and split buttons */
+    g_string_append(css,
     ".titlebar-box {"
     "    background: @headerbar_bg_color;"
     "    color: @headerbar_fg_color;"
@@ -2245,7 +2253,6 @@ load_css(void)
     "    border-top-right-radius: 0px;"
     "    border-bottom-right-radius: 0px;"
     "}"
-
     ".open-split-btn menubutton:last-child > button {"
     "    border-top-left-radius: 0px; "
     "    border-bottom-left-radius: 0px;" 
@@ -2254,12 +2261,10 @@ load_css(void)
     "    padding-left: 4px;"
     "    padding-right: 6px;"
     "}"
-
     ".open-split-btn menubutton button:active,"
     ".open-split-btn menubutton button:checked {"
     "    background-color: alpha(@window_fg_color, 0.12);"
     "}"
-
     ".titlebar-box headerbar {"
     "    background: none;"
     "    border: none;"
@@ -2269,6 +2274,10 @@ load_css(void)
     "    padding-bottom: 0px;"
     "    min-height: 0px;"
     "}"
+    );
+
+    /* Part 4: Recent list, Scrollbars and Header Buttons (inc. Save) */
+    g_string_append(css,
     ".recent-list {"
     "    background: transparent;"
     "    margin-right: -10px;"
@@ -2276,7 +2285,7 @@ load_css(void)
     ".recent-list row {"
     "    border-radius: 10px;"
     "    margin-right: 16px;"
-   "}"
+    "}"
     ".recent-list .remove-btn {"
     "    opacity: 0;"
     "    transition: opacity 0.1s;"   
@@ -2321,11 +2330,14 @@ load_css(void)
     "}"
     ".header-button:active {"
     "    background: alpha(@window_fg_color, 0.18);"
-    "}";
+    "}"
+    );
+
     GtkCssProvider *provider = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(provider, css);
+    gtk_css_provider_load_from_string(provider, css->str);
     gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
     g_object_unref(provider);
+    g_string_free(css, TRUE);
 }
 
 static void
