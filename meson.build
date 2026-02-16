@@ -10,6 +10,12 @@ gtk_dep = dependency('gtk4', version: '>= 4.0.0')
 adw_dep = dependency('libadwaita-1', version: '>= 1.0.0')
 m_dep = cc.find_library('m', required : false)
 
+i18n = import('i18n')
+
+# Define GETTEXT_PACKAGE
+add_project_arguments('-DGETTEXT_PACKAGE="vite"', language:'c')
+add_project_arguments('-DLOCALEDIR="' + join_paths(get_option('prefix'), get_option('localedir')) + '"', language:'c')
+
 sources = files(
   'src/main.c',
   'src/piece-table.c',
@@ -47,6 +53,8 @@ sources = files(
   'src/editor-minimap.c',
   'src/editor-print.c'
 )
+
+subdir('po')
 
 executable('vite',
   sources,

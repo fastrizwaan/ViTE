@@ -1,0 +1,363 @@
+# French translation for gnome-text-editor
+# Copyright (C) 2022 gnome-text-editor's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-text-editor package.
+# Franck Albaret <contact@dansleru.sh>, 2022
+# Charles Monzat <charles.monzat@free.fr>, 2022.
+# Alexandre Franke <afranke@gnome.org>, 2022.
+# Jean-Marc Tissières <jmetissieres@gmail.com>, 2023.
+# Vincent Chatelain <vinchatl_gnome@proton.me>, 2024.
+# Irénée THIRION <irenee.thirion@e.email>, 2022-2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-text-editor main\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2025-02-24 14:56+0100\n"
+"Last-Translator: Irénée THIRION <irenee.thirion@e.email>\n"
+"Language-Team: French\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"X-Generator: Gtranslator 47.1\n"
+"X-DL-Lang: fr\n"
+"X-DL-Module: gnome-text-editor\n"
+"X-DL-Branch: main\n"
+"X-DL-Domain: po\n"
+"X-DL-State: Translating\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "À _propos de l’Éditeur de texte"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "Indentation"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "A_nnuler"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr "Tout effacer"
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "Fermer la recherche"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "Police personnalisée"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "Tout abandonner"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "Abandonner les modifications…"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "Abandonner les modifications…"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "Afficher les numéros de ligne"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "Afficher la marge de droite"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "Documents"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "Codage"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "Nom du fichier"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr ""
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "Chercher/remplacer"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr "Plein écran"
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "Aller à la ligne"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "Aller à la ligne"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "Surligner la ligne actuelle"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "Largeur d’indentation"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "Indentation"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "Raccourcis clavier"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "Quitter le mode plein écran"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "Changer le codage"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr "Retour à la ligne"
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "Menu principal"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "Nouvel onglet"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "Nouvelle fenêtre"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "Correspondance suivante"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "Ouvrir"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "Impossible d’ouvrir le fichier"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "Nouvel onglet"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"Les documents ouverts contiennent des modifications non enregistrées. Celles-"
+"ci seront définitivement perdues."
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "Texte brut"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "Pré_férences"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "Correspondance précédente"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "Im_primer…"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "Remplacer"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "Chercher/remplacer"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "Position de la marge de droite"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "Enregistrer"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "Enregistrer sous"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "Enregistrer _sous…"
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "Enregistrer les modifications ?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "Rechercher dans les documents"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "Largeur de tabulation"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "Retour à la ligne"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "Affichage"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "Windows (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

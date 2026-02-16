@@ -1,5 +1,6 @@
 #include "find-replace-bar.h"
 #include "document.h"
+#include <glib/gi18n.h>
 
 struct _ViteFindReplaceBar {
     GtkBox parent_instance;
@@ -128,10 +129,10 @@ update_matches_label(ViteFindReplaceBar *self) {
         }
         size_t count = self->current_filter_result->count;
         if (count == 0) {
-            gtk_label_set_text(GTK_LABEL(self->matches_label), "No matches");
+            gtk_label_set_text(GTK_LABEL(self->matches_label), _("No matches"));
         } else {
             char buf[64];
-            snprintf(buf, sizeof(buf), "%zu matches", count);
+            snprintf(buf, sizeof(buf), _("%zu matches"), count);
             gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
         }
         gtk_widget_set_visible(self->matches_label, TRUE);
@@ -148,12 +149,12 @@ update_matches_label(ViteFindReplaceBar *self) {
     size_t total = document_search_task_get_match_count(self->current_search);
     
     if (total == 0) {
-        gtk_label_set_text(GTK_LABEL(self->matches_label), "No matches");
+        gtk_label_set_text(GTK_LABEL(self->matches_label), _("No matches"));
     } else {
          /* For now, just show total count - getting current match index 
             would require the full GArray which is expensive */
          char buf[64];
-         snprintf(buf, sizeof(buf), "%zu matches", total);
+         snprintf(buf, sizeof(buf), _("%zu matches"), total);
          gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
     }
     gtk_widget_set_visible(self->matches_label, TRUE);
@@ -195,12 +196,12 @@ static void on_search_update(GArray *matches, gboolean finished, void *user_data
         int percent = total > 0 ? (int)((searched * 100) / total) : 0;
         
         char buf[64];
-        snprintf(buf, sizeof(buf), "Finding... %d%% (%zu)", percent, match_count);
+        snprintf(buf, sizeof(buf), _("Finding... %d%% (%zu)"), percent, match_count);
         gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
         gtk_widget_set_visible(self->matches_label, TRUE);
     } else {
         char buf[64];
-        snprintf(buf, sizeof(buf), "%zu matches", match_count);
+        snprintf(buf, sizeof(buf), _("%zu matches"), match_count);
         gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
         gtk_widget_set_visible(self->matches_label, TRUE);
     }
@@ -298,7 +299,7 @@ static gboolean filter_async_step(gpointer user_data) {
         
         int percent = (total > 0) ? (int)((processed * 100) / total) : 0;
         char buf[64];
-        snprintf(buf, sizeof(buf), "Filtering... %d%% (%zu)", percent, matches);
+        snprintf(buf, sizeof(buf), _("Filtering... %d%% (%zu)"), percent, matches);
         gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
         gtk_widget_set_visible(self->matches_label, TRUE);
     } else {
@@ -367,7 +368,7 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
         self->current_filter_task = document_filter_async_start(doc, text, regex, case_sensitive);
         if (self->current_filter_task) {
             self->filter_tick_id = g_idle_add(filter_async_step, self);
-            gtk_label_set_text(GTK_LABEL(self->matches_label), "Filtering...");
+            gtk_label_set_text(GTK_LABEL(self->matches_label), _("Filtering..."));
             gtk_widget_set_visible(self->matches_label, TRUE);
         }
         return G_SOURCE_REMOVE;
@@ -405,7 +406,7 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
      * Stores matches in mmap'd file (disk-backed).
      * Uses binary search for O(log N) viewport lookup.
      * Highlights only visible matches to keep UI memory low. */
-    gtk_label_set_text(GTK_LABEL(self->matches_label), "Finding...");
+    gtk_label_set_text(GTK_LABEL(self->matches_label), _("Finding..."));
     gtk_widget_set_visible(self->matches_label, TRUE);
     
     self->current_search = document_search_async_start(doc, text, regex, case_sensitive, whole_word, on_search_update, self);
@@ -684,7 +685,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     /* Search Entry */
     self->find_entry = gtk_search_entry_new();
     gtk_widget_set_hexpand(self->find_entry, TRUE);
-    gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(self->find_entry), "Find");
+    gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(self->find_entry), _("Find"));
     g_signal_connect(self->find_entry, "search-changed", G_CALLBACK(on_search_changed), self);
     
     GtkEventController *key_ctrl = gtk_event_controller_key_new();
@@ -707,11 +708,11 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     GtkWidget *nav_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(nav_box, "linked");
     GtkWidget *prev_btn = gtk_button_new_from_icon_name("go-up-symbolic");
-    gtk_widget_set_tooltip_text(prev_btn, "Previous Match");
+    gtk_widget_set_tooltip_text(prev_btn, _("Previous Match"));
     g_signal_connect(prev_btn, "clicked", G_CALLBACK(on_prev_clicked), self);
     gtk_box_append(GTK_BOX(nav_box), prev_btn);
     GtkWidget *next_btn = gtk_button_new_from_icon_name("go-down-symbolic");
-    gtk_widget_set_tooltip_text(next_btn, "Next Match");
+    gtk_widget_set_tooltip_text(next_btn, _("Next Match"));
     g_signal_connect(next_btn, "clicked", G_CALLBACK(on_next_clicked), self);
     gtk_box_append(GTK_BOX(nav_box), next_btn);
     gtk_box_append(GTK_BOX(row1), nav_box);
@@ -719,7 +720,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     /* Toggle Replace Button (After Nav) */
     GtkWidget *toggle_repl_btn = gtk_button_new_from_icon_name("view-more-symbolic");
     gtk_button_set_icon_name(GTK_BUTTON(toggle_repl_btn), "edit-find-replace-symbolic");
-    gtk_widget_set_tooltip_text(toggle_repl_btn, "Toggle Replace");
+    gtk_widget_set_tooltip_text(toggle_repl_btn, _("Toggle Replace"));
     gtk_widget_add_css_class(toggle_repl_btn, "flat");
     g_signal_connect_swapped(toggle_repl_btn, "clicked", G_CALLBACK(vite_find_replace_bar_toggle_replace), self);
     gtk_box_append(GTK_BOX(row1), toggle_repl_btn);
@@ -737,15 +738,15 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_set_margin_start(pop_box, 12);
     gtk_widget_set_margin_end(pop_box, 12);
     
-    self->regex_check = gtk_check_button_new_with_label("Regular Expressions");
+    self->regex_check = gtk_check_button_new_with_label(_("Regular expression"));
     g_signal_connect(self->regex_check, "toggled", G_CALLBACK(on_search_changed), self);
     gtk_box_append(GTK_BOX(pop_box), self->regex_check);
     
-    self->case_check = gtk_check_button_new_with_label("Case Sensitive");
+    self->case_check = gtk_check_button_new_with_label(_("Case sensitive"));
     g_signal_connect(self->case_check, "toggled", G_CALLBACK(on_search_changed), self);
     gtk_box_append(GTK_BOX(pop_box), self->case_check);
 
-    self->word_check = gtk_check_button_new_with_label("Match Whole Word");
+    self->word_check = gtk_check_button_new_with_label(_("Match whole word only"));
     g_signal_connect(self->word_check, "toggled", G_CALLBACK(on_search_changed), self);
     gtk_box_append(GTK_BOX(pop_box), self->word_check);
     
@@ -778,7 +779,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     
     self->replace_entry = gtk_entry_new();
     gtk_widget_set_hexpand(self->replace_entry, TRUE);
-    gtk_entry_set_placeholder_text(GTK_ENTRY(self->replace_entry), "Replace");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(self->replace_entry), _("Replace"));
     gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self->replace_entry), GTK_ENTRY_ICON_PRIMARY, "edit-find-replace-symbolic");
     gtk_box_append(GTK_BOX(self->replace_box), self->replace_entry);
     
@@ -790,11 +791,11 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_set_visible(self->replace_status_label, FALSE);
     gtk_box_append(GTK_BOX(self->replace_box), self->replace_status_label);
     
-    GtkWidget *do_repl_btn = gtk_button_new_with_label("Replace");
+    GtkWidget *do_repl_btn = gtk_button_new_with_label(_("Replace"));
     g_signal_connect(do_repl_btn, "clicked", G_CALLBACK(on_replace_clicked), self);
     gtk_box_append(GTK_BOX(self->replace_box), do_repl_btn);
     
-    self->replace_all_btn = gtk_button_new_with_label("Replace All");
+    self->replace_all_btn = gtk_button_new_with_label(_("Replace All"));
     g_signal_connect(self->replace_all_btn, "clicked", G_CALLBACK(on_replace_all_clicked), self);
     gtk_box_append(GTK_BOX(self->replace_box), self->replace_all_btn);
     

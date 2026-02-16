@@ -1,0 +1,5 @@
+src/main.c
+src/find-replace-bar.c
+src/syntax.c
+src/preferences.c
+src/status-bar.c

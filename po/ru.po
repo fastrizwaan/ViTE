@@ -1,0 +1,355 @@
+# Russian translation for gnome-text-editor.
+# Copyright (C) 2021 gnome-text-editor's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-text-editor package.
+# Ser82-png <sw@atrus.ru>, 2022.
+# Ivan Molodetskikh <yalterz@gmail.com>, 2022.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: unnamed project\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2025-02-02 15:34+0300\n"
+"Last-Translator: Artur So <arturios2005@mail.ru>\n"
+"Language-Team: Russian <gnome-cyr@gnome.org>\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+"X-Generator: Poedit 3.5\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "О приложении"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "Отступ"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "Отменить"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr "Очистить все"
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "Закрыть поиск"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "Текущий шрифт"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "Не сохранять _все"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "Отменить изменения…"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "Отменить изменения…"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "Показывать номера строк"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "Показывать границу справа"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "Документы"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "Кодировка"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "Имя файла"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr "Найти"
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "Найти/Заменить"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr "Полноэкранный режим"
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "Перейти к строке"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "Перейти к строке"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "Подсвечивать текущую строку"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "Ширина отступа"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "Отступ"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "Комбинации клавиш"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "Выйти из полноэкранного режима"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "Изменение кодировки"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr "Перенос строки"
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "Главное меню"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "Новая вкладка"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "Создать окно"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "Следующее совпадение"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "Открыть"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "Открыть файл"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "Новая вкладка"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"В открытых документах есть несохраненные изменения. Изменения, которые не "
+"были сохранены, будут безвозвратно потеряны."
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "Простой текст"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "Параметры"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "Предыдущее совпадение"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "Печать…"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "Заменить"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "Найти/Заменить"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "Положение правого края"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "Сохранить"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "Сохранить как"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "Сохранить _как…"
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "Сохранить изменения?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "Поиск документов"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "Ширина табуляции"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "Переносить текст"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "Вид"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "Windows (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

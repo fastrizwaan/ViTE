@@ -1,0 +1,353 @@
+# Kazakh translation for gnome-text-editor.
+# Copyright (C) 2022 gnome-text-editor's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-text-editor package.
+# Baurzhan Muftakhidinov <baurthefirst@gmail.com>, 2022.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-text-editor main\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2024-08-30 19:29+0500\n"
+"Last-Translator: Baurzhan Muftakhidinov <baurthefirst@gmail.com>\n"
+"Language-Team: Kazakh <kk_KZ@googlegroups.com>\n"
+"Language: kk\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Poedit 3.4.4\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "Мәтін түзеткіші ту_ралы"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "Шегіну"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "Бас тарту"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr ""
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "Іздеуді жабу"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "Таңдауыңызша қаріп"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "Барлығын ел_емеу"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "Өз_герістерді елемеу"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "Өз_герістерді елемеу"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "Жолдар нөмірлерін көрсету"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "Оң жақ шет өрісін көрсету"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "Құжаттар"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "Жолдың аяқталуы:"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "Файл"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr "Табу"
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "Табу/алмастыру"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr ""
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "Жолға өту"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "Жолға өту"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "Ағымдағы жолды ерекшелеу"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "Шегініс ені"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "Шегіну"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "П_ернетақта жарлықтары"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "Толық экраннан шығу"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "Жолдың аяқталуы:"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr ""
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "Басты мәзір"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "Жаңа бет"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "Жаңа терезе"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "Келесі сәйкестік"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "Ашу"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "Файлды ашу"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "Жаңа бет"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"Ашық құжаттарда сақталмаған өзгерістер бар. Сақталмаған өзгерістер "
+"қайтарылмастай жоғалады."
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "Ашық мәтін"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "Бап_таулар"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "Алдыңғы сәйкестік"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "Бас_паға шығару…"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "Алмастыру"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "Барлығын алмастыру"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "Оң жақ шет өрісінің орны"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "Сақтау"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "Қалайша сақтау"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "Қала_йша сақтау…"
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "Өзгерістерді сақтау керек пе?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "Құжаттарды іздеу"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "Табуляция ені"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "Мәтінді тасымалдау"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "Көрініс"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "Windows (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

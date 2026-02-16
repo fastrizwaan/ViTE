@@ -1,0 +1,400 @@
+# Arabic translation for gnome-text-editor.
+# Copyright (C) 2025 gnome-text-editor's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-text-editor package.
+# Ali Aljishi <ahj696@hotmail.com>, 2022.
+# mohammadA <mohammadAbdulhadi1@gmail.com>, 2023.
+# Ahmed Najmawi <iramosu@protonmail.com>,  2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-text-editor main\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 22:39+0530\n"
+"PO-Revision-Date: 2025-08-03 20:01+0300\n"
+"Last-Translator: Ahmed Najmawi <iramosu@protonmail.com>\n"
+"Language-Team: Arabic <Arabic>\n"
+"Language: ar\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=6; plural=(n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 "
+"&& n%100<=10 ? 3 : n%100>=11 && n%100<=99 ? 4 : 5);\n"
+"X-Generator: Poedit 3.6\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/status-bar.c:450
+msgid "<span font_weight='bold'>OVR</span>"
+msgstr ""
+
+#: src/status-bar.c:448
+msgid "<span font_weight='normal'>INS</span>"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "عَنْ محرِّر النصوص"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "إزاحة آلية"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "أ_لغِ"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr "ام_حُ الكل"
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "أغلق البحث"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "خط مخصَّص"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "أ_همل الكل"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "أ_همل التغييرات…"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "أ_همل التغييرات…"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "أظهر أرقام السطور"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "اعرض الحاشية اليمنى"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "المستندات"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#. Encoding
+#: src/main.c:4568 src/status-bar.c:399
+msgid "Encoding"
+msgstr "ال_ترميز"
+
+#. File Type
+#: src/main.c:4591 src/status-bar.c:387
+msgid "File Type"
+msgstr "اسم الملف"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr ""
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "ابحث\\استبدل"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr "املئ الشاشة"
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "اذهب إلى السطر"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "اذهب إلى السطر"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "ظَلِّل السطر الحالي"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "عرض الإزاحة"
+
+#. Indentation (Tab Width)
+#: src/preferences.c:125 src/preferences.c:180 src/status-bar.c:393
+msgid "Indentation"
+msgstr "الإزاحة"
+
+#: src/status-bar.c:304
+msgid "Indentation Mode"
+msgstr "الإزاحة"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "ا_ختصارات لوحة المفاتيح"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "غادر ملء الشاشة"
+
+#: src/main.c:4574 src/status-bar.c:129
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#. Line Ending
+#. Line Ending
+#: src/main.c:4575 src/status-bar.c:406
+msgid "Line Ending"
+msgstr "غيِّر الترميز"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr "لف الأسطر"
+
+#: src/status-bar.c:458
+#, c-format
+msgid "Ln %d, Col %d"
+msgstr ""
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "القائمة الرئيسية"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "لسان جديد"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "نافذة جديدة"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "المطابقة التالية"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "ا_فتح"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "تعذَّر فتح الملف"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "لسان جديد"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"في المستندات المفتوحة تغييرات لم تحفظ. ستُحذف التغييرات الغير المحفوظة نهائيًا."
+
+#: src/main.c:4579 src/status-bar.c:207 src/status-bar.c:387
+#: src/status-bar.c:467
+msgid "Plain Text"
+msgstr "نص عادي"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "ال_تفضيلات"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "المطابقة السابقة"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "ا_طبع…"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "استبدل"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "استبدّل الكل"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "موضع الهامش الأيمن"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "احفظ"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "احفظ باسم"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "احفظ _باسم…"
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "سَتَحفَظُ التغييرات؟"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "ابحث في المستندات"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Show Overview Map"
+msgstr "إظهار خارطة النظرة العامة"
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/status-bar.c:303
+msgid "Spaces"
+msgstr ""
+
+#: src/status-bar.c:536
+#, c-format
+msgid "Spaces: %d"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Status Bar is Visible"
+msgstr "شريط الحالة مرئي"
+
+#: src/preferences.c:185 src/status-bar.c:312
+msgid "Tab Width"
+msgstr "عرض الجدولة"
+
+#: src/status-bar.c:534
+#, c-format
+msgid "Tab: %d"
+msgstr ""
+
+#: src/status-bar.c:393
+msgid "Tab: 4"
+msgstr ""
+
+#: src/status-bar.c:302
+msgid "Tabs"
+msgstr "لسان جديد"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "لَف النص"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572 src/status-bar.c:127
+msgid "Unix/Linux (LF)"
+msgstr "يونكس\\لينكس (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "عرض"
+
+#: src/main.c:4573 src/status-bar.c:128
+msgid "Windows (CRLF)"
+msgstr "ويندوز (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

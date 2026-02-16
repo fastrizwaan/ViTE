@@ -1,0 +1,354 @@
+# Persian translation for gnome-text-editor.
+# Copyright (C) 2022 gnome-text-editor's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-text-editor package.
+# Danial Behzadi <dani.behzi@ubuntu.com>, 2022-2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-text-editor main\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2025-03-03 21:37+0330\n"
+"Last-Translator: Danial Behzadi <dani.behzi@ubuntu.com>\n"
+"Language-Team: Persian <fa@li.org>\n"
+"Language: fa\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=n > 1;\n"
+"X-DamnedLies-Scope: partial\n"
+"X-Generator: Poedit 3.5\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "دربارهٔ ویرایشگر متن"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "تورفتگی خودکار"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "لغو"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr "‌پاک کردن همه"
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "بستن جست‌وجو"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "قلم سفارشی"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "دور انداختن همه"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "دور انداختن تغییرات…"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "دور انداختن تغییرات…"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "نمایش شمارهٔ خط‌ها"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "نمایش حاشیهٔ راست"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "سندها"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "کدگذاری"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "نام پرونده"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr "یافتن"
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "جست‌وجو و جایگزینی"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr "تمام‌صفحه"
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "رفتن به خط"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "رفتن به خط"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "پررنگ سازی خط فعلی"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "پهنای تورفتنگی"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "تورفتگی"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "میان‌برهای صفحه‌کلید"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "خروج از تمام‌صفحه"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "پایان خط:"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr "شکاندن خط"
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "فهرست اصلی"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "زبانهٔ جدید"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "پنجرهٔ جدید"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "نتیجهٔ بعدی"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "گشودن"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "گشودن پرونده"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "زبانهٔ جدید"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"سندهای گشوده، تغییراتی ذخیره نشده دارند. تغییراتی که ذخیره نشده‌اند از دست "
+"خواهند رفت."
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "متن خام"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "ترجیحات"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "نتیجهٔ پیشین"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "چاپ…"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "جایگزینی"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "جای‌گزینی همه"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "موقعیت حاشیهٔ راست"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "ذخیره"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "ذخیره به شکل"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "ذخیره به _شکل…"
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "ذخیرهٔ تغییرات؟"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "جست‌وجوی سندها"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "پهنای جهش"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "شکاندن متن"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "یونیکس/گنو (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "نما"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "ویندوز (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

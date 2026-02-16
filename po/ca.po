@@ -1,0 +1,395 @@
+# Catalan translations for PACKAGE package.
+# Copyright (C) 2026 THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# Automatically generated, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 22:39+0530\n"
+"PO-Revision-Date: 2026-02-16 22:37+0530\n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: ca\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/status-bar.c:450
+msgid "<span font_weight='bold'>OVR</span>"
+msgstr ""
+
+#: src/status-bar.c:448
+msgid "<span font_weight='normal'>INS</span>"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr ""
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr ""
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr ""
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr ""
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr ""
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "Tipus de lletra personalitzada"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr ""
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr ""
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr ""
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "Mostra els números de línia"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "Mostra el marge dret"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "Document"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#. Encoding
+#: src/main.c:4568 src/status-bar.c:399
+msgid "Encoding"
+msgstr ""
+
+#. File Type
+#: src/main.c:4591 src/status-bar.c:387
+msgid "File Type"
+msgstr ""
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr ""
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr ""
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr "Pantalla completa"
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr ""
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr ""
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "Ressalta la línia actual"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "Amplada de sagnat"
+
+#. Indentation (Tab Width)
+#: src/preferences.c:125 src/preferences.c:180 src/status-bar.c:393
+msgid "Indentation"
+msgstr "Sagnat"
+
+#: src/status-bar.c:304
+msgid "Indentation Mode"
+msgstr ""
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr ""
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "Abandona la pantalla completa"
+
+#: src/main.c:4574 src/status-bar.c:129
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#. Line Ending
+#. Line Ending
+#: src/main.c:4575 src/status-bar.c:406
+msgid "Line Ending"
+msgstr ""
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr "Ajustament de línia"
+
+#: src/status-bar.c:458
+#, c-format
+msgid "Ln %d, Col %d"
+msgstr ""
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "Menú principal"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "Pestanya nova"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "Finestra nova"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "Coincidència posterior"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr ""
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr ""
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr ""
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+
+#: src/main.c:4579 src/status-bar.c:207 src/status-bar.c:387
+#: src/status-bar.c:467
+msgid "Plain Text"
+msgstr "Text net"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr ""
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "Coincidència anterior"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr ""
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "Substitueix"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr ""
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "Posició del marge dret"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr ""
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr ""
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr ""
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "Voleu desar els canvis?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "Cerca als documents"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Show Overview Map"
+msgstr "Mostra el mapa general"
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/status-bar.c:303
+msgid "Spaces"
+msgstr ""
+
+#: src/status-bar.c:536
+#, c-format
+msgid "Spaces: %d"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Status Bar is Visible"
+msgstr "La barra d'estat és visible"
+
+#: src/preferences.c:185 src/status-bar.c:312
+msgid "Tab Width"
+msgstr "Amplada de la pestanya"
+
+#: src/status-bar.c:534
+#, c-format
+msgid "Tab: %d"
+msgstr ""
+
+#: src/status-bar.c:393
+msgid "Tab: 4"
+msgstr ""
+
+#: src/status-bar.c:302
+msgid "Tabs"
+msgstr ""
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "Ajustament del text"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572 src/status-bar.c:127
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "Visualització"
+
+#: src/main.c:4573 src/status-bar.c:128
+msgid "Windows (CRLF)"
+msgstr ""
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

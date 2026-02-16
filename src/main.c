@@ -1,6 +1,8 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <glib/gstdio.h>
+#include <glib/gi18n.h>
+#include <locale.h>
 #include "editor-widget.h"
 #include "document.h"
 #include "preferences.h"
@@ -17,18 +19,18 @@ typedef struct {
 } FileTypeEntry;
 
 static const FileTypeEntry file_types[] = {
-    { "Plain Text", "plain" },
+    { N_("Plain Text"), "plain" },
     { "C", "c" },
     { "C++", "cpp" },
     { "Python", "python" },
     { "Bash", "bash" },
     { "Rust", "rust" },
-    { "Header", "h" },
+    { N_("Header"), "h" },
     { "YAML", "yaml" },
     { "JSON", "json" },
     { "XML", "xml" },
     { "JavaScript", "javascript" },
-    { "Desktop Entry", "desktop" },
+    { N_("Desktop Entry"), "desktop" },
     { "Markdown", "markdown" },
     { NULL, NULL }
 };
@@ -490,12 +492,12 @@ show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCall
     gtk_widget_set_margin_end(header, 12);
     gtk_box_append(GTK_BOX(main_box), header);
 
-    GtkWidget *title = gtk_label_new("Save Changes?");
+    GtkWidget *title = gtk_label_new(_("Save Changes?"));
     gtk_widget_add_css_class(title, "title-2");
     gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(header), title);
 
-    GtkWidget *body = gtk_label_new("Open documents contain unsaved changes.\nChanges which are not saved will be permanently lost.");
+    GtkWidget *body = gtk_label_new(_("Open documents contain unsaved changes.\nChanges which are not saved will be permanently lost."));
     gtk_widget_add_css_class(body, "dim-label");
     gtk_label_set_wrap(GTK_LABEL(body), TRUE);
     gtk_label_set_justify(GTK_LABEL(body), GTK_JUSTIFY_CENTER);
@@ -572,9 +574,9 @@ show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCall
     gtk_widget_set_margin_end(button_box, 24);
     gtk_box_append(GTK_BOX(main_box), button_box);
 
-    GtkWidget *cancel_btn = gtk_button_new_with_label("Cancel");
-    GtkWidget *discard_btn = gtk_button_new_with_label("Discard All");
-    GtkWidget *save_btn = gtk_button_new_with_label("Save");
+    GtkWidget *cancel_btn = gtk_button_new_with_label(_("Cancel"));
+    GtkWidget *discard_btn = gtk_button_new_with_label(_("Discard All"));
+    GtkWidget *save_btn = gtk_button_new_with_label(_("Save"));
     
     gtk_widget_add_css_class(discard_btn, "destructive-action");
     gtk_widget_add_css_class(save_btn, "suggested-action");
@@ -703,11 +705,11 @@ on_discard_all_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G
     Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
     if (!document_can_undo(doc)) return;
     
-    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Discard Changes?", 
-                                                 "This will undo all changes and clear undo/redo history. The document will return to its last saved (or opened) state."));
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(_("Discard Changes?"), 
+                                                 _("This will undo all changes and clear undo/redo history. The document will return to its last saved (or opened) state.")));
     
-    adw_alert_dialog_add_response(dialog, "cancel", "Cancel");
-    adw_alert_dialog_add_response(dialog, "discard", "Discard Changes");
+    adw_alert_dialog_add_response(dialog, "cancel", _("Cancel"));
+    adw_alert_dialog_add_response(dialog, "discard", _("Discard Changes"));
     adw_alert_dialog_set_response_appearance(dialog, "discard", ADW_RESPONSE_DESTRUCTIVE);
     
     adw_alert_dialog_set_default_response(dialog, "cancel");
@@ -1797,7 +1799,11 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
              
              /* Also update File Type / Encoding / Line Endings using Document properties */
              const char *lang_name = editor_widget_get_language_name(EDITOR_WIDGET(editor));
-             vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), lang_name);
+             if (g_strcmp0(lang_name, "Plain Text") == 0) {
+                 vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL);
+             } else {
+                 vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), lang_name);
+             }
              
              /* BIND Menu Actions to Editor Properties */
              /* This mirrors the logic in preferences.c, ensuring robust sync */
@@ -2972,13 +2978,13 @@ on_recent_context_menu(GtkGestureClick *gesture G_GNUC_UNUSED, int n_press G_GNU
     GSimpleActionGroup *group = g_simple_action_group_new();
     
     if (row) {
-        g_menu_append(menu, "Remove from Recents", "context.remove");
+        g_menu_append(menu, _("Remove from Recents"), "context.remove");
         GSimpleAction *act_remove = g_simple_action_new("remove", NULL);
         g_signal_connect(act_remove, "activate", G_CALLBACK(on_remove_recent_clicked), row);
         g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_remove));
     }
     
-    g_menu_append(menu, "Clear All Recents", "context.clear-all");
+    g_menu_append(menu, _("Clear All Recents"), "context.clear-all");
     GSimpleAction *act_clear = g_simple_action_new("clear-all", NULL);
     g_signal_connect(act_clear, "activate", G_CALLBACK(on_clear_all_clicked), list);
     g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(act_clear));
@@ -3209,7 +3215,11 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
             }
         }
         if (win->status_bar) {
-            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), display_name);
+            if (g_strcmp0(display_name, "Plain Text") == 0) {
+                vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL);
+            } else {
+                vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), _(display_name));
+            }
         }
     }
     
@@ -3396,7 +3406,7 @@ show_goto_line_popover(GtkWidget *parent_widget, EditorWidget *editor)
     gtk_widget_set_margin_end(box, 3);
     gtk_popover_set_child(GTK_POPOVER(popover), box);
     
-    GtkWidget *label = gtk_label_new("Go to Line:");
+    GtkWidget *label = gtk_label_new(_("Go to Line:"));
     gtk_box_append(GTK_BOX(box), label);
     
     /* Determine max lines */
@@ -3858,7 +3868,7 @@ on_set_file_type(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer 
 
     /* Update Status Bar - need to map ID to display name */
     /* Find the display name for the language ID */
-    const char *display_name = "Plain Text";
+    const char *display_name = NULL;
     for (int i = 0; file_types[i].name != NULL; i++) {
         if (g_strcmp0(file_types[i].id, lang_id) == 0) {
             display_name = file_types[i].name;
@@ -3867,7 +3877,11 @@ on_set_file_type(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer 
     }
     
     if (win->status_bar) {
-        vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), display_name);
+        if (g_strcmp0(lang_id, "plain") == 0) {
+            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL);
+        } else if (display_name) {
+            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), _(display_name));
+        }
     }
     
     if (editor && EDITOR_IS_WIDGET(editor)) {
@@ -4305,7 +4319,7 @@ setup_window(AdwApplicationWindow *window)
     
     /* Fullscreen Restore Button */
     GtkWidget *btn_restore = gtk_button_new_from_icon_name("view-restore-symbolic");
-    gtk_widget_set_tooltip_text(btn_restore, "Leave Fullscreen");
+    gtk_widget_set_tooltip_text(btn_restore, _("Leave Fullscreen"));
     gtk_widget_set_visible(btn_restore, FALSE); /* Hidden initially */
     gtk_actionable_set_action_name(GTK_ACTIONABLE(btn_restore), "win.fullscreen");
     win->fullscreen_restore_btn = btn_restore;
@@ -4430,7 +4444,7 @@ setup_window(AdwApplicationWindow *window)
     
     /* Open Split Button */
     GtkWidget *split_btn = adw_split_button_new();
-    adw_split_button_set_label(ADW_SPLIT_BUTTON(split_btn), "Open");
+    adw_split_button_set_label(ADW_SPLIT_BUTTON(split_btn), _("Open"));
     g_signal_connect(split_btn, "clicked", G_CALLBACK(on_open_btn_clicked), NULL);
     
     /* Custom Popover for Recent Files and Alignment */
@@ -4457,7 +4471,7 @@ setup_window(AdwApplicationWindow *window)
     gtk_widget_set_margin_start(search_entry, 6);
     gtk_widget_set_margin_end(search_entry, 6);
     gtk_widget_set_margin_bottom(search_entry, 6);
-    g_object_set(search_entry, "placeholder-text", "Search Documents", NULL);
+    g_object_set(search_entry, "placeholder-text", _("Search documents"), NULL);
     gtk_box_append(GTK_BOX(pop_vbox), search_entry);
     
     GtkEventController *key_ctrl = gtk_event_controller_key_new();
@@ -4497,7 +4511,7 @@ setup_window(AdwApplicationWindow *window)
     
     /* Styling to look like single button by default */
     /* By default AdwSplitButton looks joined. We can add specific classes if needed. */
-     gtk_widget_set_tooltip_text(split_btn, "Open File");
+     gtk_widget_set_tooltip_text(split_btn, _("Open File"));
      gtk_widget_add_css_class(split_btn, "open-split-btn");
     /* Set tooltip for the dropdown arrow (if accessible) or just relied on general one. 
        AdwSplitButton documentation suggests "dropdown-tooltip" property. */
@@ -4507,7 +4521,7 @@ setup_window(AdwApplicationWindow *window)
     
     /* New Tab (Icon Only) */
     GtkWidget *btn_new = gtk_button_new_from_icon_name("tab-new-symbolic");
-    gtk_widget_set_tooltip_text(btn_new, "New Tab");
+    gtk_widget_set_tooltip_text(btn_new, _("New Tab"));
     g_signal_connect(btn_new, "clicked", G_CALLBACK(on_new_tab_clicked_header), window);
     adw_header_bar_pack_start(ADW_HEADER_BAR(header), btn_new);
     
@@ -4517,21 +4531,21 @@ setup_window(AdwApplicationWindow *window)
     GMenu *main_menu = g_menu_new();
     
     /* Group 1: New Window, etc. */
-    g_menu_append(main_menu, "New Window", "win.new-window");
+    g_menu_append(main_menu, _("New Window"), "win.new-window");
     
     /* Group 2: File Actions */
     GMenu *s_file = g_menu_new();
-    g_menu_append(s_file, "Save", "win.save");
-    g_menu_append(s_file, "Save As…", "win.save-as");
-    g_menu_append(s_file, "Discard Changes", "win.discard-changes");
+    g_menu_append(s_file, _("Save"), "win.save");
+    g_menu_append(s_file, _("Save As…"), "win.save-as");
+    g_menu_append(s_file, _("Discard Changes"), "win.discard-changes");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_file));
     g_object_unref(s_file);
     
     /* Group 3: Search Actions */
     GMenu *s_search = g_menu_new();
-    g_menu_append(s_search, "Filter Lines", "win.filter");
-    g_menu_append(s_search, "Find/Replace", "win.find");
-    g_menu_append(s_search, "Go to Line…", "win.goto-line");
+    g_menu_append(s_search, _("Filter Lines"), "win.filter");
+    g_menu_append(s_search, _("Find/Replace"), "win.find");
+    g_menu_append(s_search, _("Go to Line…"), "win.goto-line");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_search));
     g_object_unref(s_search);
     
@@ -4540,20 +4554,20 @@ setup_window(AdwApplicationWindow *window)
     
     /* View Submenu */
     GMenu *view_menu = g_menu_new();
-    g_menu_append(view_menu, "Show Line Numbers", "win.show-line-numbers");
-    g_menu_append(view_menu, "Code Folding", "win.enable-folding");
-    g_menu_append(view_menu, "Minimap", "win.enable-minimap");
-    g_menu_append(view_menu, "Word Wrap", "win.enable-word-wrap");
-    g_menu_append(view_menu, "Show Status Bar", "win.show-status-bar");
-    g_menu_append(view_menu, "Show Save Button", "win.show-save-button");
+    g_menu_append(view_menu, _("Display Line Numbers"), "win.show-line-numbers");
+    g_menu_append(view_menu, _("Enable Code Folding"), "win.enable-folding");
+    g_menu_append(view_menu, _("Show Overview Map"), "win.enable-minimap");
+    g_menu_append(view_menu, _("Word Wrap"), "win.enable-word-wrap");
+    g_menu_append(view_menu, _("Status Bar is Visible"), "win.show-status-bar");
+    g_menu_append(view_menu, _("Show Save Button"), "win.show-save-button");
     
     GMenu *split_menu = g_menu_new();
-    g_menu_append(split_menu, "Split Right", "win.split-right");
-    g_menu_append(split_menu, "Split Down", "win.split-down");
-    g_menu_append(split_menu, "Close View", "win.close-view");
+    g_menu_append(split_menu, _("Split right"), "win.split-right");
+    g_menu_append(split_menu, _("Split down"), "win.split-down");
+    g_menu_append(split_menu, _("Close View"), "win.close-view");
     g_menu_append_section(view_menu, NULL, G_MENU_MODEL(split_menu));
     g_object_unref(split_menu);
-    g_menu_append_submenu(s_subs, "View", G_MENU_MODEL(view_menu));
+    g_menu_append_submenu(s_subs, _("View"), G_MENU_MODEL(view_menu));
     g_object_unref(view_menu);
     
     /* Document Submenu */
@@ -4563,33 +4577,33 @@ setup_window(AdwApplicationWindow *window)
     g_menu_append(enc_menu, "UTF-8", "win.set-encoding::utf-8");
     g_menu_append(enc_menu, "UTF-16 LE", "win.set-encoding::utf-16le");
     g_menu_append(enc_menu, "UTF-16 BE", "win.set-encoding::utf-16be");
-    g_menu_append_submenu(doc_menu, "Encoding", G_MENU_MODEL(enc_menu));
+    g_menu_append_submenu(doc_menu, _("Encoding"), G_MENU_MODEL(enc_menu));
     g_object_unref(enc_menu);
     
     GMenu *le_menu = g_menu_new();
-    g_menu_append(le_menu, "Unix/Linux (LF)", "win.set-line-ending::lf");
-    g_menu_append(le_menu, "Windows (CRLF)", "win.set-line-ending::crlf");
-    g_menu_append(le_menu, "Legacy Mac (CR)", "win.set-line-ending::cr");
-    g_menu_append_submenu(doc_menu, "Line Ending", G_MENU_MODEL(le_menu));
+    g_menu_append(le_menu, _("Unix/Linux (LF)"), "win.set-line-ending::lf");
+    g_menu_append(le_menu, _("Windows (CRLF)"), "win.set-line-ending::crlf");
+    g_menu_append(le_menu, _("Legacy Mac (CR)"), "win.set-line-ending::cr");
+    g_menu_append_submenu(doc_menu, _("Line Ending"), G_MENU_MODEL(le_menu));
     g_object_unref(le_menu);
 
     GMenu *ft_menu = g_menu_new();
-    g_menu_append(ft_menu, "Plain Text", "win.set-file-type::plain");
+    g_menu_append(ft_menu, _("Plain Text"), "win.set-file-type::plain");
     g_menu_append(ft_menu, "C", "win.set-file-type::c");
     g_menu_append(ft_menu, "C++", "win.set-file-type::cpp");
     g_menu_append(ft_menu, "Python", "win.set-file-type::python");
     g_menu_append(ft_menu, "Bash", "win.set-file-type::bash");
     g_menu_append(ft_menu, "Rust", "win.set-file-type::rust");
-    g_menu_append(ft_menu, "Header", "win.set-file-type::h");
+    g_menu_append(ft_menu, _("Header"), "win.set-file-type::h");
     g_menu_append(ft_menu, "YAML", "win.set-file-type::yaml");
     g_menu_append(ft_menu, "JSON", "win.set-file-type::json");
     g_menu_append(ft_menu, "XML", "win.set-file-type::xml");
     g_menu_append(ft_menu, "JavaScript", "win.set-file-type::javascript");
-    g_menu_append(ft_menu, "Desktop Entry", "win.set-file-type::desktop");
-    g_menu_append_submenu(doc_menu, "File Type", G_MENU_MODEL(ft_menu));
+    g_menu_append(ft_menu, _("Desktop Entry"), "win.set-file-type::desktop");
+    g_menu_append_submenu(doc_menu, _("File Type"), G_MENU_MODEL(ft_menu));
     g_object_unref(ft_menu);
 
-    g_menu_append_submenu(s_subs, "Document", G_MENU_MODEL(doc_menu));
+    g_menu_append_submenu(s_subs, _("Document"), G_MENU_MODEL(doc_menu));
     g_object_unref(doc_menu);
     
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_subs));
@@ -4597,32 +4611,32 @@ setup_window(AdwApplicationWindow *window)
     
     /* Group 5: Print, Fullscreen */
     GMenu *s_extra = g_menu_new();
-    g_menu_append(s_extra, "Print", "win.print");
+    g_menu_append(s_extra, _("Print"), "win.print");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_extra));
     g_object_unref(s_extra);
     
     GMenu *s_fs = g_menu_new();
-    g_menu_append(s_fs, "Fullscreen", "win.fullscreen");
+    g_menu_append(s_fs, _("Fullscreen"), "win.fullscreen");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_fs));
     g_object_unref(s_fs);
     
     /* Group 6: App Info */
     GMenu *s_app = g_menu_new();
-    g_menu_append(s_app, "Keyboard Shortcuts", "win.shortcuts");
-    g_menu_append(s_app, "About Virtual Text Editor", "win.about");
-    g_menu_append(s_app, "Preferences", "win.preferences");
+    g_menu_append(s_app, _("Keyboard Shortcuts"), "win.shortcuts");
+    g_menu_append(s_app, _("About Virtual Text Editor"), "win.about");
+    g_menu_append(s_app, _("Preferences"), "win.preferences");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_app));
     g_object_unref(s_app);
     
     GtkWidget *btn_menu = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(btn_menu), "open-menu-symbolic");
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(btn_menu), G_MENU_MODEL(main_menu));
-    gtk_widget_set_tooltip_text(btn_menu, "Main Menu");
+    gtk_widget_set_tooltip_text(btn_menu, _("Main Menu"));
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_menu);
     g_object_unref(main_menu);
     /* Save Button */
-    GtkWidget *btn_save = gtk_button_new_with_label("Save");
-    gtk_widget_set_tooltip_text(btn_save, "Save (Ctrl+S)");
+    GtkWidget *btn_save = gtk_button_new_with_label(_("Save"));
+    gtk_widget_set_tooltip_text(btn_save, _("Save (Ctrl+S)"));
     gtk_actionable_set_action_name(GTK_ACTIONABLE(btn_save), "win.save");
     gtk_widget_add_css_class(btn_save, "header-button"); /* Use header button style */
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_save);
@@ -4636,7 +4650,7 @@ setup_window(AdwApplicationWindow *window)
     /* Open Tabs Button (Overflow Menu) */
     GtkWidget *btn_tabs = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(btn_tabs), "pan-down-symbolic");
-    gtk_widget_set_tooltip_text(btn_tabs, "Open Tabs");
+    gtk_widget_set_tooltip_text(btn_tabs, _("Open Tabs"));
     gtk_widget_set_visible(btn_tabs, FALSE); /* Hidden by default until overflow */
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_tabs);
 
@@ -5116,7 +5130,11 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
             }
         }
         if (target_window->status_bar) {
-            vite_status_bar_set_file_type(VITE_STATUS_BAR(target_window->status_bar), display_name);
+            if (g_strcmp0(display_name, "Plain Text") == 0) {
+                vite_status_bar_set_file_type(VITE_STATUS_BAR(target_window->status_bar), NULL);
+            } else {
+                vite_status_bar_set_file_type(VITE_STATUS_BAR(target_window->status_bar), _(display_name));
+            }
         }
     }
     
@@ -5197,9 +5215,14 @@ main(int argc, char **argv)
 {
     AdwApplication *app;
     int status;
-    adw_init();
-    
-    app = adw_application_new("io.github.fastrizwaan.ViTE", G_APPLICATION_HANDLES_OPEN);
+
+    setlocale(LC_ALL, "");
+    setlocale(LC_NUMERIC, "C"); /* Prevent issues with float parsing in drivers/libs */
+    bindtextdomain(GETTEXT_PACKAGE, LOCALEDIR);
+    bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
+    textdomain (GETTEXT_PACKAGE);
+
+    app = adw_application_new ("io.github.fastrizwaan.ViTE", G_APPLICATION_HANDLES_OPEN);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
     g_signal_connect(app, "open", G_CALLBACK(on_open), NULL);
     status = g_application_run(G_APPLICATION(app), argc, argv);
@@ -5610,7 +5633,7 @@ on_save_as_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNU
     const char *current_path = document_get_file_path(doc);
     
     GtkFileDialog *dialog = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(dialog, "Save As");
+    gtk_file_dialog_set_title(dialog, _("Save As"));
     
     /* Set initial file/folder if document has path */
     if (current_path) {

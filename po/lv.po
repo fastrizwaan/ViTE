@@ -1,0 +1,353 @@
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+#
+# SPDX-FileCopyrightText: 2022, 2023, 2024 Rūdolfs Mazurs <rudolfs.mazurs@gmail.com>
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2024-09-11 22:53+0300\n"
+"Last-Translator: Rūdolfs Mazurs <rudolfs.mazurs@gmail.com>\n"
+"Language-Team: Latvian <lata-l10n@googlegroups.com>\n"
+"Language: lv\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n != 0 ? 1 : "
+"2);\n"
+"X-Generator: Lokalize 23.08.5\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "Par teksta redaktoru"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "Automātiskās atkāpes"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "Atcelt"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr ""
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "Aizvērt meklēšanu"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "Pielāgots fonts"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "Nesa_glabāt visu"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "Nesa_glabāt izmaiņas"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "Nesa_glabāt izmaiņas"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "Rādīt rindu numurus"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "Rādīt labo malu"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "Dokumenti"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "Rindas beigas:"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "Datne"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr "Meklēt"
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "Meklēt/aizstāt"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr ""
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "Iet uz rindu"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "Iet uz rindu"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "Izcelt aktīvo rindu"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "Atkāpes platums"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "Atkāpju veidošana"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "Tastatūras īsinājumtaustiņi"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "Iziet no pilnekrāna režīma"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "Rindas beigas:"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr ""
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "Galvenā izvēlne"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "Jauna cilne"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "Jauns logs"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "Nākamā atbilsme"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "Atvērt"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "Atvērt datni"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "Jauna cilne"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"Atvērtie dokumenti satur nesaglabātās izmaiņas. Šīs izmaiņas tiks "
+"neatgriezeniski zaudētas."
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "Vienkāršs teksts"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "Ie_statījumi"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "Iepriekšējā atbilsme"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "Drukāt…"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "Aizstāt"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "Meklēt/aizstāt"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "Labās malas pozīcija"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "Saglabāt"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "Saglabāt kā"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "S_aglabāt kā…"
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "Saglabāt izmaiņas?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "Meklēt dokumentus"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "Tabulācijas platums"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "Teksta aplaušana"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "Skats"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "Windows (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

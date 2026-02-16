@@ -1007,7 +1007,7 @@ editor_widget_set_language(EditorWidget *self, const char *lang)
 {
     if (self->syntax_ctx) {
         /* DEBUG: Print language set */
-        g_print("DEBUG: editor_widget_set_language called with '%s'\n", lang);
+
         
         syntax_context_set_language(self->syntax_ctx, lang);
         

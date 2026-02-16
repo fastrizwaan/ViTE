@@ -1,0 +1,357 @@
+# Japanese translation for gnome-text-editor.
+# Copyright (C) 2022-2023, 2025 gnome-text-editor's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-text-editor package.
+# sujiniku <sujinikusityuu@gmail.com>, 2022.
+# sicklylife <translation@sicklylife.jp>, 2022.
+# 小山田 純 <oyamadajun@outlook.jp>, 2022-2023.
+# Seiji Iizuka <seiji@iizuka.dev>, 2025.
+# Kusano Takayuki <https://bsky.app/profile/tkusano.jp>, 2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-text-editor main\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2025-05-11 11:51+0900\n"
+"Last-Translator: Kusano Takayuki <https://bsky.app/profile/tkusano.jp>\n"
+"Language-Team: Japanese <https://l10n.gnome.org/teams/ja/>\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Gtranslator 48.0\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "テキストエディターについて(_B)"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "インデント"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "キャンセル"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr "すべてクリア(_C)"
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "検索を閉じる"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "カスタムフォント"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "すべて破棄(_D)"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "変更を破棄(_D)"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "変更を破棄(_D)"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "行番号の表示"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "右マージンを表示"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "文書"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "エンコード(_E)"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "ファイル名"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr ""
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "検索/置換"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr "全画面"
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "指定行へ移動"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "指定行へ移動"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "現在の行の強調表示"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "インデントの幅"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "インデント"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "キーボードショートカット(_K)"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "全画面を終了"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "改行文字:"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr "行の折り返し"
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "メインメニュー"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "新しいタブ"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "新しいウィンドウ"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "次の一致"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "開く"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "ファイルを開けませんでした"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "新しいタブ"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"開いている文書に未保存の変更内容が含まれています。保存しないと変更内容が完全"
+"に失われます。"
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "プレーンテキスト"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "設定(_R)"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "前の一致"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "印刷…(_P)"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "置換"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "検索/置換"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "右マージンの位置"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "保存"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr "新しいタブ (Ctrl+T)"
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "名前を付けて保存"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "名前を付けて保存(_A)…"
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "変更を保存しますか?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "文書を検索"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "タブの幅"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "テキストの折り返し"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "表示"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "Windows (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

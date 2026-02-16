@@ -1,4 +1,5 @@
 #include "status-bar.h"
+#include <glib/gi18n.h>
 
 struct _ViteStatusBar {
     GtkWidget parent_instance;
@@ -123,9 +124,9 @@ create_line_ending_menu(ViteStatusBar *self)
     g_action_map_add_action_entries(G_ACTION_MAP(self->line_ending_group), entries, G_N_ELEMENTS(entries), self);
     gtk_widget_insert_action_group(self->line_ending_btn, "le", G_ACTION_GROUP(self->line_ending_group));
     
-    g_menu_append(menu, "Unix/Linux (LF)", "le.set::lf");
-    g_menu_append(menu, "Windows (CRLF)", "le.set::crlf");
-    g_menu_append(menu, "Legacy Mac (CR)", "le.set::cr");
+    g_menu_append(menu, _("Unix/Linux (LF)"), "le.set::lf");
+    g_menu_append(menu, _("Windows (CRLF)"), "le.set::crlf");
+    g_menu_append(menu, _("Legacy Mac (CR)"), "le.set::cr");
     
     GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->line_ending_btn), popover);
@@ -203,7 +204,7 @@ typedef struct {
 } FileTypeEntry;
 
 static const FileTypeEntry file_types[] = {
-    { "Plain Text", NULL },
+    { N_("Plain Text"), NULL },
     { "C", "c" },
     { "C++", "cpp" },
     { "Python", "python" },
@@ -226,7 +227,12 @@ on_file_type_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_da
     const char *name = g_object_get_data(G_OBJECT(row), "lang-name");
     
     /* Update label */
-    vite_status_bar_set_file_type(self, name);
+    /* Update label */
+    if (id == NULL) {
+        vite_status_bar_set_file_type(self, NULL);
+    } else {
+        vite_status_bar_set_file_type(self, _(name));
+    }
     
     /* Close popover first to release focus */
     GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(box), GTK_TYPE_POPOVER);
@@ -298,9 +304,9 @@ create_indent_menu(ViteStatusBar *self)
     
     /* Indent Type Section */
     GMenu *s1 = g_menu_new();
-    g_menu_append(s1, "Tabs", "indent.set-style(1)");
-    g_menu_append(s1, "Spaces", "indent.set-style(0)");
-    g_menu_append_section(menu, "Indentation Mode", G_MENU_MODEL(s1));
+    g_menu_append(s1, _("Tabs"), "indent.set-style(1)");
+    g_menu_append(s1, _("Spaces"), "indent.set-style(0)");
+    g_menu_append_section(menu, _("Indentation Mode"), G_MENU_MODEL(s1));
     g_object_unref(s1);
     
     /* Width Section */
@@ -308,7 +314,7 @@ create_indent_menu(ViteStatusBar *self)
     g_menu_append(s2, "2", "indent.set-width(2)");
     g_menu_append(s2, "4", "indent.set-width(4)");
     g_menu_append(s2, "8", "indent.set-width(8)");
-    g_menu_append_section(menu, "Tab Width", G_MENU_MODEL(s2));
+    g_menu_append_section(menu, _("Tab Width"), G_MENU_MODEL(s2));
     g_object_unref(s2);
     
     GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
@@ -354,7 +360,7 @@ create_file_type_menu(ViteStatusBar *self)
     
     for (int i = 0; file_types[i].name != NULL; i++) {
         GtkWidget *row = gtk_list_box_row_new();
-        GtkWidget *lbl = gtk_label_new(file_types[i].name);
+        GtkWidget *lbl = gtk_label_new(_(file_types[i].name));
         gtk_widget_set_margin_start(lbl, 12);
         gtk_widget_set_margin_end(lbl, 12);
         gtk_widget_set_margin_top(lbl, 8);
@@ -383,26 +389,26 @@ vite_status_bar_init(ViteStatusBar *self)
     gtk_widget_add_css_class(GTK_WIDGET(self), "status-bar");
     
     /* File Type */
-    self->file_type_btn = create_menu_button(self, &self->file_type_label, "File Type", "Plain Text");
+    self->file_type_btn = create_menu_button(self, &self->file_type_label, _("File Type"), _("Plain Text"));
     create_file_type_menu(self); /* Setup Popover */
     gtk_box_append(GTK_BOX(self->box), self->file_type_btn);
     gtk_box_append(GTK_BOX(self->box), create_separator());
     
     /* Indentation (Tab Width) */
-    self->tab_width_btn = create_menu_button(self, &self->tab_width_label, "Indentation", "Tab: 4");
+    self->tab_width_btn = create_menu_button(self, &self->tab_width_label, _("Indentation"), _("Tab: 4"));
     create_indent_menu(self);
     gtk_box_append(GTK_BOX(self->box), self->tab_width_btn);
     gtk_box_append(GTK_BOX(self->box), create_separator());
 
     /* Encoding */
-    self->encoding_btn = create_menu_button(self, &self->encoding_label, "Encoding", "UTF-8");
+    self->encoding_btn = create_menu_button(self, &self->encoding_label, _("Encoding"), "UTF-8");
     create_encoding_menu(self);
     gtk_box_append(GTK_BOX(self->box), self->encoding_btn);
     gtk_box_append(GTK_BOX(self->box), create_separator());
 
     /* Line Ending */
     /* Line Ending */
-    self->line_ending_btn = create_menu_button(self, &self->line_ending_label, "Line Ending", "LF");
+    self->line_ending_btn = create_menu_button(self, &self->line_ending_label, _("Line Ending"), "LF");
     create_line_ending_menu(self);
     gtk_box_append(GTK_BOX(self->box), self->line_ending_btn);
     
@@ -444,9 +450,9 @@ vite_status_bar_set_insert_mode(ViteStatusBar *self, gboolean insert)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
     if (insert) {
-        gtk_label_set_markup(GTK_LABEL(self->ins_label), "<span font_weight='normal'>INS</span>");
+        gtk_label_set_markup(GTK_LABEL(self->ins_label), _("<span font_weight='normal'>INS</span>"));
     } else {
-        gtk_label_set_markup(GTK_LABEL(self->ins_label), "<span font_weight='bold'>OVR</span>");
+        gtk_label_set_markup(GTK_LABEL(self->ins_label), _("<span font_weight='bold'>OVR</span>"));
     }
 }
 
@@ -454,7 +460,7 @@ void
 vite_status_bar_set_cursor_position(ViteStatusBar *self, int line, int col)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
-    char *text = g_strdup_printf("Ln %d, Col %d", line + 1, col + 1);
+    char *text = g_strdup_printf(_("Ln %d, Col %d"), line + 1, col + 1);
     gtk_label_set_text(GTK_LABEL(self->cursor_label), text);
     g_free(text);
 }
@@ -463,7 +469,7 @@ void
 vite_status_bar_set_file_type(ViteStatusBar *self, const char *file_type)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
-    if (!file_type) file_type = "Plain Text";
+    if (!file_type) file_type = _("Plain Text");
     /* Bold if not plain text? svite does this. */
     char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", file_type);
     gtk_label_set_markup(GTK_LABEL(self->file_type_label), markup);
@@ -530,9 +536,9 @@ vite_status_bar_set_indentation(ViteStatusBar *self, int width, gboolean use_tab
     /* Update Label */
     char *text;
     if (use_tabs) {
-        text = g_strdup_printf("Tab: %d", width);
+        text = g_strdup_printf(_("Tab: %d"), width);
     } else {
-        text = g_strdup_printf("Spaces: %d", width);
+        text = g_strdup_printf(_("Spaces: %d"), width);
     }
     
     char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", text);

@@ -1,0 +1,395 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the vite package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: vite\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-17 01:37+0530\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/main.c:22 src/main.c:4583 src/status-bar.c:207 src/status-bar.c:392
+#: src/status-bar.c:472
+msgid "Plain Text"
+msgstr ""
+
+#: src/main.c:28 src/main.c:4589
+msgid "Header"
+msgstr ""
+
+#: src/main.c:33 src/main.c:4594
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr ""
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr ""
+
+#. Save Button
+#: src/main.c:579 src/main.c:4530 src/main.c:4630
+msgid "Save"
+msgstr ""
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr ""
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/main.c:712 src/main.c:4532
+msgid "Discard Changes"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr ""
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr ""
+
+#: src/main.c:4314
+msgid "Leave Fullscreen"
+msgstr ""
+
+#: src/main.c:4439
+msgid "Open"
+msgstr ""
+
+#: src/main.c:4466
+msgid "Search documents"
+msgstr ""
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4506
+msgid "Open File"
+msgstr ""
+
+#: src/main.c:4516
+msgid "New Tab"
+msgstr ""
+
+#. Group 1: New Window, etc.
+#: src/main.c:4526
+msgid "New Window"
+msgstr ""
+
+#: src/main.c:4531
+msgid "Save As…"
+msgstr ""
+
+#: src/main.c:4538
+msgid "Filter Lines"
+msgstr ""
+
+#: src/main.c:4539
+msgid "Find/Replace"
+msgstr ""
+
+#: src/main.c:4540
+msgid "Go to Line…"
+msgstr ""
+
+#: src/main.c:4549 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4551 src/preferences.c:150
+msgid "Show Overview Map"
+msgstr ""
+
+#: src/main.c:4552
+msgid "Word Wrap"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Status Bar is Visible"
+msgstr ""
+
+#: src/main.c:4554 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4557
+msgid "Split right"
+msgstr ""
+
+#: src/main.c:4558
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4559
+msgid "Close View"
+msgstr ""
+
+#: src/main.c:4562
+msgid "View"
+msgstr ""
+
+#. Encoding
+#: src/main.c:4572 src/status-bar.c:404
+msgid "Encoding"
+msgstr ""
+
+#: src/main.c:4576 src/status-bar.c:127
+msgid "Unix/Linux (LF)"
+msgstr ""
+
+#: src/main.c:4577 src/status-bar.c:128
+msgid "Windows (CRLF)"
+msgstr ""
+
+#: src/main.c:4578 src/status-bar.c:129
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#. Line Ending
+#. Line Ending
+#: src/main.c:4579 src/status-bar.c:411
+msgid "Line Ending"
+msgstr ""
+
+#. File Type
+#: src/main.c:4595 src/status-bar.c:392
+msgid "File Type"
+msgstr ""
+
+#: src/main.c:4598
+msgid "Document"
+msgstr ""
+
+#: src/main.c:4606
+msgid "Print"
+msgstr ""
+
+#: src/main.c:4611
+msgid "Fullscreen"
+msgstr ""
+
+#: src/main.c:4617
+msgid "Keyboard Shortcuts"
+msgstr ""
+
+#: src/main.c:4618
+msgid "About Virtual Text Editor"
+msgstr ""
+
+#: src/main.c:4619
+msgid "Preferences"
+msgstr ""
+
+#: src/main.c:4626
+msgid "Main Menu"
+msgstr ""
+
+#: src/main.c:4631
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:4645
+msgid "Open Tabs"
+msgstr ""
+
+#: src/main.c:5624
+msgid "Save As"
+msgstr ""
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr ""
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr ""
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr ""
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr ""
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#. Indentation (Tab Width)
+#: src/preferences.c:125 src/preferences.c:180 src/status-bar.c:398
+msgid "Indentation"
+msgstr ""
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr ""
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr ""
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr ""
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr ""
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr ""
+
+#: src/preferences.c:185 src/status-bar.c:317
+msgid "Tab Width"
+msgstr ""
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr ""
+
+#: src/status-bar.c:307
+msgid "Tabs"
+msgstr ""
+
+#: src/status-bar.c:308
+msgid "Spaces"
+msgstr ""
+
+#: src/status-bar.c:309
+msgid "Indentation Mode"
+msgstr ""
+
+#: src/status-bar.c:398
+msgid "Tab: 4"
+msgstr ""
+
+#: src/status-bar.c:453
+msgid "<span font_weight='normal'>INS</span>"
+msgstr ""
+
+#: src/status-bar.c:455
+msgid "<span font_weight='bold'>OVR</span>"
+msgstr ""
+
+#: src/status-bar.c:463
+#, c-format
+msgid "Ln %d, Col %d"
+msgstr ""
+
+#: src/status-bar.c:539
+#, c-format
+msgid "Tab: %d"
+msgstr ""
+
+#: src/status-bar.c:541
+#, c-format
+msgid "Spaces: %d"
+msgstr ""

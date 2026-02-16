@@ -1,0 +1,352 @@
+# Basque translation for gnome-text-editor.
+# Copyright (C) 2021 gnome-text-editor's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-text-editor package.
+# Asier Sarasua Garmendia <asiersarasua@ni.eus>, 2021, 2022, 2023, 2025.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-text-editor master\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2025-02-23 01:54+0000\n"
+"Last-Translator: Asier Sarasua Garmendia <asiersarasua@ni.eus>\n"
+"Language-Team: Basque <librezale@librezale.eus>\n"
+"Language: eu\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);9\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "Testu-editoreari b_uruz"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "Koska automatikoa"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "Utzi"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr "Garbitu _denak"
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "Itxi bilaketa"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "Letra-tipo pertsonalizatua"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "Baztertu _dena"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "Ba_ztertu aldaketak…"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "Ba_ztertu aldaketak…"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "Bistaratu lerro-zenbakiak"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "Bistaratu eskuineko marjinak"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "Dokumentuak"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "K_odeketa"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "Fitxategi-izena"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr "Aurkitu"
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "Bilatu/ordeztu"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr "Pantaila osoa"
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "Joan lerrora"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "Joan lerrora"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "Nabarmendu uneko lerroa"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "Koska-zabalera"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "Koskak"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "Las_ter-teklak"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "Irten pantaila osotik"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "Lerroaren amaiera:"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr "Lerro-egokitzea"
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "Menu nagusia"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "Fitxa berria"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "Leiho berria"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "Hurrengo parekatzea"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "Ireki"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "Ireki fitxategia"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "Fitxa berria"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"Dokumentu irekiek gorde gabeko aldaketak dituzte. Gorde ez diren aldaketak "
+"betiko galduko dira."
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "Testu soila"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "Hobespenak"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "Aurreko parekatzea"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "Inprimatu…"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "Ordeztu"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "Bilatu/ordeztu"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "Eskuineko marjinaren kokalekua"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "Gorde"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "Gorde honela"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "Gorde _honela..."
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "Gorde aldaketak?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "Bilatu dokumentuak"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "Tabulazio-zabalera"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "Testu-egokitzea"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "Ikusi"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "Windows (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

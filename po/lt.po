@@ -1,0 +1,354 @@
+# Lithuanian translation for gnome-text-editor.
+# Copyright (C) 2022 gnome-text-editor's COPYRIGHT HOLDER
+# This file is distributed under the same license as the gnome-text-editor package.
+# Aurimas Černius <aurisc4@gmail.com>, 2022-2023.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: gnome-text-editor main\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2025-03-01 22:28+0200\n"
+"Last-Translator: Aurimas Černius <aurisc4@gmail.com>\n"
+"Language-Team: Lietuvių <gnome-lt@lists.akl.lt>\n"
+"Language: lt\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"(n%100<10 || n%100>=20) ? 1 : 2);\n"
+"X-Generator: Poedit 3.5\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "A_pie Tekstų redaktorių"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "Įtrauka"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "Atsisakyti"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr "Iš_valyti viską"
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "Užverti paiešką"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "Pasirinktinis šriftas"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "Atmesti viską"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "Atmesti pakeitimus…"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "Atmesti pakeitimus…"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "Rodyti eilučių numerius"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "Rodyti dešinę paraštę"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "Dokumentai"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "Koduotė"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "Failo pavadinimas"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr "Rasti"
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "Rasti ir pakeisti"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr "Visas ekranas"
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "Eiti į eilutę"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "Eiti į eilutę"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "Paryškinti esamą eilutę"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "Įtraukos plotis"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "Įtrauka"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "Klaviatūros trumpiniai"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "Palikti viso ekrano veikseną"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "Eilutės pabaiga:"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr "Laužyti eilutes"
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "Pagrindinis meniu"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "Nauja kortelė"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "Naujas langas"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "Kita atitiktis"
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "Atverti"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "Atverti failą"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "Nauja kortelė"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"Atverti dokumentai turi neįrašytų pakeitimų. Neįrašyti pakeitimai bus "
+"negrįžtamai prarasti."
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "Grynasis tekstas"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "Nuostatos"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr "Ankstesnė atitiktis"
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "S_pausdinti…"
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "Pakeisti"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "Rasti ir pakeisti"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "Dešinės paraštės padėtis"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "Įrašyti"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "Įrašyti taip"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "Įrašyti _taip…"
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "Įrašyti pakeitimus?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "Ieškoti dokumentų"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "Tab plotis"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "Teksto laužymas"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "Rodinys"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "Windows (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""

@@ -1,0 +1,352 @@
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+#
+# Sveinn í Felli <sv1@fellsnet.is>, 2022, 2023.
+msgid ""
+msgstr ""
+"Project-Id-Version: \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"PO-Revision-Date: 2023-06-18 10:19+0000\n"
+"Last-Translator: Sveinn í Felli <sv1@fellsnet.is>\n"
+"Language-Team: Icelandic\n"
+"Language: is\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=n != 1;\n"
+"X-Generator: Lokalize 21.12.3\n"
+
+#: src/find-replace-bar.c:135 src/find-replace-bar.c:157
+#: src/find-replace-bar.c:204
+#, c-format
+msgid "%zu matches"
+msgstr ""
+
+#: src/main.c:4614
+msgid "About Virtual Text Editor"
+msgstr "U_m textaritilinn"
+
+#: src/preferences.c:183
+msgid "Automatic Indentation"
+msgstr "Sjálfvirkur inndráttur"
+
+#: src/main.c:577 src/main.c:711
+msgid "Cancel"
+msgstr "Hætta við"
+
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/main.c:2983
+msgid "Clear All Recents"
+msgstr ""
+
+#: src/main.c:4555
+msgid "Close View"
+msgstr "Loka leit"
+
+#: src/preferences.c:99
+msgid "Custom Font"
+msgstr "Sérsniðið letur"
+
+#: src/main.c:4590
+msgid "Desktop Entry"
+msgstr ""
+
+#: src/main.c:578
+msgid "Discard All"
+msgstr "Henda öllu"
+
+#: src/main.c:712 src/main.c:4528
+msgid "Discard Changes"
+msgstr "Henda breytingum"
+
+#: src/main.c:708
+msgid "Discard Changes?"
+msgstr "Henda breytingum"
+
+#: src/preferences.c:145
+msgid "Display"
+msgstr ""
+
+#: src/main.c:4545 src/preferences.c:148
+msgid "Display Line Numbers"
+msgstr "Birta línunúmer"
+
+#: src/preferences.c:174
+msgid "Display Right Margin"
+msgstr "Sýna hægri spássíu"
+
+#: src/main.c:4594
+msgid "Document"
+msgstr "Skjöl"
+
+#: src/main.c:4546 src/preferences.c:149
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4568
+msgid "Encoding"
+msgstr "Línuendingar:"
+
+#: src/main.c:4591
+msgid "File Type"
+msgstr "Skrá"
+
+#: src/main.c:4534
+msgid "Filter Lines"
+msgstr ""
+
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
+msgstr ""
+
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
+msgstr ""
+
+#: src/find-replace-bar.c:688
+msgid "Find"
+msgstr ""
+
+#: src/main.c:4535
+msgid "Find/Replace"
+msgstr "Finna/Skipta út"
+
+#. UNIFIED APPROACH: Use async search for ALL files.
+#. * Stores matches in mmap'd file (disk-backed).
+#. * Uses binary search for O(log N) viewport lookup.
+#. * Highlights only visible matches to keep UI memory low.
+#: src/find-replace-bar.c:409
+msgid "Finding..."
+msgstr ""
+
+#: src/find-replace-bar.c:199
+#, c-format
+msgid "Finding... %d%% (%zu)"
+msgstr ""
+
+#: src/preferences.c:105
+msgid "Font Name"
+msgstr ""
+
+#: src/main.c:4607
+msgid "Fullscreen"
+msgstr ""
+
+#: src/main.c:3401
+msgid "Go to Line:"
+msgstr "Fara í línu"
+
+#: src/main.c:4536
+msgid "Go to Line…"
+msgstr "Fara í línu"
+
+#: src/main.c:4585
+msgid "Header"
+msgstr ""
+
+#: src/preferences.c:151
+msgid "Highlight Current Line"
+msgstr "Lýsa upp núverandi línu"
+
+#: src/preferences.c:186
+msgid "Indent Width"
+msgstr "Breidd inndráttar"
+
+#: src/preferences.c:125 src/preferences.c:180
+msgid "Indentation"
+msgstr "Inndráttur"
+
+#: src/main.c:4613
+msgid "Keyboard Shortcuts"
+msgstr "Flýtivísanir á lyklaborði"
+
+#: src/main.c:4310
+msgid "Leave Fullscreen"
+msgstr "Fara úr heilskjá"
+
+#: src/main.c:4574
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4575
+msgid "Line Ending"
+msgstr "Línuendingar:"
+
+#: src/preferences.c:171
+msgid "Line Wrap"
+msgstr ""
+
+#: src/main.c:4622
+msgid "Main Menu"
+msgstr "Aðalvalmynd"
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
+msgstr ""
+
+#: src/main.c:4547 src/preferences.c:150
+msgid "Minimap"
+msgstr ""
+
+#: src/main.c:4512
+msgid "New Tab"
+msgstr "Nýr flipi (Ctrl+T)"
+
+#. Group 1: New Window, etc.
+#: src/main.c:4522
+msgid "New Window"
+msgstr "Nýr gluggi"
+
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr ""
+
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
+#: src/main.c:4435
+msgid "Open"
+msgstr "Opna"
+
+#. Styling to look like single button by default
+#. By default AdwSplitButton looks joined. We can add specific classes if needed.
+#: src/main.c:4502
+msgid "Open File"
+msgstr "Opna skrá"
+
+#: src/main.c:4641
+msgid "Open Tabs"
+msgstr "Opna"
+
+#: src/main.c:500
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
+msgstr ""
+"Opin skjöl innihalda óvistaðar breytingar. Breytingar sem ekki eru vistaðar "
+"munu tapast endanlega."
+
+#: src/main.c:4579
+msgid "Plain Text"
+msgstr "Hreinn texti"
+
+#: src/main.c:4615
+msgid "Preferences"
+msgstr "Kjö_rstillingar"
+
+#: src/find-replace-bar.c:711
+msgid "Previous Match"
+msgstr ""
+
+#: src/main.c:4602
+msgid "Print"
+msgstr "Prenta..."
+
+#: src/find-replace-bar.c:741
+msgid "Regular expression"
+msgstr ""
+
+#: src/main.c:2977
+msgid "Remove from Recents"
+msgstr ""
+
+#: src/find-replace-bar.c:782 src/find-replace-bar.c:794
+msgid "Replace"
+msgstr "Skipta út"
+
+#: src/find-replace-bar.c:798
+msgid "Replace All"
+msgstr "Finna/Skipta út"
+
+#: src/preferences.c:175
+msgid "Right Margin Position"
+msgstr "Staðsetning hægri spássíu"
+
+#. Save Button
+#: src/main.c:579 src/main.c:4526 src/main.c:4626
+msgid "Save"
+msgstr "Vista"
+
+#: src/main.c:4627
+msgid "Save (Ctrl+S)"
+msgstr "Nýr flipi (Ctrl+T)"
+
+#: src/main.c:5620
+msgid "Save As"
+msgstr "Vista sem"
+
+#: src/main.c:4527
+msgid "Save As…"
+msgstr "Vist_a sem..."
+
+#: src/main.c:495
+msgid "Save Changes?"
+msgstr "Vista breytingar?"
+
+#: src/main.c:4462
+msgid "Search documents"
+msgstr "Leita að skjölum"
+
+#: src/preferences.c:107
+msgid "Select..."
+msgstr ""
+
+#: src/main.c:4550 src/preferences.c:155
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4549
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4554
+msgid "Split down"
+msgstr ""
+
+#: src/main.c:4553
+msgid "Split right"
+msgstr ""
+
+#: src/preferences.c:185
+msgid "Tab Width"
+msgstr "Breidd inndráttar"
+
+#: src/preferences.c:176
+msgid "Text Wrapping"
+msgstr "Textaskrið"
+
+#: src/main.c:709
+msgid ""
+"This will undo all changes and clear undo/redo history. The document will "
+"return to its last saved (or opened) state."
+msgstr ""
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
+
+#: src/preferences.c:164
+msgid "Typography"
+msgstr ""
+
+#: src/main.c:4572
+msgid "Unix/Linux (LF)"
+msgstr "Unix/Linux (LF)"
+
+#: src/main.c:4558
+msgid "View"
+msgstr "Skoða"
+
+#: src/main.c:4573
+msgid "Windows (CRLF)"
+msgstr "Windows (CR+LF)"
+
+#: src/main.c:4548
+msgid "Word Wrap"
+msgstr ""
