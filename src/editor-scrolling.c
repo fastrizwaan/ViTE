@@ -463,21 +463,33 @@ editor_widget_scroll_to_line(EditorWidget *self, size_t line)
         target_y = (double)line * self->avg_visual_lines * self->line_height;
     } else {
         editor_widget_update_adjustments(self, -1, -1);
-        
+
         if (self->line_y_offsets && line < self->line_y_offsets->len) {
             target_y = g_array_index(self->line_y_offsets, double, line);
         } else {
             target_y = (double)line * self->line_height;
         }
     }
-    
+
+    /* Ensure the line is visible in the viewport with proper positioning */
     if (self->vadjustment) {
-        gtk_adjustment_set_value(self->vadjustment, target_y);
+        double page_size = gtk_adjustment_get_page_size(self->vadjustment);
+        
+        /* Calculate the ideal position to center the line in the viewport */
+        double centered_y = target_y - (page_size / 2.0) + (self->line_height / 2.0);
+        
+        /* Clamp to valid range */
+        double upper = gtk_adjustment_get_upper(self->vadjustment) - page_size;
+        if (upper < 0) upper = 0;
+        
+        centered_y = CLAMP(centered_y, 0, upper);
+        
+        gtk_adjustment_set_value(self->vadjustment, centered_y);
     }
-    
+
     /* Move cursor to start of line */
     size_t line_start_offset = document_get_offset_of_line(self->doc, line);
-    
+
     if (self->cursors) {
         g_array_set_size(self->cursors, 0);
         EditorCursor c;
@@ -486,7 +498,7 @@ editor_widget_scroll_to_line(EditorWidget *self, size_t line)
         c.target_x = -1;
         g_array_append_val(self->cursors, c);
     }
-    
+
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 
