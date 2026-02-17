@@ -2798,41 +2798,12 @@ update_recent_files_list(GtkListBox *list_box, GtkApplication *app G_GNUC_UNUSED
 
         GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
         gtk_widget_set_margin_start(row, 6);
-        gtk_widget_set_margin_end(row, 6);
+        gtk_widget_set_margin_end(row, 0);
         gtk_widget_set_margin_top(row, 6);
         gtk_widget_set_margin_bottom(row, 6);
         
-        /* Try to get icon for file */
-        GIcon *gicon = NULL;
-        GFileInfo *info = g_file_query_info(file, "standard::icon", 0, NULL, NULL);
-        if (info) {
-            gicon = g_file_info_get_icon(info);
-            if (gicon) g_object_ref(gicon);
-            g_object_unref(info);
-        }
+        /* Try to get icon for file - REMOVED */
         
-        GIcon *symbolic = NULL;
-        if (gicon && G_IS_THEMED_ICON(gicon)) {
-            const char * const *names = g_themed_icon_get_names(G_THEMED_ICON(gicon));
-            if (names && names[0]) {
-                char *sym_name = g_strconcat(names[0], "-symbolic", NULL);
-                symbolic = g_themed_icon_new_with_default_fallbacks(sym_name);
-                g_free(sym_name);
-            }
-        }
-        
-        GtkWidget *icon_widget;
-        if (symbolic) {
-            icon_widget = gtk_image_new_from_gicon(symbolic);
-            g_object_unref(symbolic);
-        } else {
-            icon_widget = gtk_image_new_from_icon_name("text-x-generic-symbolic");
-        }
-        if (gicon) g_object_unref(gicon);
-        
-        gtk_widget_set_valign(icon_widget, GTK_ALIGN_CENTER);
-        gtk_box_append(GTK_BOX(row), icon_widget);
-
         /* Text container (Title + Subtitle) */
         GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
         gtk_widget_set_valign(vbox, GTK_ALIGN_CENTER);
@@ -2841,7 +2812,7 @@ update_recent_files_list(GtkListBox *list_box, GtkApplication *app G_GNUC_UNUSED
         GtkWidget *title_label = gtk_label_new(display_name);
         gtk_widget_set_halign(title_label, GTK_ALIGN_START);
         gtk_label_set_ellipsize(GTK_LABEL(title_label), PANGO_ELLIPSIZE_END);
-        gtk_label_set_max_width_chars(GTK_LABEL(title_label), 60);
+        gtk_label_set_max_width_chars(GTK_LABEL(title_label), 260);
         gtk_box_append(GTK_BOX(vbox), title_label);
 
         if (subtitle) {
