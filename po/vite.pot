@@ -139,7 +139,7 @@ msgid "Word Wrap"
 msgstr ""
 
 #: src/main.c:4553
-msgid "Status Bar is Visible"
+msgid "Show Status Bar"
 msgstr ""
 
 #: src/main.c:4554 src/preferences.c:155

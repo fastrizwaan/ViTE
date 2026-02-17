@@ -4570,7 +4570,7 @@ setup_window(AdwApplicationWindow *window)
     g_menu_append(view_menu, _("Enable Code Folding"), "win.enable-folding");
     g_menu_append(view_menu, _("Show Overview Map"), "win.enable-minimap");
     g_menu_append(view_menu, _("Word Wrap"), "win.enable-word-wrap");
-    g_menu_append(view_menu, _("Status Bar is Visible"), "win.show-status-bar");
+    g_menu_append(view_menu, _("Show Status Bar"), "win.show-status-bar");
     g_menu_append(view_menu, _("Show Save Button"), "win.show-save-button");
     
     GMenu *split_menu = g_menu_new();

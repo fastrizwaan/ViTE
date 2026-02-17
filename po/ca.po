@@ -340,7 +340,7 @@ msgid "Split right"
 msgstr ""
 
 #: src/main.c:4549
-msgid "Status Bar is Visible"
+msgid "Show Status Bar"
 msgstr "La barra d'estat és visible"
 
 #: src/preferences.c:185 src/status-bar.c:312
