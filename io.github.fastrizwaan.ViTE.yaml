@@ -1,6 +1,6 @@
 app-id: io.github.fastrizwaan.ViTE
 runtime: org.gnome.Platform
-runtime-version: '47'
+runtime-version: '48'
 sdk: org.gnome.Sdk
 command: vite
 finish-args:
@@ -8,7 +8,12 @@ finish-args:
   - --share=ipc
   - --socket=fallback-x11
   - --socket=wayland
-  - --filesystem=host
+  - --talk-name=org.freedesktop.FileManager1
+  - --talk-name=org.gtk.vfs
+  - --talk-name=org.gtk.vfs.*
+  - --filesystem=xdg-run/gvfs
+  - --filesystem=xdg-run/gvfsd
+  - --filesystem=xdg-document
   - --share=network
 cleanup:
   - /include
