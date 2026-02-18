@@ -190,8 +190,8 @@ on_motion(GtkEventControllerMotion *controller G_GNUC_UNUSED, double x, double y
         /* Over gutter - use default arrow */
         gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default");
     } else if (in_minimap) {
-        /* Over minimap - use hand cursor */
-        gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "hand");
+        /* Over minimap - use default arrow cursor */
+        gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "default");
     } else {
         /* Over text - use I-beam */
         gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "text");

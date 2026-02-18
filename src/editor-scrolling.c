@@ -5,14 +5,6 @@
 #define MAX_PANGO_LINE_LEN 10485760
 #endif
 
-/* Scroll Calculation Helper */
-typedef struct {
-    double current_y;
-    GArray *offsets;
-    int chars_per_line;
-    double line_height;
-} ScrollCalcState;
-
 /* Max line width calculation helper */
 typedef struct {
     size_t max_len_bytes;
@@ -27,23 +19,6 @@ calculate_max_line_len_cb(size_t len, void *user_data)
     }
 }
 
-static void
-calculate_line_height_cb(size_t len, void *user_data)
-{
-    ScrollCalcState *state = (ScrollCalcState*)user_data;
-    
-    size_t effective_len = len;
-    if (effective_len > 0) effective_len--; /* approximate removing newline */
-    
-    size_t visual_lines = 1;
-    if (state->chars_per_line > 0 && effective_len > 0) {
-        visual_lines = (effective_len + state->chars_per_line - 1) / state->chars_per_line;
-        if (visual_lines == 0) visual_lines = 1;
-    }
-    
-    g_array_append_val(state->offsets, state->current_y);
-    state->current_y += (double)visual_lines * state->line_height;
-}
 
 static double
 calculate_total_content_height(EditorWidget *self, int widget_width, int widget_height G_GNUC_UNUSED)
@@ -79,12 +54,84 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
 
         g_array_set_size(self->line_y_offsets, 0);
         
-        /* Strategy Switch: Exact vs Statistical */
-        if (total_lines > 1500) {
+        if (total_lines <= 1500) {
+            /* Lightweight O(N) full scan: reuse a single PangoLayout and just swap
+             * text per line.  Skips syntax highlighting and per-line object creation.
+             * Gives exact Pango-measured wrap heights + per-line y-offsets. */
+            PangoContext *pango_ctx = gtk_widget_get_pango_context(GTK_WIDGET(self));
+            PangoLayout *measure_layout = pango_layout_new(pango_ctx);
+            pango_layout_set_font_description(measure_layout, self->font_desc);
+            pango_layout_set_width(measure_layout, (int)(wrap_width * PANGO_SCALE));
+            pango_layout_set_wrap(measure_layout, PANGO_WRAP_WORD_CHAR);
+            
+            if (self->tab_width > 0) {
+                PangoFontMetrics *metrics = pango_context_get_metrics(pango_ctx, self->font_desc, NULL);
+                int char_w = pango_font_metrics_get_approximate_char_width(metrics);
+                pango_font_metrics_unref(metrics);
+                PangoTabArray *tabs = pango_tab_array_new(1, FALSE);
+                pango_tab_array_set_tab(tabs, 0, PANGO_TAB_LEFT, char_w * self->tab_width);
+                pango_layout_set_tabs(measure_layout, tabs);
+                pango_tab_array_free(tabs);
+            }
+            
+            double current_y = 0;
+            
+            for (size_t i = 0; i < total_lines; i++) {
+                size_t phys_idx = get_physical_line_index(self, i);
+                if (phys_idx == (size_t)-1) {
+                    g_array_append_val(self->line_y_offsets, current_y);
+                    current_y += self->line_height;
+                    continue;
+                }
+                
+                g_array_append_val(self->line_y_offsets, current_y);
+                
+                size_t line_len_bytes = document_get_line_length(self->doc, phys_idx);
+                
+                if (line_len_bytes > 4096) {
+                    size_t visual_lines = 1;
+                    if (chars_per_line > 0) {
+                        visual_lines = (line_len_bytes + chars_per_line - 1) / chars_per_line;
+                    }
+                    current_y += (double)(visual_lines > 0 ? visual_lines : 1) * self->line_height;
+                } else {
+                    size_t fetched_len = 0;
+                    char *text = document_get_line_truncated(self->doc, phys_idx, &fetched_len, 4096, NULL);
+                    if (text) {
+                        while (fetched_len > 0 && (text[fetched_len-1] == '\n' || text[fetched_len-1] == '\r'))
+                            fetched_len--;
+                        
+                        pango_layout_set_text(measure_layout, text, (int)fetched_len);
+                        
+                        PangoRectangle logical;
+                        pango_layout_get_extents(measure_layout, NULL, &logical);
+                        double h = (double)logical.height / PANGO_SCALE;
+                        if (h < self->line_height) h = self->line_height;
+                        current_y += h;
+                        
+                        g_free(text);
+                    } else {
+                        current_y += self->line_height;
+                    }
+                }
+            }
+            
+            g_object_unref(measure_layout);
+            
+            g_array_append_val(self->line_y_offsets, current_y);
+            self->avg_visual_lines = (total_lines > 0) ? (current_y / ((double)total_lines * self->line_height)) : 1.0;
+            content_height = current_y + self->padding_top * 2;
+            
+        } else {
+            /* Large file: sampling approach (~50 Pango layouts) */
+            PangoContext *pango_ctx = gtk_widget_get_pango_context(GTK_WIDGET(self));
+            PangoLayout *measure_layout = pango_layout_new(pango_ctx);
+            pango_layout_set_font_description(measure_layout, self->font_desc);
+            pango_layout_set_width(measure_layout, (int)(wrap_width * PANGO_SCALE));
+            pango_layout_set_wrap(measure_layout, PANGO_WRAP_WORD_CHAR);
+            
             double total_sample_height = 0;
             int samples = 50;
-            if ((size_t)samples > total_lines) samples = (int)total_lines;
-            
             int step = total_lines / samples;
             if (step < 1) step = 1;
             
@@ -96,76 +143,36 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
                 if (phys_idx == (size_t)-1) continue;
                 size_t line_len_bytes = document_get_line_length(self->doc, phys_idx);
                 
-                /* Optimization: For massive lines, estimate height to avoid Pango stall */
                 if (line_len_bytes > 4096) {
-                    /* Estimate visual lines (Simple Char Wrap) */
                     size_t visual_lines = 1;
                     if (chars_per_line > 0) {
                         visual_lines = (line_len_bytes + chars_per_line - 1) / chars_per_line;
                     }
-                     total_sample_height += (double)visual_lines * self->line_height;
-                     actual_samples++;
+                    total_sample_height += (double)visual_lines * self->line_height;
+                    actual_samples++;
                 } else {
-                    char *text = NULL;
-                    PangoLayout *layout = create_pango_layout_for_line(self, phys_idx, &text, NULL);
-                    if (layout) {
-                        /* Must set width to simulate wrapping for accurate height */
-                         pango_layout_set_width(layout, (int)(wrap_width * PANGO_SCALE));
-                         pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-
+                    size_t fetched_len = 0;
+                    char *text = document_get_line_truncated(self->doc, phys_idx, &fetched_len, 4096, NULL);
+                    if (text) {
+                        while (fetched_len > 0 && (text[fetched_len-1] == '\n' || text[fetched_len-1] == '\r'))
+                            fetched_len--;
+                        pango_layout_set_text(measure_layout, text, (int)fetched_len);
                         PangoRectangle logical;
-                        pango_layout_get_extents(layout, NULL, &logical);
+                        pango_layout_get_extents(measure_layout, NULL, &logical);
                         double h = (double)logical.height / PANGO_SCALE;
                         if (h < self->line_height) h = self->line_height;
                         total_sample_height += h;
                         actual_samples++;
-                        g_object_unref(layout);
+                        g_free(text);
                     }
-                    if (text) g_free(text);
                 }
             }
+            
+            g_object_unref(measure_layout);
             
             double avg_height = (actual_samples > 0) ? (total_sample_height / actual_samples) : self->line_height;
             self->avg_visual_lines = avg_height / self->line_height;
             content_height = (double)total_lines * avg_height + self->padding_top * 2;
-            
-        } else {
-            /* Exact Scan Mode (O(N)) */
-            self->avg_visual_lines = 1.0; /* Reset */
-            
-            ScrollCalcState state;
-            state.current_y = 0;
-            state.offsets = self->line_y_offsets;
-            state.chars_per_line = chars_per_line;
-            state.line_height = self->line_height;
-            
-            if (self->visible_lines && self->visible_lines->data) {
-                size_t count = compact_matches_count(self->visible_lines);
-                for (guint i = 0; i < count; i++) {
-                    size_t phys_idx = self->visible_lines->data ? self->visible_lines->data[i] : (size_t)-1;
-                    if (phys_idx == (size_t)-1) continue;
-                    size_t line_len = document_get_line_length(self->doc, phys_idx);
-                    calculate_line_height_cb(line_len, &state);
-                }
-            } else if (self->filtered_lines && self->filtered_lines->data) {
-                size_t count = compact_matches_count(self->filtered_lines);
-                for (guint i = 0; i < count; i++) {
-                    size_t phys_idx = self->filtered_lines->data ? self->filtered_lines->data[i] : (size_t)-1;
-                    if (phys_idx == (size_t)-1) continue;
-                    size_t line_len = document_get_line_length(self->doc, phys_idx);
-                    calculate_line_height_cb(line_len, &state);
-                }
-            } else {
-                document_foreach_line(self->doc, calculate_line_height_cb, &state);
-            }
-            
-            while (self->line_y_offsets->len < total_lines) {
-                g_array_append_val(self->line_y_offsets, state.current_y);
-                state.current_y += self->line_height;
-            }
-            
-            g_array_append_val(self->line_y_offsets, state.current_y);
-            content_height = state.current_y + self->padding_top * 2;
         }
     }
     
