@@ -876,6 +876,7 @@ editor_widget_init(EditorWidget *self)
     self->syntax_scan_idle_id = 0;
     
     self->last_theme_dark_mode = -1; /* Force initial theme sync */
+    self->last_theme_revision = 0;
     
     /* Default Theme Colors (will be updated by theme logic or CSS later) */
     /* Light theme defaults */

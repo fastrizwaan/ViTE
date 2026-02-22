@@ -99,10 +99,12 @@ render_context_init(SnapshotRenderContext *ctx, EditorWidget *self, GtkSnapshot 
         self->color_line_number.alpha = 0.5;
     }
     
-    if (self->last_theme_dark_mode != ctx->is_dark) {
+    guint64 theme_revision = theme_manager_get_revision();
+    if (self->last_theme_dark_mode != ctx->is_dark || self->last_theme_revision != theme_revision) {
         syntax_set_theme_mode(ctx->is_dark);
         if (self->syntax_ctx) syntax_context_invalidate_cache(self->syntax_ctx);
         self->last_theme_dark_mode = ctx->is_dark;
+        self->last_theme_revision = theme_revision;
     }
 }
 

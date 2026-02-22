@@ -89,6 +89,9 @@ void theme_manager_apply_theme(const char *theme_name);
 /* Get current active theme (never NULL after init) */
 const ViteTheme *theme_manager_get_current(void);
 
+/* Monotonic revision incremented each time a theme is applied */
+guint64 theme_manager_get_revision(void);
+
 /* Persist / load selection */
 void theme_manager_save_selection(const char *theme_name);
 char *theme_manager_load_selection(void);

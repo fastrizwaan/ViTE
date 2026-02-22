@@ -9,6 +9,7 @@
 static GPtrArray *all_themes = NULL;  /* ViteTheme* */
 static ViteTheme *current_theme = NULL;
 static GtkCssProvider *current_css_provider = NULL;
+static guint64 theme_revision = 0;
 
 /* Check if a theme is a built-in default that should use native Adwaita colors */
 static gboolean
@@ -628,13 +629,16 @@ generate_css(const ViteTheme *theme)
     g_string_append_printf(css,
         "headerbar, headerbar.titlebar {"
         "  background-color: %s; color: %s;"
-        "  border-bottom: 1px solid %s;"
-        "}\n", c_chrome, c_fg, c_border);
+        "  border-bottom: none;"
+        "  box-shadow: none;"
+        "}\n", c_chrome, c_fg);
 
     /* --- AdwToolbarView top/bottom bars --- */
     g_string_append_printf(css,
         ".toolbar-view .top-bar, .toolbar-view .bottom-bar {"
         "  background-color: %s; color: %s;"
+        "  border: none;"
+        "  box-shadow: none;"
         "}\n", c_chrome, c_fg);
 
     /* --- Status bar --- */
@@ -836,6 +840,7 @@ theme_manager_apply_theme(const char *theme_name)
         return;
     }
 
+    theme_revision++;
     current_theme = target;
 
     /* Remove old CSS provider */
@@ -884,6 +889,12 @@ const ViteTheme *
 theme_manager_get_current(void)
 {
     return current_theme;
+}
+
+guint64
+theme_manager_get_revision(void)
+{
+    return theme_revision;
 }
 
 /* --- Persistence --- */

@@ -40,7 +40,7 @@ static const char *TAB_BAR_CSS =
 "    outline: none;"
 "}"
 ".vite-tab-bar-container {"
-"    margin-top: 1px;"
+"    margin-top: 0;"
 "    padding: 0;"
 "    margin-bottom: 0px;"
 "}"

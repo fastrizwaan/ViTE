@@ -162,6 +162,7 @@ struct _EditorWidget {
     guint syntax_scan_idle_id; /* For background full-document scanning */
     
     gboolean last_theme_dark_mode; /* Tracking for syntax cache invalidation */
+    guint64 last_theme_revision;   /* Theme revision seen by this editor */
     
     /* Async Undo/Redo */
     UndoRedoTask *undo_redo_task; /* Active undo/redo operation */
