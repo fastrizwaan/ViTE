@@ -200,6 +200,174 @@ get_piece_data(PieceTable *pt, const Piece *p)
     return "";
 }
 
+typedef struct {
+    FileEncoding enc;
+    const char *id;
+    const char *display;
+    const char *charset;
+    gboolean stream_safe;
+} FileEncodingInfo;
+
+static const FileEncodingInfo encoding_infos[] = {
+    { ENCODING_UTF8,         "utf-8",         "UTF-8",         "UTF-8",         TRUE  },
+    { ENCODING_UTF16LE,      "utf-16le",      "UTF-16 LE",     "UTF-16LE",      TRUE  },
+    { ENCODING_UTF16BE,      "utf-16be",      "UTF-16 BE",     "UTF-16BE",      TRUE  },
+    { ENCODING_UTF32LE,      "utf-32le",      "UTF-32 LE",     "UTF-32LE",      TRUE  },
+    { ENCODING_UTF32BE,      "utf-32be",      "UTF-32 BE",     "UTF-32BE",      TRUE  },
+    { ENCODING_ISO_8859_1,   "iso-8859-1",    "ISO-8859-1",    "ISO-8859-1",    TRUE  },
+    { ENCODING_ISO_8859_2,   "iso-8859-2",    "ISO-8859-2",    "ISO-8859-2",    TRUE  },
+    { ENCODING_ISO_8859_3,   "iso-8859-3",    "ISO-8859-3",    "ISO-8859-3",    TRUE  },
+    { ENCODING_ISO_8859_4,   "iso-8859-4",    "ISO-8859-4",    "ISO-8859-4",    TRUE  },
+    { ENCODING_ISO_8859_5,   "iso-8859-5",    "ISO-8859-5",    "ISO-8859-5",    TRUE  },
+    { ENCODING_ISO_8859_6,   "iso-8859-6",    "ISO-8859-6",    "ISO-8859-6",    TRUE  },
+    { ENCODING_ISO_8859_7,   "iso-8859-7",    "ISO-8859-7",    "ISO-8859-7",    TRUE  },
+    { ENCODING_ISO_8859_8,   "iso-8859-8",    "ISO-8859-8",    "ISO-8859-8",    TRUE  },
+    { ENCODING_ISO_8859_9,   "iso-8859-9",    "ISO-8859-9",    "ISO-8859-9",    TRUE  },
+    { ENCODING_ISO_8859_10,  "iso-8859-10",   "ISO-8859-10",   "ISO-8859-10",   TRUE  },
+    { ENCODING_ISO_8859_11,  "iso-8859-11",   "ISO-8859-11",   "ISO-8859-11",   TRUE  },
+    { ENCODING_ISO_8859_13,  "iso-8859-13",   "ISO-8859-13",   "ISO-8859-13",   TRUE  },
+    { ENCODING_ISO_8859_14,  "iso-8859-14",   "ISO-8859-14",   "ISO-8859-14",   TRUE  },
+    { ENCODING_ISO_8859_15,  "iso-8859-15",   "ISO-8859-15",   "ISO-8859-15",   TRUE  },
+    { ENCODING_ISO_8859_16,  "iso-8859-16",   "ISO-8859-16",   "ISO-8859-16",   TRUE  },
+    { ENCODING_WINDOWS_1250, "windows-1250",  "Windows-1250",  "WINDOWS-1250",  TRUE  },
+    { ENCODING_WINDOWS_1251, "windows-1251",  "Windows-1251",  "WINDOWS-1251",  TRUE  },
+    { ENCODING_WINDOWS_1252, "windows-1252",  "Windows-1252",  "WINDOWS-1252",  TRUE  },
+    { ENCODING_WINDOWS_1253, "windows-1253",  "Windows-1253",  "WINDOWS-1253",  TRUE  },
+    { ENCODING_WINDOWS_1254, "windows-1254",  "Windows-1254",  "WINDOWS-1254",  TRUE  },
+    { ENCODING_WINDOWS_1255, "windows-1255",  "Windows-1255",  "WINDOWS-1255",  TRUE  },
+    { ENCODING_WINDOWS_1256, "windows-1256",  "Windows-1256",  "WINDOWS-1256",  TRUE  },
+    { ENCODING_WINDOWS_1257, "windows-1257",  "Windows-1257",  "WINDOWS-1257",  TRUE  },
+    { ENCODING_WINDOWS_1258, "windows-1258",  "Windows-1258",  "WINDOWS-1258",  TRUE  },
+    { ENCODING_KOI8_R,       "koi8-r",        "KOI8-R",        "KOI8-R",        TRUE  },
+    { ENCODING_KOI8_U,       "koi8-u",        "KOI8-U",        "KOI8-U",        TRUE  },
+    { ENCODING_CP850,        "cp850",         "CP850",         "CP850",         TRUE  },
+    { ENCODING_CP852,        "cp852",         "CP852",         "CP852",         TRUE  },
+    { ENCODING_CP855,        "cp855",         "CP855",         "CP855",         TRUE  },
+    { ENCODING_CP857,        "cp857",         "CP857",         "CP857",         TRUE  },
+    { ENCODING_CP862,        "cp862",         "CP862",         "CP862",         TRUE  },
+    { ENCODING_CP864,        "cp864",         "CP864",         "CP864",         TRUE  },
+    { ENCODING_CP866,        "cp866",         "CP866",         "CP866",         TRUE  },
+    { ENCODING_SHIFT_JIS,    "shift_jis",     "Shift_JIS",     "SHIFT_JIS",     FALSE },
+    { ENCODING_EUC_JP,       "euc-jp",        "EUC-JP",        "EUC-JP",        FALSE },
+    { ENCODING_ISO_2022_JP,  "iso-2022-jp",   "ISO-2022-JP",   "ISO-2022-JP",   FALSE },
+    { ENCODING_GB18030,      "gb18030",       "GB18030",       "GB18030",       FALSE },
+    { ENCODING_GBK,          "gbk",           "GBK",           "GBK",           FALSE },
+    { ENCODING_BIG5,         "big5",          "Big5",          "BIG5",          FALSE },
+    { ENCODING_BIG5_HKSCS,   "big5-hkscs",    "Big5-HKSCS",    "BIG5-HKSCS",    FALSE },
+    { ENCODING_EUC_KR,       "euc-kr",        "EUC-KR",        "EUC-KR",        FALSE },
+    { ENCODING_CP949,        "cp949",         "CP949",         "CP949",         FALSE },
+    { ENCODING_ISO_2022_KR,  "iso-2022-kr",   "ISO-2022-KR",   "ISO-2022-KR",   FALSE },
+    { ENCODING_TIS_620,      "tis-620",       "TIS-620",       "TIS-620",       TRUE  },
+};
+
+static const FileEncodingInfo *
+file_encoding_get_info(FileEncoding enc)
+{
+    for (guint i = 0; i < G_N_ELEMENTS(encoding_infos); i++) {
+        if (encoding_infos[i].enc == enc) return &encoding_infos[i];
+    }
+    return NULL;
+}
+
+int
+file_encoding_get_count(void)
+{
+    return (int)G_N_ELEMENTS(encoding_infos);
+}
+
+FileEncoding
+file_encoding_from_id(const char *id)
+{
+    if (!id) return ENCODING_UTF8;
+    for (guint i = 0; i < G_N_ELEMENTS(encoding_infos); i++) {
+        if (g_ascii_strcasecmp(encoding_infos[i].id, id) == 0) {
+            return encoding_infos[i].enc;
+        }
+    }
+
+    /* Legacy aliases */
+    if (g_ascii_strcasecmp(id, "ascii") == 0) return ENCODING_WINDOWS_1252;
+    if (g_ascii_strcasecmp(id, "iso8859-1") == 0) return ENCODING_ISO_8859_1;
+    if (g_ascii_strcasecmp(id, "iso8859-2") == 0) return ENCODING_ISO_8859_2;
+    if (g_ascii_strcasecmp(id, "iso8859-5") == 0) return ENCODING_ISO_8859_5;
+    if (g_ascii_strcasecmp(id, "iso8859-6") == 0) return ENCODING_ISO_8859_6;
+    if (g_ascii_strcasecmp(id, "iso8859-7") == 0) return ENCODING_ISO_8859_7;
+    if (g_ascii_strcasecmp(id, "iso8859-8") == 0) return ENCODING_ISO_8859_8;
+    if (g_ascii_strcasecmp(id, "iso8859-9") == 0) return ENCODING_ISO_8859_9;
+    if (g_ascii_strcasecmp(id, "iso8859-13") == 0) return ENCODING_ISO_8859_13;
+    if (g_ascii_strcasecmp(id, "gb2312") == 0) return ENCODING_GB18030;
+    if (g_ascii_strcasecmp(id, "uhc") == 0) return ENCODING_CP949;
+    if (g_ascii_strcasecmp(id, "utf-16") == 0) return ENCODING_UTF16LE;
+
+    return ENCODING_UTF8;
+}
+
+const char *
+file_encoding_to_id(FileEncoding enc)
+{
+    const FileEncodingInfo *info = file_encoding_get_info(enc);
+    return info ? info->id : "utf-8";
+}
+
+const char *
+file_encoding_to_display_name(FileEncoding enc)
+{
+    const FileEncodingInfo *info = file_encoding_get_info(enc);
+    return info ? info->display : "UTF-8";
+}
+
+const char *
+file_encoding_to_display_name_from_id(const char *id)
+{
+    if (!id) return "UTF-8";
+    for (guint i = 0; i < G_N_ELEMENTS(encoding_infos); i++) {
+        if (g_ascii_strcasecmp(encoding_infos[i].id, id) == 0) {
+            return encoding_infos[i].display;
+        }
+    }
+    return id;
+}
+
+const char *
+file_encoding_to_charset(FileEncoding enc)
+{
+    const FileEncodingInfo *info = file_encoding_get_info(enc);
+    return info ? info->charset : "UTF-8";
+}
+
+const char *
+file_encoding_get_id_at(int index)
+{
+    if (index < 0 || (guint)index >= G_N_ELEMENTS(encoding_infos)) return NULL;
+    return encoding_infos[index].id;
+}
+
+const char *
+file_encoding_get_display_name_at(int index)
+{
+    if (index < 0 || (guint)index >= G_N_ELEMENTS(encoding_infos)) return NULL;
+    return encoding_infos[index].display;
+}
+
+gboolean
+file_encoding_is_utf16(FileEncoding enc)
+{
+    return (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE);
+}
+
+gboolean
+file_encoding_is_utf32(FileEncoding enc)
+{
+    return (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE);
+}
+
+gboolean
+file_encoding_is_stream_safe(FileEncoding enc)
+{
+    const FileEncodingInfo *info = file_encoding_get_info(enc);
+    return info ? info->stream_safe : TRUE;
+}
+
 static void
 detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_bom, size_t *bom_len)
 {
@@ -207,7 +375,21 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
     *has_bom = FALSE;
     *bom_len = 0;
 
-    if (size >= 3 && (unsigned char)data[0] == 0xEF && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) {
+    if (size >= 4 &&
+        (unsigned char)data[0] == 0xFF && (unsigned char)data[1] == 0xFE &&
+        (unsigned char)data[2] == 0x00 && (unsigned char)data[3] == 0x00) {
+        *enc = ENCODING_UTF32LE;
+        *has_bom = TRUE;
+        *bom_len = 4;
+        return;
+    } else if (size >= 4 &&
+               (unsigned char)data[0] == 0x00 && (unsigned char)data[1] == 0x00 &&
+               (unsigned char)data[2] == 0xFE && (unsigned char)data[3] == 0xFF) {
+        *enc = ENCODING_UTF32BE;
+        *has_bom = TRUE;
+        *bom_len = 4;
+        return;
+    } else if (size >= 3 && (unsigned char)data[0] == 0xEF && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) {
         *enc = ENCODING_UTF8;
         *has_bom = TRUE;
         *bom_len = 3;
@@ -248,13 +430,40 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
                 if (data[i+1] == 0 && data[i] != 0) le_count++;
                 if (data[i] == 0 && data[i+1] != 0) be_count++;
             }
-            
-            if (le_count > check_len / 4) {
+
+            size_t u32_le_count = 0;
+            size_t u32_be_count = 0;
+            for (size_t i = 0; i + 3 < check_len; i += 4) {
+                if (data[i] != 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 0) u32_le_count++;
+                if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] != 0) u32_be_count++;
+            }
+
+            if (u32_le_count > check_len / 16) {
+                *enc = ENCODING_UTF32LE;
+            } else if (u32_be_count > check_len / 16) {
+                *enc = ENCODING_UTF32BE;
+            } else if (le_count > check_len / 4) {
                 *enc = ENCODING_UTF16LE;
             } else if (be_count > check_len / 4) {
                 *enc = ENCODING_UTF16BE;
             } else {
                 /* Not valid UTF-8 and doesn't look like UTF-16. */
+                gboolean has_escape_sequence = FALSE;
+                for (size_t i = 0; i < check_len; i++) {
+                    if ((unsigned char)data[i] == 0x1B) {
+                        has_escape_sequence = TRUE;
+                        break;
+                    }
+                    if (i + 1 < check_len && data[i] == '~' && data[i+1] == '{') {
+                        has_escape_sequence = TRUE;
+                        break;
+                    }
+                }
+                if (has_escape_sequence) {
+                    *enc = ENCODING_ISO_2022_JP;
+                    return;
+                }
+
                 /* Check for Windows-1252 characters (0x80-0x9F) */
                 gboolean has_win1252 = FALSE;
                 for (size_t i = 0; i < check_len; i++) {
@@ -357,6 +566,56 @@ detect_newline_style_raw(const char *data, size_t size, FileEncoding enc, Newlin
                   return;
              }
          }
+    } else if (enc == ENCODING_UTF32LE) {
+        /* LE: LF 0A 00 00 00, CR 0D 00 00 00 */
+        for (size_t i = 0; i + 3 < check_len; i += 4) {
+            if ((unsigned char)data[i] == 0x0A &&
+                (unsigned char)data[i+1] == 0x00 &&
+                (unsigned char)data[i+2] == 0x00 &&
+                (unsigned char)data[i+3] == 0x00) {
+                *style = NEWLINE_LF;
+                return;
+            } else if ((unsigned char)data[i] == 0x0D &&
+                       (unsigned char)data[i+1] == 0x00 &&
+                       (unsigned char)data[i+2] == 0x00 &&
+                       (unsigned char)data[i+3] == 0x00) {
+                if (i + 7 < check_len &&
+                    (unsigned char)data[i+4] == 0x0A &&
+                    (unsigned char)data[i+5] == 0x00 &&
+                    (unsigned char)data[i+6] == 0x00 &&
+                    (unsigned char)data[i+7] == 0x00) {
+                    *style = NEWLINE_CRLF;
+                } else {
+                    *style = NEWLINE_CR;
+                }
+                return;
+            }
+        }
+    } else if (enc == ENCODING_UTF32BE) {
+        /* BE: LF 00 00 00 0A, CR 00 00 00 0D */
+        for (size_t i = 0; i + 3 < check_len; i += 4) {
+            if ((unsigned char)data[i] == 0x00 &&
+                (unsigned char)data[i+1] == 0x00 &&
+                (unsigned char)data[i+2] == 0x00 &&
+                (unsigned char)data[i+3] == 0x0A) {
+                *style = NEWLINE_LF;
+                return;
+            } else if ((unsigned char)data[i] == 0x00 &&
+                       (unsigned char)data[i+1] == 0x00 &&
+                       (unsigned char)data[i+2] == 0x00 &&
+                       (unsigned char)data[i+3] == 0x0D) {
+                if (i + 7 < check_len &&
+                    (unsigned char)data[i+4] == 0x00 &&
+                    (unsigned char)data[i+5] == 0x00 &&
+                    (unsigned char)data[i+6] == 0x00 &&
+                    (unsigned char)data[i+7] == 0x0A) {
+                    *style = NEWLINE_CRLF;
+                } else {
+                    *style = NEWLINE_CR;
+                }
+                return;
+            }
+        }
     }
 }
 
@@ -716,8 +975,8 @@ piece_table_new(const char *filename)
         detect_encoding(pt->orig_data, pt->orig_size, &pt->encoding, &pt->has_bom, &bom_len);
         
         if (pt->encoding != ENCODING_UTF8) {
-            /* Disk-backed UTF-16 to UTF-8 conversion for zero-RAM storage */
-            const char *from_codeset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
+            /* Disk-backed conversion to UTF-8 for zero-RAM storage. */
+            const char *from_codeset = file_encoding_to_charset(pt->encoding);
             
             /* Create temp file for converted UTF-8 data */
             const char *tmp_dir = g_get_tmp_dir();
@@ -737,18 +996,32 @@ piece_table_new(const char *filename)
             /* Stream-convert chunks from UTF-16 to UTF-8 */
             const char *src = pt->orig_data + bom_len;
             size_t src_remaining = pt->orig_size - bom_len;
-            size_t chunk_size = UTF16_CONVERT_CHUNK_SIZE; /* 64KB chunks (must be even for UTF-16) */
+            size_t chunk_size = UTF16_CONVERT_CHUNK_SIZE;
             size_t total_written = 0;
-            
+
 
             
             gint64 work_budget_us = 0;
             while (src_remaining > 0) {
                 gint64 chunk_start = g_get_monotonic_time();
                 size_t to_convert = (src_remaining < chunk_size) ? src_remaining : chunk_size;
-                /* For UTF-16, ensure we don't split a surrogate pair (4 bytes) */
-                if (to_convert < src_remaining && (to_convert % 2) != 0) {
-                    to_convert--;
+                if (file_encoding_is_utf16(pt->encoding)) {
+                    /* Keep UTF-16 code units aligned. */
+                    if (to_convert < src_remaining && (to_convert % 2) != 0) {
+                        to_convert--;
+                    }
+                } else if (file_encoding_is_utf32(pt->encoding)) {
+                    /* Keep UTF-32 code units aligned. */
+                    if (to_convert < src_remaining && (to_convert % 4) != 0) {
+                        to_convert -= (to_convert % 4);
+                    }
+                }
+                if (to_convert == 0) {
+                    close(temp_fd);
+                    unlink(pt->temp_path);
+                    g_free(pt->temp_path);
+                    pt->temp_path = NULL;
+                    goto ram_fallback;
                 }
                 
                 gsize bytes_read, bytes_written;
@@ -830,13 +1103,13 @@ piece_table_new(const char *filename)
         detect_newline_style(pt->orig_data, pt->orig_size, &pt->newline_style);
     }
 
-    /* Skip to tree building - only UTF-16 conversion needs ram_fallback */
+    /* Skip to tree building - non-UTF8 conversion may use ram_fallback */
     goto build_tree;
         
 ram_fallback:
-    /* RAM-based fallback for when temp file fails (UTF-16 only) */
+    /* RAM-based fallback for when temp file conversion fails */
     if (pt->encoding != ENCODING_UTF8) {
-        const char *from_codeset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : "UTF-16BE";
+        const char *from_codeset = file_encoding_to_charset(pt->encoding);
         gsize bytes_read, bytes_written;
         GError *error = NULL;
         char *utf8_data = g_convert(pt->orig_data + bom_len, pt->orig_size - bom_len, 
@@ -2384,10 +2657,7 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
         queue_load_progress(data, 0.0, res->encoding, res->newline_style);
         
         /* DEBUG: After encoding detection */
-        const char *enc_name = (res->encoding == ENCODING_UTF8) ? "UTF-8" : 
-                               (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : 
-                               (res->encoding == ENCODING_UTF16BE) ? "UTF-16BE" : 
-                               (res->encoding == ENCODING_WINDOWS_1252) ? "Windows-1252" : "ISO-8859-1";
+        const char *enc_name = file_encoding_to_display_name(res->encoding);
         g_print("[LOAD DEBUG] %.3fs - Detected encoding: %s, Size: %.2f MB\n", 
                 g_timer_elapsed(timer, NULL), enc_name, (double)res->size / (1024*1024));
         
@@ -2400,10 +2670,8 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
 
         if (res->encoding != ENCODING_UTF8) {
             did_conversion = TRUE;
-            /* Disk-backed UTF-16 to UTF-8 conversion for zero-RAM storage */
-            const char *from_codeset = (res->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : 
-                                       (res->encoding == ENCODING_UTF16BE) ? "UTF-16BE" : 
-                                       (res->encoding == ENCODING_WINDOWS_1252) ? "WINDOWS-1252" : "ISO-8859-1";
+            /* Disk-backed conversion to UTF-8 for zero-RAM storage. */
+            const char *from_codeset = file_encoding_to_charset(res->encoding);
             
             /* Create temp file for converted UTF-8 data */
             const char *tmp_dir = g_get_tmp_dir();
@@ -2418,6 +2686,16 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
             
             res->temp_path = g_strdup(temp_template);
             g_free(temp_template);
+
+            /* For stateful/multibyte encodings, prefer one-shot fallback conversion
+               to avoid split-sequence artifacts in chunked conversion. */
+            if (!file_encoding_is_stream_safe(res->encoding)) {
+                close(temp_fd);
+                unlink(res->temp_path);
+                g_free(res->temp_path);
+                res->temp_path = NULL;
+                goto ram_fallback;
+            }
             
             /* Stream-convert chunks from UTF-16 to UTF-8 */
             const char *src = res->data + bom_len;
@@ -2439,7 +2717,7 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
                 
                 size_t to_convert = (src_remaining < conv_chunk_size) ? src_remaining : conv_chunk_size;
                 
-                if (res->encoding == ENCODING_UTF16LE || res->encoding == ENCODING_UTF16BE) {
+                if (file_encoding_is_utf16(res->encoding)) {
                     /* Ensure strictly even bytes for UTF-16 */
                     if ((to_convert % 2) != 0) {
                         to_convert--;
@@ -2464,6 +2742,18 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
                             to_convert -= 2;
                         }
                     }
+                } else if (file_encoding_is_utf32(res->encoding)) {
+                    /* Ensure UTF-32 code-point alignment */
+                    if ((to_convert % 4) != 0) {
+                        to_convert -= (to_convert % 4);
+                    }
+                }
+                if (to_convert == 0) {
+                    close(temp_fd);
+                    unlink(res->temp_path);
+                    g_free(res->temp_path);
+                    res->temp_path = NULL;
+                    goto ram_fallback;
                 }
                 
                 gsize bytes_read, bytes_written;
@@ -2965,12 +3255,11 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
     piece_table_iter_init(pt, &iter);
     
     gboolean need_crlf = (pt->newline_style == NEWLINE_CRLF);
-    gboolean need_utf16 = (pt->encoding == ENCODING_UTF16LE || pt->encoding == ENCODING_UTF16BE);
-    const char *target_charset = (pt->encoding == ENCODING_UTF16LE) ? "UTF-16LE" : 
-                                  (pt->encoding == ENCODING_UTF16BE) ? "UTF-16BE" : "UTF-8";
+    gboolean need_conversion = (pt->encoding != ENCODING_UTF8);
+    const char *target_charset = file_encoding_to_charset(pt->encoding);
     
     /* Write BOM - for UTF-16 files, always write BOM; for UTF-8 only if original had it */
-    if (need_utf16 || pt->has_bom) {
+    if (file_encoding_is_utf16(pt->encoding) || file_encoding_is_utf32(pt->encoding) || pt->has_bom) {
         if (pt->encoding == ENCODING_UTF8 && pt->has_bom) {
             const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
             if (write(fd, bom, 3) != 3) {
@@ -2986,6 +3275,18 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
         } else if (pt->encoding == ENCODING_UTF16BE) {
             const unsigned char bom[] = { 0xFE, 0xFF };
             if (write(fd, bom, 2) != 2) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to write BOM: %s", strerror(errno));
+                return FALSE;
+            }
+        } else if (pt->encoding == ENCODING_UTF32LE) {
+            const unsigned char bom[] = { 0xFF, 0xFE, 0x00, 0x00 };
+            if (write(fd, bom, 4) != 4) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to write BOM: %s", strerror(errno));
+                return FALSE;
+            }
+        } else if (pt->encoding == ENCODING_UTF32BE) {
+            const unsigned char bom[] = { 0x00, 0x00, 0xFE, 0xFF };
+            if (write(fd, bom, 4) != 4) {
                 g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to write BOM: %s", strerror(errno));
                 return FALSE;
             }
@@ -3038,7 +3339,7 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
         
         /* For UTF-16 conversion, find the last complete UTF-8 character */
         size_t safe_len = working_len;
-        if (need_utf16) {
+        if (need_conversion) {
             /* Check if the last few bytes form a complete UTF-8 sequence */
             const char *p = working_data + working_len;
             size_t trailing = 0;
@@ -3099,7 +3400,7 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
         }
         
         /* Step 2: Handle encoding conversion */
-        if (need_utf16 && data_len > 0) {
+        if (need_conversion && data_len > 0) {
             gsize bytes_written;
             GError *conv_error = NULL;
             char *utf16_data = g_convert(data_to_encode, data_len,
@@ -3133,8 +3434,8 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
     
     /* Handle any remaining pending bytes (should not happen with valid UTF-8) */
     if (pending_len > 0) {
-        /* Invalid UTF-8 at end - write as-is for UTF-8, skip for UTF-16 */
-        if (!need_utf16) {
+        /* Invalid UTF-8 at end - write as-is only when no conversion is requested. */
+        if (!need_conversion) {
             WRITE_ALL(fd, pending_bytes, pending_len);
         }
     }
@@ -3176,8 +3477,7 @@ piece_table_save_async_start(PieceTable *pt, int fd)
     task->need_crlf = (pt->newline_style == NEWLINE_CRLF);
     
     /* Calculate if BOM write is needed */
-    gboolean need_utf16 = (pt->encoding == ENCODING_UTF16LE || pt->encoding == ENCODING_UTF16BE);
-    gboolean needs_bom = (need_utf16 || pt->has_bom);
+    gboolean needs_bom = (file_encoding_is_utf16(pt->encoding) || file_encoding_is_utf32(pt->encoding) || pt->has_bom);
     
     task->bom_written = !needs_bom; /* If no BOM needed, mark as written/skipped */
     task->cancelled = FALSE;
@@ -3199,11 +3499,7 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
     gint64 start_us = g_get_monotonic_time();
     
     gboolean need_conversion = (task->pt->encoding != ENCODING_UTF8);
-    const char *target_charset = "UTF-8";
-    if (task->pt->encoding == ENCODING_UTF16LE) target_charset = "UTF-16LE";
-    else if (task->pt->encoding == ENCODING_UTF16BE) target_charset = "UTF-16BE";
-    else if (task->pt->encoding == ENCODING_ISO_8859_1) target_charset = "ISO-8859-1";
-    else if (task->pt->encoding == ENCODING_WINDOWS_1252) target_charset = "WINDOWS-1252";
+    const char *target_charset = file_encoding_to_charset(task->pt->encoding);
 
     /* Write BOM if needed */
     if (!task->bom_written) {
@@ -3216,6 +3512,12 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
         } else if (task->pt->encoding == ENCODING_UTF16BE) {
             const unsigned char bom[] = { 0xFE, 0xFF };
             write(task->fd, bom, 2);
+        } else if (task->pt->encoding == ENCODING_UTF32LE) {
+            const unsigned char bom[] = { 0xFF, 0xFE, 0x00, 0x00 };
+            write(task->fd, bom, 4);
+        } else if (task->pt->encoding == ENCODING_UTF32BE) {
+            const unsigned char bom[] = { 0x00, 0x00, 0xFE, 0xFF };
+            write(task->fd, bom, 4);
         }
         task->bom_written = TRUE;
     }

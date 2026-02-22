@@ -33,8 +33,52 @@ typedef enum {
     ENCODING_UTF8,
     ENCODING_UTF16LE,
     ENCODING_UTF16BE,
+    ENCODING_UTF32LE,
+    ENCODING_UTF32BE,
+    ENCODING_ISO_8859_2,
+    ENCODING_ISO_8859_3,
+    ENCODING_ISO_8859_4,
+    ENCODING_ISO_8859_5,
+    ENCODING_ISO_8859_6,
+    ENCODING_ISO_8859_7,
+    ENCODING_ISO_8859_8,
+    ENCODING_ISO_8859_9,
+    ENCODING_ISO_8859_10,
+    ENCODING_ISO_8859_11,
+    ENCODING_ISO_8859_13,
+    ENCODING_ISO_8859_14,
+    ENCODING_ISO_8859_15,
+    ENCODING_ISO_8859_16,
     ENCODING_ISO_8859_1,
+    ENCODING_WINDOWS_1250,
+    ENCODING_WINDOWS_1251,
     ENCODING_WINDOWS_1252,
+    ENCODING_WINDOWS_1253,
+    ENCODING_WINDOWS_1254,
+    ENCODING_WINDOWS_1255,
+    ENCODING_WINDOWS_1256,
+    ENCODING_WINDOWS_1257,
+    ENCODING_WINDOWS_1258,
+    ENCODING_KOI8_R,
+    ENCODING_KOI8_U,
+    ENCODING_CP850,
+    ENCODING_CP852,
+    ENCODING_CP855,
+    ENCODING_CP857,
+    ENCODING_CP862,
+    ENCODING_CP864,
+    ENCODING_CP866,
+    ENCODING_SHIFT_JIS,
+    ENCODING_EUC_JP,
+    ENCODING_ISO_2022_JP,
+    ENCODING_GB18030,
+    ENCODING_GBK,
+    ENCODING_BIG5,
+    ENCODING_BIG5_HKSCS,
+    ENCODING_EUC_KR,
+    ENCODING_CP949,
+    ENCODING_ISO_2022_KR,
+    ENCODING_TIS_620,
 } FileEncoding;
 
 typedef enum {
@@ -179,5 +223,18 @@ NewlineType piece_table_get_newline_type(PieceTable *pt);
 
 void piece_table_set_encoding(PieceTable *pt, FileEncoding enc);
 FileEncoding piece_table_get_encoding(PieceTable *pt);
+
+/* Encoding metadata helpers (shared across UI/load/save paths) */
+int file_encoding_get_count(void);
+FileEncoding file_encoding_from_id(const char *id);
+const char *file_encoding_to_id(FileEncoding enc);
+const char *file_encoding_to_display_name(FileEncoding enc);
+const char *file_encoding_to_display_name_from_id(const char *id);
+const char *file_encoding_to_charset(FileEncoding enc);
+const char *file_encoding_get_id_at(int index);
+const char *file_encoding_get_display_name_at(int index);
+gboolean file_encoding_is_utf16(FileEncoding enc);
+gboolean file_encoding_is_utf32(FileEncoding enc);
+gboolean file_encoding_is_stream_safe(FileEncoding enc);
 
 #endif

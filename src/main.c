@@ -1822,11 +1822,7 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
              if (doc) {
                  /* Encoding - Keep imperative */
                  FileEncoding enc = document_get_encoding(doc);
-                 const char *enc_id = "utf-8";
-                 if (enc == ENCODING_UTF16LE) enc_id = "utf-16le";
-                 else if (enc == ENCODING_UTF16BE) enc_id = "utf-16be";
-                 else if (enc == ENCODING_ISO_8859_1) enc_id = "iso-8859-1";
-                 else if (enc == ENCODING_WINDOWS_1252) enc_id = "windows-1252";
+                 const char *enc_id = file_encoding_to_id(enc);
                  vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), enc_id);
                  
                  /* Line Ending - Keep imperative */
@@ -1837,11 +1833,7 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
                  vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), nl_id);
                  
                  /* Encoding Action State */
-                 const char *enc_key = "utf-8";
-                 if (enc == ENCODING_UTF16LE) enc_key = "utf-16le";
-                 else if (enc == ENCODING_UTF16BE) enc_key = "utf-16be";
-                 else if (enc == ENCODING_ISO_8859_1) enc_key = "iso-8859-1";
-                 else if (enc == ENCODING_WINDOWS_1252) enc_key = "windows-1252";
+                 const char *enc_key = file_encoding_to_id(enc);
                  GAction *act = g_action_map_lookup_action(map, "set-encoding");
                  if (act) g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(enc_key));
                  
@@ -4605,9 +4597,14 @@ setup_window(AdwApplicationWindow *window)
     GMenu *doc_menu = g_menu_new();
     
     GMenu *enc_menu = g_menu_new();
-    g_menu_append(enc_menu, "UTF-8", "win.set-encoding::utf-8");
-    g_menu_append(enc_menu, "UTF-16 LE", "win.set-encoding::utf-16le");
-    g_menu_append(enc_menu, "UTF-16 BE", "win.set-encoding::utf-16be");
+    for (int i = 0; i < file_encoding_get_count(); i++) {
+        const char *disp = file_encoding_get_display_name_at(i);
+        const char *id = file_encoding_get_id_at(i);
+        if (!disp || !id) continue;
+        char *detailed = g_strdup_printf("win.set-encoding::%s", id);
+        g_menu_append(enc_menu, disp, detailed);
+        g_free(detailed);
+    }
     g_menu_append_submenu(doc_menu, _("Encoding"), G_MENU_MODEL(enc_menu));
     g_object_unref(enc_menu);
     
@@ -4792,12 +4789,7 @@ on_load_progress(double progress, FileEncoding encoding, NewlineType newline, vo
     
     /* Update Status Bar immediately if we have valid window context */
     if (ctx->gtkw_ref && ctx->window && ctx->window->status_bar) {
-        const char *enc_id = "utf-8";
-        switch (encoding) {
-            case ENCODING_UTF16LE: enc_id = "utf-16le"; break;
-            case ENCODING_UTF16BE: enc_id = "utf-16be"; break;
-            default: break;
-        }
+        const char *enc_id = file_encoding_to_id(encoding);
         vite_status_bar_set_encoding(VITE_STATUS_BAR(ctx->window->status_bar), enc_id);
         
         const char *nl_id = "lf";

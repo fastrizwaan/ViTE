@@ -1,4 +1,5 @@
 #include "status-bar.h"
+#include "piece-table.h"
 #include <glib/gi18n.h>
 
 struct _ViteStatusBar {
@@ -14,7 +15,6 @@ struct _ViteStatusBar {
     
     GtkWidget *encoding_btn;
     GtkWidget *encoding_label;
-    GSimpleActionGroup *encoding_group;
     
     GtkWidget *line_ending_btn;
     GtkWidget *line_ending_label;
@@ -36,6 +36,12 @@ enum {
 };
 
 static guint signals[LAST_SIGNAL] = { 0 };
+
+static void on_search_changed(GtkEditable *entry, gpointer user_data);
+static gboolean file_type_filter_func(GtkListBoxRow *row, gpointer user_data);
+static void on_file_type_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_data);
+static gboolean encoding_filter_func(GtkListBoxRow *row, gpointer user_data);
+static void on_encoding_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_data);
 
 static void
 vite_status_bar_dispose(GObject *object)
@@ -134,39 +140,55 @@ create_line_ending_menu(ViteStatusBar *self)
 }
 
 static void
-on_encoding_activated(GSimpleAction *action, GVariant *parameter, gpointer user_data)
-{
-    ViteStatusBar *self = VITE_STATUS_BAR(user_data);
-    g_simple_action_set_state(action, parameter);
-    
-    const char *id = g_variant_get_string(parameter, NULL);
-
-    
-    vite_status_bar_set_encoding(self, id);
-    g_signal_emit(self, signals[ENCODING_CHANGED], 0, id);
-}
-
-static void
 create_encoding_menu(ViteStatusBar *self)
 {
-    GMenu *menu = g_menu_new();
-    
-    self->encoding_group = g_simple_action_group_new();
-    GActionEntry entries[] = {
-        { "set", NULL, "s", "'utf-8'", on_encoding_activated, { 0 } }
-    };
-    g_action_map_add_action_entries(G_ACTION_MAP(self->encoding_group), entries, G_N_ELEMENTS(entries), self);
-    gtk_widget_insert_action_group(self->encoding_btn, "enc", G_ACTION_GROUP(self->encoding_group));
-    
-    g_menu_append(menu, "UTF-8", "enc.set::utf-8");
-    g_menu_append(menu, "UTF-16 LE", "enc.set::utf-16le");
-    g_menu_append(menu, "UTF-16 BE", "enc.set::utf-16be");
-    g_menu_append(menu, "ISO-8859-1", "enc.set::iso-8859-1");
-    g_menu_append(menu, "Windows-1252", "enc.set::windows-1252");
-    
-    GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+    GtkWidget *popover = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->encoding_btn), popover);
-    g_object_unref(menu);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_top(box, 6);
+    gtk_widget_set_margin_bottom(box, 6);
+    gtk_widget_set_margin_start(box, 6);
+    gtk_widget_set_margin_end(box, 6);
+    gtk_popover_set_child(GTK_POPOVER(popover), box);
+
+    GtkWidget *entry = gtk_search_entry_new();
+    gtk_box_append(GTK_BOX(box), entry);
+
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 240);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 240);
+    gtk_widget_set_vexpand(scrolled, TRUE);
+    gtk_box_append(GTK_BOX(box), scrolled);
+
+    GtkWidget *listbox = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(listbox), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class(listbox, "boxed-list");
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), listbox);
+
+    for (int i = 0; i < file_encoding_get_count(); i++) {
+        const char *disp = file_encoding_get_display_name_at(i);
+        const char *id = file_encoding_get_id_at(i);
+        if (!disp || !id) continue;
+
+        GtkWidget *row = gtk_list_box_row_new();
+        GtkWidget *lbl = gtk_label_new(disp);
+        gtk_widget_set_margin_start(lbl, 12);
+        gtk_widget_set_margin_end(lbl, 12);
+        gtk_widget_set_margin_top(lbl, 8);
+        gtk_widget_set_margin_bottom(lbl, 8);
+        gtk_widget_set_halign(lbl, GTK_ALIGN_START);
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), lbl);
+
+        g_object_set_data(G_OBJECT(row), "enc-name", (gpointer)disp);
+        g_object_set_data(G_OBJECT(row), "enc-id", (gpointer)id);
+
+        gtk_list_box_append(GTK_LIST_BOX(listbox), row);
+    }
+
+    gtk_list_box_set_filter_func(GTK_LIST_BOX(listbox), encoding_filter_func, entry, NULL);
+    g_signal_connect(entry, "search-changed", G_CALLBACK(on_search_changed), listbox);
+    g_signal_connect(listbox, "row-activated", G_CALLBACK(on_encoding_row_activated), self);
 }
 
 static GtkWidget *
@@ -260,6 +282,46 @@ file_type_filter_func(GtkListBoxRow *row, gpointer user_data)
     g_free(text_lower);
     
     return match;
+}
+
+static gboolean
+encoding_filter_func(GtkListBoxRow *row, gpointer user_data)
+{
+    GtkEditable *entry = GTK_EDITABLE(user_data);
+    const char *text = gtk_editable_get_text(entry);
+    if (!text || !text[0]) return TRUE;
+
+    const char *name = g_object_get_data(G_OBJECT(row), "enc-name");
+    const char *id = g_object_get_data(G_OBJECT(row), "enc-id");
+    if (!name && !id) return FALSE;
+
+    char *name_lower = name ? g_utf8_strdown(name, -1) : NULL;
+    char *id_lower = id ? g_utf8_strdown(id, -1) : NULL;
+    char *text_lower = g_utf8_strdown(text, -1);
+
+    gboolean match = FALSE;
+    if (name_lower && strstr(name_lower, text_lower)) match = TRUE;
+    if (!match && id_lower && strstr(id_lower, text_lower)) match = TRUE;
+
+    g_free(name_lower);
+    g_free(id_lower);
+    g_free(text_lower);
+    return match;
+}
+
+static void
+on_encoding_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_data)
+{
+    ViteStatusBar *self = VITE_STATUS_BAR(user_data);
+    const char *id = g_object_get_data(G_OBJECT(row), "enc-id");
+    if (!id) return;
+
+    vite_status_bar_set_encoding(self, id);
+
+    GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(box), GTK_TYPE_POPOVER);
+    if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
+
+    g_signal_emit(self, signals[ENCODING_CHANGED], 0, id);
 }
 
 static void
@@ -483,25 +545,11 @@ vite_status_bar_set_encoding(ViteStatusBar *self, const char *encoding_id)
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
     if (!encoding_id) encoding_id = "utf-8";
     
-    /* Map ID to Display Name */
-    const char *display = "UTF-8";
-    if (g_strcmp0(encoding_id, "utf-8") == 0) display = "UTF-8";
-    else if (g_strcmp0(encoding_id, "utf-16le") == 0) display = "UTF-16 LE";
-    else if (g_strcmp0(encoding_id, "utf-16be") == 0) display = "UTF-16 BE";
-    else if (g_strcmp0(encoding_id, "iso-8859-1") == 0) display = "ISO-8859-1";
-    else if (g_strcmp0(encoding_id, "windows-1252") == 0) display = "Windows-1252";
+    const char *display = file_encoding_to_display_name_from_id(encoding_id);
     
     char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", display);
     gtk_label_set_markup(GTK_LABEL(self->encoding_label), markup);
     g_free(markup);
-    
-    /* Update Action State directly using ID */
-    if (self->encoding_group) {
-        GAction *act = g_action_map_lookup_action(G_ACTION_MAP(self->encoding_group), "set");
-        if (act) {
-            g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_string(encoding_id));
-        }
-    }
 }
 
 void
@@ -555,4 +603,3 @@ vite_status_bar_set_indentation(ViteStatusBar *self, int width, gboolean use_tab
         if (act) g_simple_action_set_state(G_SIMPLE_ACTION(act), g_variant_new_int32(use_tabs ? 1 : 0));
     }
 }
-
