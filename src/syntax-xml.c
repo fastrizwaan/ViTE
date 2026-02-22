@@ -10,7 +10,7 @@ syntax_highlight_xml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text,
          while (g_match_info_matches(mi)) {
              int s, e;
              g_match_info_fetch_pos(mi, 0, &s, &e);
-             add_attr(attrs, s, len, &d_comment); /* Assume single line or until end */
+             add_color_attr(attrs, s, len, COLOR_COMMENT); /* Assume single line or until end */
              /* TODO: Proper state machine for XML comments */
              state = STATE_IN_ML_COMMENT;
              g_match_info_next(mi, NULL);
@@ -24,7 +24,7 @@ syntax_highlight_xml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text,
             while (g_match_info_matches(mi)) {
                 int s, e;
                 g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_tag); /* Red tags */
+                add_color_attr(attrs, s, e, COLOR_TAG); /* Red tags */
                 g_match_info_next(mi, NULL);
             }
         }
@@ -34,7 +34,7 @@ syntax_highlight_xml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text,
             while (g_match_info_matches(mi)) {
                 int s, e;
                 g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_tag);
+                add_color_attr(attrs, s, e, COLOR_TAG);
                 g_match_info_next(mi, NULL);
             }
         }
@@ -45,7 +45,7 @@ syntax_highlight_xml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text,
             while (g_match_info_matches(mi)) {
                 int s, e;
                 g_match_info_fetch_pos(mi, 1, &s, &e); /* Group 1 name */
-                add_attr(attrs, s, e, &d_attribute); /* Orange attributes */
+                add_color_attr(attrs, s, e, COLOR_ATTRIBUTE); /* Orange attributes */
                 g_match_info_next(mi, NULL);
             }
         }
@@ -57,7 +57,7 @@ syntax_highlight_xml(SyntaxContext *ctx, PangoAttrList *attrs, const char *text,
             while (g_match_info_matches(mi)) {
                 int s, e;
                 g_match_info_fetch_pos(mi, 0, &s, &e);
-                add_attr(attrs, s, e, &d_string);
+                add_color_attr(attrs, s, e, COLOR_STRING);
                 g_match_info_next(mi, NULL);
             }
         }

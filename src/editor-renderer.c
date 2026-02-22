@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include "syntax.h"
+#include "theme-manager.h"
 #include "editor-minimap.h"
 
 void
@@ -69,38 +70,31 @@ render_context_init(SnapshotRenderContext *ctx, EditorWidget *self, GtkSnapshot 
     ctx->gutter_w = get_effective_gutter_width(self);
     ctx->text_start_x = ctx->gutter_w + self->padding_left;
     
-    /* Theme / BG Logic */
-    gtk_widget_get_color(GTK_WIDGET(self), &self->color_text);
-    self->color_cursor = self->color_text;
-    
-    ctx->bg_color = (GdkRGBA){1, 1, 1, 1};
-    ctx->is_dark = FALSE;
-    if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
-        /* #1d1d20 = 29, 29, 32 */
-        ctx->bg_color = (GdkRGBA){0.113725, 0.113725, 0.12549, 1.0};
-        ctx->is_dark = TRUE;
-    }
-    
-    /* Update Theme Colors (Auto-Theme Logic for now) */
-    self->color_background = ctx->bg_color;
-    /* Gutter same as background */
-    self->color_gutter_bg = self->color_background;
-    
-    if (ctx->is_dark) {
-        /* Use 'd_variable_c' (Light Grey #d1d1d1) for plain text as requested */
-        self->color_text = (GdkRGBA){0.82, 0.82, 0.82, 1.0};
-        
-        self->color_line_highlight = self->color_text; 
-        self->color_line_highlight.alpha = 0.04; /* Reduced from 0.1 */
-        
-        self->color_line_number = self->color_text;
-        self->color_line_number.alpha = 0.5;
+    /* Theme-driven colors */
+    const ViteTheme *theme = theme_manager_get_current();
+    if (theme) {
+        ctx->bg_color = theme->editor_bg;
+        ctx->is_dark = theme->is_dark;
+        self->color_text = theme->editor_fg;
+        self->color_cursor = theme->cursor_color;
+        self->color_background = theme->editor_bg;
+        self->color_gutter_bg = theme->gutter_bg;
+        self->color_line_number = theme->gutter_fg;
+        self->color_line_highlight = theme->line_highlight;
     } else {
-        /* Keep original text color for light mode (likely black) */
-        
-        self->color_line_highlight = self->color_text; 
-        self->color_line_highlight.alpha = 0.03; /* Reduced from 0.05 */
-        
+        /* Fallback if theme not initialized yet */
+        gtk_widget_get_color(GTK_WIDGET(self), &self->color_text);
+        self->color_cursor = self->color_text;
+        ctx->bg_color = (GdkRGBA){1, 1, 1, 1};
+        ctx->is_dark = FALSE;
+        if (self->color_text.red > 0.5 && self->color_text.green > 0.5 && self->color_text.blue > 0.5) {
+            ctx->bg_color = (GdkRGBA){0.113725, 0.113725, 0.12549, 1.0};
+            ctx->is_dark = TRUE;
+        }
+        self->color_background = ctx->bg_color;
+        self->color_gutter_bg = self->color_background;
+        self->color_line_highlight = self->color_text;
+        self->color_line_highlight.alpha = ctx->is_dark ? 0.04 : 0.03;
         self->color_line_number = self->color_text;
         self->color_line_number.alpha = 0.5;
     }

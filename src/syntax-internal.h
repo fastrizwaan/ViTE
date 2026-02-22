@@ -2,6 +2,7 @@
 #define SYNTAX_INTERNAL_H
 
 #include "syntax.h"
+#include "theme-manager.h"
 
 /* --- Internal Structures --- */
 
@@ -54,54 +55,13 @@ typedef struct {
     PangoAttrList *attrs;
 } SyntaxCacheEntry;
 
-/* --- Colors (Shared) --- */
-extern gboolean is_dark_mode;
+/* --- Color System (Theme-Driven) --- */
 
-/* Dark Theme */
-extern PangoColor d_keyword;
-extern PangoColor d_builtin;
-extern PangoColor d_string;
-extern PangoColor d_comment;
-extern PangoColor d_number;
-extern PangoColor d_function;
-extern PangoColor d_type;
-extern PangoColor d_decorator;
-extern PangoColor d_variable;
-extern PangoColor d_variable_c;
-extern PangoColor d_constant;
-extern PangoColor d_tag;
-extern PangoColor d_operator;
-extern PangoColor d_punctuation;
-extern PangoColor d_attribute;
-extern PangoColor d_param;
-extern PangoColor d_property;
-extern PangoColor d_preproc;
-extern PangoColor d_logical;
-
-/* Light Theme */
-extern PangoColor l_keyword;
-extern PangoColor l_builtin;
-extern PangoColor l_string;
-extern PangoColor l_comment;
-extern PangoColor l_number;
-extern PangoColor l_operator;
-extern PangoColor l_punctuation;
-extern PangoColor l_function;
-extern PangoColor l_type;
-extern PangoColor l_decorator;
-extern PangoColor l_variable;
-extern PangoColor l_variable_c;
-extern PangoColor l_constant;
-extern PangoColor l_tag;
-extern PangoColor l_attribute;
-extern PangoColor l_param;
-extern PangoColor l_property;
-extern PangoColor l_preproc;
-extern PangoColor l_logical;
+/* Add a syntax-colored attribute using a ViteColorSlot.
+   Looks up the actual color from the current theme. */
+void add_color_attr(PangoAttrList *attrs, int start, int end, ViteColorSlot slot);
 
 /* --- Helper Functions --- */
-
-void add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref);
 void set_line_end_state(SyntaxContext *ctx, size_t line_index, SyntaxState state);
 SyntaxState get_line_start_state(SyntaxContext *ctx, size_t line_index);
 

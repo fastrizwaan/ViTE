@@ -155,7 +155,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
             cur++;
         }
         if (state == STATE_IN_TRIPLE_DQ_STRING) cur = len;
-        add_attr(attrs, start_pos, cur, &d_string);
+        add_color_attr(attrs, start_pos, cur, COLOR_STRING);
     }
     else if (state == STATE_IN_TRIPLE_SQ_STRING) {
         size_t start_pos = cur;
@@ -168,7 +168,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
             cur++;
         }
         if (state == STATE_IN_TRIPLE_SQ_STRING) cur = len;
-        add_attr(attrs, start_pos, cur, &d_string);
+        add_color_attr(attrs, start_pos, cur, COLOR_STRING);
     }
 
     while (cur < len) {
@@ -188,7 +188,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                     cur++;
                 }
                 if (state == STATE_IN_TRIPLE_DQ_STRING) cur = len;
-                add_attr(attrs, start_pos, cur, &d_string);
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                 continue;
             }
             if (g_str_has_prefix(text + cur, "'''")) {
@@ -204,7 +204,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                     cur++;
                 }
                 if (state == STATE_IN_TRIPLE_SQ_STRING) cur = len;
-                add_attr(attrs, start_pos, cur, &d_string);
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                 continue;
             }
             /* Single Strings */
@@ -218,7 +218,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                     }
                     cur++;
                 }
-                add_attr(attrs, start_pos, cur, &d_string);
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                 continue;
             }
             if (text[cur] == '\'') {
@@ -231,12 +231,12 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                     }
                     cur++;
                 }
-                add_attr(attrs, start_pos, cur, &d_string);
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                 continue;
             }
             /* Comment */
             if (text[cur] == '#') {
-                add_attr(attrs, cur, len, &d_comment);
+                add_color_attr(attrs, cur, len, COLOR_COMMENT);
                 cur = len;
                 continue;
             }
@@ -247,7 +247,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '.')) {
                     cur++;
                 }
-                add_attr(attrs, start_pos, cur, &d_number);
+                add_color_attr(attrs, start_pos, cur, COLOR_NUMBER);
                 continue;
             }
 
@@ -306,33 +306,33 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                 /* 1. Keywords / Bools / Builtins */
                 /* 'self' -> Yellow (d_type) */
                 if (word_len == 4 && strncmp(word_start, "self", 4) == 0) {
-                     add_attr(attrs, start_pos, cur, &d_type); 
+                     add_color_attr(attrs, start_pos, cur, COLOR_TYPE); 
                 }
                 else if (is_word_in_list(word_start, word_len, py_keywords)) {
-                    add_attr(attrs, start_pos, cur, &d_keyword);
+                    add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD);
                     /* Check for 'lambda' to start lambda param state */
                     if (word_len == 6 && strncmp(word_start, "lambda", 6) == 0) {
                         in_lambda_def = TRUE;
                     }
                 }
                 else if (is_word_in_list(word_start, word_len, py_bools)) {
-                     add_attr(attrs, start_pos, cur, &d_number);
+                     add_color_attr(attrs, start_pos, cur, COLOR_NUMBER);
                 }
                 else if (is_word_in_list(word_start, word_len, py_builtins)) {
-                     add_attr(attrs, start_pos, cur, &d_builtin);
+                     add_color_attr(attrs, start_pos, cur, COLOR_BUILTIN);
                 }
                 /* 1.5. Special Dunder Variables */
                 else if (word_len >= 4 && word_start[0] == '_' && word_start[1] == '_' && 
                          word_start[word_len-1] == '_' && word_start[word_len-2] == '_') {
                      if (is_word_in_list(word_start, word_len, py_special_vars)) {
-                         add_attr(attrs, start_pos, cur, &d_variable); /* Red */
+                         add_color_attr(attrs, start_pos, cur, COLOR_VARIABLE); /* Red */
                      } else {
-                         add_attr(attrs, start_pos, cur, &d_logical);  /* Cyan */
+                         add_color_attr(attrs, start_pos, cur, COLOR_LOGICAL);  /* Cyan */
                      }
                 }
                 /* 2. Function Call */
                 else if (is_call) {
-                     add_attr(attrs, start_pos, cur, &d_function);
+                     add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
                 }
                 /* 3. Attributes */
                 else if (is_attr) {
@@ -357,30 +357,30 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                      }
                      
                      if (owner_is_self) {
-                         add_attr(attrs, start_pos, cur, &d_variable_c); /* self.XXX -> Grey */
+                         add_color_attr(attrs, start_pos, cur, COLOR_VARIABLE_C); /* self.XXX -> Grey */
                      } else {
-                         add_attr(attrs, start_pos, cur, &d_type); /* other.XXX -> Yellow */
+                         add_color_attr(attrs, start_pos, cur, COLOR_TYPE); /* other.XXX -> Yellow */
                      }
                 }
                 /* 4. Lambda Params -> Orange */
                 else if (in_lambda_def) {
-                    add_attr(attrs, start_pos, cur, &d_attribute); /* Orange */
+                    add_color_attr(attrs, start_pos, cur, COLOR_ATTRIBUTE); /* Orange */
                 }
                 /* 5. Types (CamelCase) -> Yellow */
                 else if (g_ascii_isupper(word_start[0]) && !is_all_caps(word_start, word_len)) {
-                     add_attr(attrs, start_pos, cur, &d_type);
+                     add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
                 }
                 /* 6. Assignment LHS / Keyword Arg -> Red */
                 else if (is_assignment) {
-                     add_attr(attrs, start_pos, cur, &d_variable);
+                     add_color_attr(attrs, start_pos, cur, COLOR_VARIABLE);
                 }
                 /* 7. Inside Parens (Args) -> Red */
                 else if (paren_depth > 0) {
-                     add_attr(attrs, start_pos, cur, &d_variable);
+                     add_color_attr(attrs, start_pos, cur, COLOR_VARIABLE);
                 }
                 /* 8. Default Variable -> Grey */
                 else {
-                    add_attr(attrs, start_pos, cur, &d_variable_c);
+                    add_color_attr(attrs, start_pos, cur, COLOR_VARIABLE_C);
                 }
                 continue;
             }
@@ -392,14 +392,14 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_' || text[cur] == '.')) {
                     cur++;
                 }
-                add_attr(attrs, start_pos, cur, &d_decorator);
+                add_color_attr(attrs, start_pos, cur, COLOR_DECORATOR);
                 continue;
             }
             
             /* Punctuation */
             /* Handle '.' specifically as Grey */
             if (text[cur] == '.') {
-                 add_attr(attrs, cur, cur+1, &d_variable_c);
+                 add_color_attr(attrs, cur, cur+1, COLOR_VARIABLE_C);
                  cur++;
                  continue;
             }
@@ -407,7 +407,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
             /* Colon terminates lambda definition */
             if (text[cur] == ':') {
                  in_lambda_def = FALSE;
-                 add_attr(attrs, cur, cur+1, &d_punctuation);
+                 add_color_attr(attrs, cur, cur+1, COLOR_PUNCTUATION);
                  cur++;
                  continue;
             }
@@ -415,14 +415,14 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
             /* Parens track depth & Rainbow Brackets */
             /* Cycle: Orange -> Purple -> Cyan */
             if (strchr("([{", text[cur])) {
-                 const PangoColor *bracket_color;
+                 ViteColorSlot bracket_color;
                  int depth_mod = paren_depth % 3;
                  
-                 if (depth_mod == 0) bracket_color = &d_punctuation; /* Orange */
-                 else if (depth_mod == 1) bracket_color = &d_keyword; /* Purple */
-                 else bracket_color = &d_logical; /* Cyan */
+                 if (depth_mod == 0) bracket_color = COLOR_PUNCTUATION; /* Orange */
+                 else if (depth_mod == 1) bracket_color = COLOR_KEYWORD; /* Purple */
+                 else bracket_color = COLOR_LOGICAL; /* Cyan */
                  
-                 add_attr(attrs, cur, cur+1, bracket_color);
+                 add_color_attr(attrs, cur, cur+1, bracket_color);
                  paren_depth++;
                  cur++;
                  continue;
@@ -430,21 +430,21 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
             if (strchr(")]}", text[cur])) {
                  if (paren_depth > 0) paren_depth--;
                  
-                 const PangoColor *bracket_color;
+                 ViteColorSlot bracket_color;
                  int depth_mod = paren_depth % 3;
                  
-                 if (depth_mod == 0) bracket_color = &d_punctuation; /* Orange */
-                 else if (depth_mod == 1) bracket_color = &d_keyword; /* Purple */
-                 else bracket_color = &d_logical; /* Cyan */
+                 if (depth_mod == 0) bracket_color = COLOR_PUNCTUATION; /* Orange */
+                 else if (depth_mod == 1) bracket_color = COLOR_KEYWORD; /* Purple */
+                 else bracket_color = COLOR_LOGICAL; /* Cyan */
                  
-                 add_attr(attrs, cur, cur+1, bracket_color);
+                 add_color_attr(attrs, cur, cur+1, bracket_color);
                  cur++;
                  continue;
             }
             
             /* Other Punctuation */
             if (strchr(":;,", text[cur])) {
-                 add_attr(attrs, cur, cur+1, &d_punctuation);
+                 add_color_attr(attrs, cur, cur+1, COLOR_PUNCTUATION);
                  cur++;
                  continue;
             }
@@ -454,7 +454,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                  /* = & | explicitly requested as Cyan */
                  if (strchr("=&|", text[cur])) {
                      /* Careful with ==, &&, || */
-                     add_attr(attrs, cur, cur+1, &d_logical);
+                     add_color_attr(attrs, cur, cur+1, COLOR_LOGICAL);
                      cur++;
                      continue;
                  }
@@ -465,21 +465,21 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                          (text[cur] == '!' && text[cur+1] == '=') ||
                          (text[cur] == '<' && text[cur+1] == '=') ||
                          (text[cur] == '>' && text[cur+1] == '=')) {
-                         add_attr(attrs, cur, cur+2, &d_logical);
+                         add_color_attr(attrs, cur, cur+2, COLOR_LOGICAL);
                          cur += 2;
                          continue;
                      }
                  }
                  /* Single Ops */
                  if (text[cur] == '<' || text[cur] == '>') {
-                     add_attr(attrs, cur, cur+1, &d_logical);
+                     add_color_attr(attrs, cur, cur+1, COLOR_LOGICAL);
                      cur++;
                      continue;
                  }
                  
                  /* Other math ops: +, -, *, /, % */
                  /* Can stay keyword (purple) or operator (orange). Let's keep Keyword/Purple for now */
-                 add_attr(attrs, cur, cur+1, &d_keyword);
+                 add_color_attr(attrs, cur, cur+1, COLOR_KEYWORD);
                  cur++;
                  continue;
             }

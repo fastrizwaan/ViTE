@@ -9,6 +9,7 @@ cc = meson.get_compiler('c')
 gtk_dep = dependency('gtk4', version: '>= 4.0.0')
 adw_dep = dependency('libadwaita-1', version: '>= 1.0.0')
 m_dep = cc.find_library('m', required : false)
+json_glib_dep = dependency('json-glib-1.0', version: '>= 1.0.0')
 
 i18n = import('i18n')
 
@@ -51,14 +52,15 @@ sources = files(
   'src/syntax-rust.c',
   'src/syntax-markdown.c',
   'src/editor-minimap.c',
-  'src/editor-print.c'
+  'src/editor-print.c',
+  'src/theme-manager.c'
 )
 
 subdir('po')
 
 executable('vite',
   sources,
-  dependencies : [gtk_dep, adw_dep, m_dep],
+  dependencies : [gtk_dep, adw_dep, m_dep, json_glib_dep],
   install : true)
 
 # Install desktop file
@@ -104,4 +106,10 @@ install_data(
 install_data(
   'data/io.github.fastrizwaan.ViTE.xml',
   install_dir: join_paths(get_option('datadir'), 'metainfo')
+)
+
+# Install VS Code theme files
+install_subdir('vscode-themes',
+  install_dir: join_paths(get_option('datadir'), 'vite', 'themes'),
+  strip_directory: true
 )

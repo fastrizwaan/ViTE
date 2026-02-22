@@ -1,52 +1,7 @@
 #include "syntax-internal.h"
 #include <string.h>
 
-/* --- Colors --- */
-gboolean is_dark_mode = TRUE;
-
-/* Dark Theme (One Dark) */
-PangoColor d_keyword;   /* #c678dd Purple */
-PangoColor d_builtin;   /* #56b6c2 Cyan */
-PangoColor d_string;    /* #98c379 Green */
-PangoColor d_comment;   /* #7f848e Grey */
-PangoColor d_number;    /* #d19a66 Orange */
-PangoColor d_function;  /* #61afef Blue */
-PangoColor d_type;      /* #e5c07b Yellow/Gold (Class) */
-PangoColor d_decorator; /* #56b6c2 Cyan */
-PangoColor d_variable;  /* #e06c75 Red */
-PangoColor d_variable_c; /* #d1d1d1 Light Grey */
-PangoColor d_constant;  /* #e06c75 Red (Macros, Enums) */
-PangoColor d_tag;       /* #e06c75 Red */
-PangoColor d_operator;     /* #d19a66 Orange */
-PangoColor d_punctuation;  /* #d19a66 Orange */
-PangoColor d_attribute; /* #d19a66 Orange */
-PangoColor d_param;     /* #d19a66 Orange (Argument) */
-PangoColor d_property;  /* #56b6c2 Cyan */
-PangoColor d_preproc;   /* #c678dd Purple */
-PangoColor d_logical;   /* #56b6c2 Cyan */
-
-/* Light Theme (One Light) */
-PangoColor l_keyword;   /* #a626a4 Purple */
-PangoColor l_builtin;   /* #0184bc Cyan/Blue */
-PangoColor l_string;    /* #50a14f Green */
-PangoColor l_comment;   /* #5c6370 Grey */
-PangoColor l_number;    /* #986801 Orange */
-PangoColor l_operator;     /* #986801 Orange */
-PangoColor l_punctuation;  /* #986801 Orange */
-PangoColor l_function;  /* #4078f2 Blue */
-PangoColor l_type;      /* #c18401 Orange/Gold */
-PangoColor l_decorator; /* #a626a4 Purple */
-PangoColor l_variable;  /* #e45649 Red */
-PangoColor l_variable_c; /* #383a42 Dark Grey */
-PangoColor l_constant;  /* #e45649 Red */
-PangoColor l_tag;       /* #e45649 Red */
-PangoColor l_attribute; /* #986801 Orange */
-PangoColor l_param;     /* #986801 Orange */
-PangoColor l_property;  /* #0184bc Cyan */
-PangoColor l_preproc;   /* #a626a4 Purple */
-PangoColor l_logical;   /* #0184bc Cyan */
-
-static gboolean colors_initialized = FALSE;
+/* --- Theme-Driven Color System --- */
 
 static void
 syntax_cache_entry_free(gpointer data)
@@ -57,77 +12,41 @@ syntax_cache_entry_free(gpointer data)
     g_free(entry);
 }
 
-static void
-init_syntax_colors(void)
-{
-    if (colors_initialized) return;
-    
-    /* Dark */
-    pango_color_parse(&d_keyword, "#c678dd");
-    pango_color_parse(&d_builtin, "#56b6c2");
-    pango_color_parse(&d_string, "#98c379");
-    pango_color_parse(&d_comment, "#7f848e");
-    pango_color_parse(&d_number, "#d19a66");
-    pango_color_parse(&d_function, "#61afef");
-    pango_color_parse(&d_type, "#e5c07b");
-    pango_color_parse(&d_decorator, "#56b6c2");
-    pango_color_parse(&d_variable, "#e06c75");
-    pango_color_parse(&d_variable_c, "#d1d1d1");
-    pango_color_parse(&d_constant, "#e06c75");
-    pango_color_parse(&d_tag, "#e06c75");
-    pango_color_parse(&d_operator, "#d19a66");
-    pango_color_parse(&d_logical, "#56b6c2");
-    pango_color_parse(&d_punctuation, "#d19a66");
-    pango_color_parse(&d_attribute, "#d19a66");
-    pango_color_parse(&d_param, "#e06c75");
-    pango_color_parse(&d_property, "#56b6c2");
-    pango_color_parse(&d_preproc, "#c678dd");
-
-    /* Light */
-    pango_color_parse(&l_keyword, "#a626a4");
-    pango_color_parse(&l_builtin, "#0184bc");
-    pango_color_parse(&l_string, "#50a14f");
-    pango_color_parse(&l_comment, "#5c6370");
-    pango_color_parse(&l_number, "#986801");
-    pango_color_parse(&l_operator, "#986801");
-    pango_color_parse(&l_logical, "#0184bc");
-    pango_color_parse(&l_punctuation, "#986801");
-    pango_color_parse(&l_function, "#4078f2");
-    pango_color_parse(&l_type, "#c18401");
-    pango_color_parse(&l_decorator, "#a626a4");
-    pango_color_parse(&l_variable, "#e45649");
-    pango_color_parse(&l_variable_c, "#383a42");
-    pango_color_parse(&l_constant, "#e45649");
-    pango_color_parse(&l_tag, "#e45649");
-    pango_color_parse(&l_attribute, "#986801");
-    pango_color_parse(&l_param, "#e45649");
-    pango_color_parse(&l_property, "#0184bc");
-    pango_color_parse(&l_preproc, "#a626a4");
-
-
-    colors_initialized = TRUE;
-}
-
+/* Stub: kept for API compatibility, but theme state now lives in theme-manager */
 void
 syntax_set_theme_mode(gboolean is_dark)
 {
-    if (is_dark_mode != is_dark) {
-        is_dark_mode = is_dark;
-    }
+    (void)is_dark; /* Theme mode is now managed by theme_manager */
 }
 
 gboolean
 syntax_get_theme_mode(void)
 {
-    return is_dark_mode;
+    const ViteTheme *theme = theme_manager_get_current();
+    return theme ? theme->is_dark : TRUE;
+}
+
+/* New, clean color attribute function: looks up color from current theme */
+void
+add_color_attr(PangoAttrList *attrs, int start, int end, ViteColorSlot slot)
+{
+    if (start >= end) return;
+    if (!attrs) return;
+    if (slot < 0 || slot >= COLOR_SLOT_COUNT) return;
+
+    const ViteTheme *theme = theme_manager_get_current();
+    if (!theme) return;
+
+    const PangoColor *c = &theme->syntax[slot];
+    PangoAttribute *attr = pango_attr_foreground_new(c->red, c->green, c->blue);
+    attr->start_index = start;
+    attr->end_index = end;
+    pango_attr_list_insert(attrs, attr);
 }
 
 SyntaxContext *
 syntax_context_new(void)
 {
-    /* Initialize color cache on first context creation */
-    init_syntax_colors();
-    
     SyntaxContext *ctx = g_new0(SyntaxContext, 1);
     ctx->ref_count = 1;
     ctx->lang = LANG_NONE;
@@ -139,13 +58,10 @@ syntax_context_new(void)
     /* Bash */
     ctx->sh_keywords = g_regex_new("\\b(if|then|else|elif|fi|case|esac|for|select|while|until|do|done|in|function|time|coproc|declare|typeset|local|readonly|export|unset|set|shopt|trap|source|alias|unalias|break|continue|return|exit|eval|exec)\\b", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->sh_builtins = g_regex_new("\\b(echo|printf|cd|pwd|ls|cp|mv|rm|mkdir|rmdir|touch|cat|grep|sed|awk|find|chmod|chown|kill|ps|jobs|bg|fg|history|read|wait|sleep|true|false|make|install|flatpak|git|node|npm|pip|python|python3|gcc|g\\+\\+|clang|docker|systemctl|journalctl)\\b", G_REGEX_OPTIMIZE, 0, NULL);
-    /* ctx->sh_comment, etc - migrated to linear scanner but kept some for partial match inside loop if needed, 
-       but actually the linear scanner does manual matching now for most things to avoid regex overhead per char.
-       We kept sh_variable usage in syntax-shell.c though. */
     ctx->sh_variable = g_regex_new("(\\$[a-zA-Z_][a-zA-Z0-9_]*|\\$\\{[^}]+\\}|\\$[0-9*@#?!$-])", G_REGEX_OPTIMIZE, 0, NULL);
     
     /* XML */
-    ctx->xml_tag_open = g_regex_new("</?([-\\w.:]+)", G_REGEX_OPTIMIZE, 0, NULL);
+    ctx->xml_tag_open = g_regex_new("</?([- \\w.:]+)", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->xml_tag_close = g_regex_new("/?>", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->xml_attr = g_regex_new("\\s([-\\w.:]+)=", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->xml_comment_start = g_regex_new("<!--", G_REGEX_OPTIMIZE, 0, NULL);
@@ -328,7 +244,6 @@ syntax_detect_language(const char *content)
     }
     
     /* Python Heuristics */
-    /* Look for "def " or "import " at start of lines, or "if __name__" */
     if (strstr(content, "def ") && strstr(content, ":")) return "python";
     if (strstr(content, "import ") && strstr(content, "from ")) return "python";
     if (strstr(content, "if __name__ == \"__main__\":")) return "python";
@@ -337,16 +252,12 @@ syntax_detect_language(const char *content)
 
     /* YAML Heuristics */
     if (g_str_has_prefix(content, "%YAML") || g_str_has_prefix(content, "---")) return "yaml";
-    /* Look for typical "key: value" or "- item" at start */
-    /* Check first line manually */
     {
         const char *s = content;
         while (*s && g_ascii_isspace(*s)) s++;
         
-        /* List item */
         if (*s == '-') return "yaml";
         
-        /* Key: Value */
         if (g_ascii_isalnum(*s)) {
             const char *k = s;
             while (*k && (g_ascii_isalnum(*k) || *k == '-' || *k == '_')) k++;
@@ -361,21 +272,16 @@ syntax_detect_language(const char *content)
 void
 syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta)
 {
-    /* 1. Shift the state chain to preserve future states for convergence check */
     if (ctx->state_chain->len > start_line) {
         if (line_delta > 0) {
-            /* Insertion: Shift data up to make room */
             size_t old_len = ctx->state_chain->len;
             size_t move_count = old_len - start_line;
             g_byte_array_set_size(ctx->state_chain, old_len + line_delta);
-            /* Memmove: dest, src, length */
             memmove(ctx->state_chain->data + start_line + line_delta, 
                     ctx->state_chain->data + start_line, 
                     move_count);
-            /* Invalidate the inserted gap (optional, set to ROOT) */
             memset(ctx->state_chain->data + start_line, STATE_ROOT, line_delta);
         } else if (line_delta < 0) {
-            /* Deletion: Shift data down */
             size_t start_src = start_line + (-line_delta);
             if (start_src < ctx->state_chain->len) {
                 size_t move_count = ctx->state_chain->len - start_src;
@@ -384,29 +290,22 @@ syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta)
                         move_count);
                 g_byte_array_set_size(ctx->state_chain, ctx->state_chain->len + line_delta);
             } else {
-                /* Deleting everything until end or beyond */
                 g_byte_array_set_size(ctx->state_chain, start_line);
             }
         }
     }
-    /* Reset valid_up_to to the start of edit. We must re-scan from here. */
     if (ctx->valid_up_to > start_line) {
         ctx->valid_up_to = start_line;
     }
 
-    /* 2. Shift the cache (keep existing logic) */
     if (ctx->line_cache) {
         if (line_delta > 0) {
-            /* Insertion: insert NULL entries */
-            /* Guard: Only insert if start_line is within the currently cached range.
-               If we are inserting beyond the cache, we don't need to shift anything. */
             if (start_line <= ctx->line_cache->len) {
                 for (int i = 0; i < line_delta; i++) {
                     g_ptr_array_insert(ctx->line_cache, start_line, NULL);
                 }
             }
         } else if (line_delta < 0) {
-            /* Deletion: remove entries */
             int to_remove = -line_delta;
             if (start_line < ctx->line_cache->len) {
                 int count = MIN(to_remove, (int)(ctx->line_cache->len - start_line));
@@ -414,11 +313,9 @@ syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta)
             }
         }
         
-        /* 3. Invalidate current line entry if it's within bounds. */
         if (start_line < ctx->line_cache->len) {
              SyntaxCacheEntry *old = g_ptr_array_index(ctx->line_cache, start_line);
              if (old) {
-                 /* Replace with NULL to trigger re-highlight */
                  g_ptr_array_remove_index(ctx->line_cache, start_line);
                  g_ptr_array_insert(ctx->line_cache, start_line, NULL);
              }
@@ -439,66 +336,9 @@ syntax_context_invalidate_all(SyntaxContext *ctx)
 void
 syntax_context_invalidate_cache(SyntaxContext *ctx)
 {
-    /* Only clear the attribute cache, preserving state chain.
-       Useful for theme changes where syntax logic is unchanged but colors change. */
     if (ctx->line_cache) {
         g_ptr_array_set_size(ctx->line_cache, 0);
     }
-}
-
-/* Helper to add attribute - selects color based on theme */
-void
-add_attr(PangoAttrList *attrs, int start, int end, const PangoColor *color_ref)
-{
-    if (start >= end) return;
-    if (!attrs) return; /* Skip attribute creation if only computing state */
-    
-    /* Map reference pointer to actual color based on mode */
-    const PangoColor *effective_color = color_ref;
-    
-    /* Determine if mapped to dark or light palette */
-    if (is_dark_mode) {
-        /* Already pointing to dark usually, but ensure mapping if we used generic pointers */
-        if (color_ref == &l_keyword) effective_color = &d_keyword;
-        else if (color_ref == &l_type) effective_color = &d_type;
-        else if (color_ref == &l_string) effective_color = &d_string;
-        else if (color_ref == &l_comment) effective_color = &d_comment;
-        else if (color_ref == &l_preproc) effective_color = &d_preproc;
-        else if (color_ref == &l_number) effective_color = &d_number;
-        else if (color_ref == &l_operator) effective_color = &d_operator;
-        else if (color_ref == &l_punctuation) effective_color = &d_punctuation;
-        else if (color_ref == &l_function) effective_color = &d_function;
-        else if (color_ref == &l_variable) effective_color = &d_variable;
-        else if (color_ref == &l_variable_c) effective_color = &d_variable_c;
-        else if (color_ref == &l_constant) effective_color = &d_constant;
-    } else {
-        /* If pointers are to dark (default statics), map to light */
-        if (color_ref == &d_keyword) effective_color = &l_keyword;
-        else if (color_ref == &d_type) effective_color = &l_type;
-        else if (color_ref == &d_string) effective_color = &l_string;
-        else if (color_ref == &d_comment) effective_color = &l_comment;
-        else if (color_ref == &d_preproc) effective_color = &l_preproc;
-        else if (color_ref == &d_number) effective_color = &l_number;
-        else if (color_ref == &d_operator) effective_color = &l_operator;
-        else if (color_ref == &d_punctuation) effective_color = &l_punctuation;
-        else if (color_ref == &d_function) effective_color = &l_function;
-        else if (color_ref == &d_variable) effective_color = &l_variable;
-        else if (color_ref == &d_variable_c) effective_color = &l_variable_c;
-        else if (color_ref == &d_constant) effective_color = &l_constant;
-        else if (color_ref == &d_logical) effective_color = &l_logical;
-        else if (color_ref == &d_param) effective_color = &l_param;
-        else if (color_ref == &d_tag) effective_color = &l_tag;
-        else if (color_ref == &d_attribute) effective_color = &l_attribute;
-        else if (color_ref == &d_property) effective_color = &l_property;
-        
-        /* Refine: Constants/Numbers are Orange in One Light, not Purple */
-        if (color_ref == &d_number || color_ref == &d_type) effective_color = &l_number; 
-    }
-    
-    PangoAttribute *attr = pango_attr_foreground_new(effective_color->red, effective_color->green, effective_color->blue);
-    attr->start_index = start;
-    attr->end_index = end;
-    pango_attr_list_insert(attrs, attr);
 }
 
 /* Helper to get next state */

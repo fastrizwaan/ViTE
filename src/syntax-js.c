@@ -38,7 +38,7 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                 cur++;
             }
             if (state == STATE_IN_ML_COMMENT) cur = len;
-            add_attr(attrs, start_pos, cur, &d_comment);
+            add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
             continue;
         }
         if (state == STATE_IN_TRIPLE_DQ_STRING) { /* Reused for Template ` */
@@ -52,14 +52,14 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                 }
                 cur++;
             }
-            add_attr(attrs, start_pos, cur, &d_string);
+            add_color_attr(attrs, start_pos, cur, COLOR_STRING);
             continue;
         }
 
         if (state == STATE_ROOT) {
             /* Comments */
             if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
-                add_attr(attrs, cur, len, &d_comment);
+                add_color_attr(attrs, cur, len, COLOR_COMMENT);
                 cur = len;
                 break;
             }
@@ -76,7 +76,7 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                     cur++;
                 }
                 if (state == STATE_IN_ML_COMMENT) cur = len;
-                add_attr(attrs, start_pos, cur, &d_comment);
+                add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
                 continue; /* Don't set prev_is_value for comment? */
             }
 
@@ -85,7 +85,7 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                 if (prev_is_value) {
                     /* Division */
                     /* Just an operator (Operator/Keyword color) */
-                    add_attr(attrs, cur, cur+1, &d_keyword);
+                    add_color_attr(attrs, cur, cur+1, COLOR_KEYWORD);
                     cur++;
                     prev_is_value = FALSE; /* Op consumes value */
                 } else {
@@ -102,7 +102,7 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                         }
                         cur++;
                     }
-                    add_attr(attrs, start_pos, cur, &d_string); /* Regex colored as string */
+                    add_color_attr(attrs, start_pos, cur, COLOR_STRING); /* Regex colored as string */
                 }
                 continue;
             }
@@ -118,7 +118,7 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                     }
                     cur++;
                 }
-                add_attr(attrs, start_pos, cur, &d_string);
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                  prev_is_value = TRUE;
                 continue;
             }
@@ -132,7 +132,7 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                     }
                     cur++;
                 }
-                add_attr(attrs, start_pos, cur, &d_string);
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                  prev_is_value = TRUE;
                 continue;
             }
@@ -150,7 +150,7 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                     }
                     cur++;
                 }
-                add_attr(attrs, start_pos, cur, &d_string);
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                 continue;
             }
 
@@ -160,7 +160,7 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '.')) {
                     cur++;
                 }
-                add_attr(attrs, start_pos, cur, &d_number);
+                add_color_attr(attrs, start_pos, cur, COLOR_NUMBER);
                 prev_is_value = TRUE;
                 continue;
             }
@@ -175,12 +175,12 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                 const char *word_start = text + start_pos;
                 
                 if (expect_func) {
-                    add_attr(attrs, start_pos, cur, &d_function);
+                    add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
                     expect_func = FALSE;
                     prev_is_value = TRUE; /* Function Name is a value-ish */
                 } 
                 else if (is_word_in_list(word_start, word_len, js_keywords)) {
-                    add_attr(attrs, start_pos, cur, &d_keyword);
+                    add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD);
                     prev_is_value = FALSE; /* Keywords usually start statements/clauses */
                      /* Special case: 'this', 'true', 'false', 'null', 'undefined', 'NaN' are values */
                     if (strncmp(word_start, "this", word_len) == 0 ||
@@ -196,14 +196,14 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
                     }
                 } 
                 else if (is_word_in_list(word_start, word_len, js_builtins)) {
-                    add_attr(attrs, start_pos, cur, &d_builtin);
+                    add_color_attr(attrs, start_pos, cur, COLOR_BUILTIN);
                     prev_is_value = TRUE;
                 } 
                 else {
                     /* Check for function call */
                     size_t peek = cur;
                     while (peek < len && g_ascii_isspace(text[peek])) peek++;
-                    if (peek < len && text[peek] == '(') add_attr(attrs, start_pos, cur, &d_function);
+                    if (peek < len && text[peek] == '(') add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
                     
                     prev_is_value = TRUE; /* Identifier is a value */
                 }
@@ -214,14 +214,14 @@ syntax_highlight_js(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, 
             if (strchr("()[]{};,", text[cur])) {
                 if (text[cur] == ')' || text[cur] == ']') prev_is_value = TRUE;
                 else prev_is_value = FALSE;
-                add_attr(attrs, cur, cur+1, &d_punctuation);
+                add_color_attr(attrs, cur, cur+1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             }
             /* Operators */
             if (strchr("=+-*&|!<>?:", text[cur])) {
                  prev_is_value = FALSE;
-                 add_attr(attrs, cur, cur+1, &d_keyword);
+                 add_color_attr(attrs, cur, cur+1, COLOR_KEYWORD);
                  cur++;
                  continue;
             }
@@ -266,9 +266,9 @@ syntax_highlight_json(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             size_t peek = cur;
             while (peek < len && g_ascii_isspace(text[peek])) peek++;
             if (peek < len && text[peek] == ':') {
-                add_attr(attrs, start_pos, cur, &d_variable); /* Key -> Red */
+                add_color_attr(attrs, start_pos, cur, COLOR_VARIABLE); /* Key -> Red */
             } else {
-                add_attr(attrs, start_pos, cur, &d_string); /* Value -> Green */
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING); /* Value -> Green */
             }
             continue;
         }
@@ -280,7 +280,7 @@ syntax_highlight_json(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             while (cur < len && (g_ascii_isdigit(text[cur]) || text[cur] == '.' || text[cur] == 'e' || text[cur] == 'E' || text[cur] == '+' || text[cur] == '-')) {
                 cur++;
             }
-            add_attr(attrs, start_pos, cur, &d_number);
+            add_color_attr(attrs, start_pos, cur, COLOR_NUMBER);
             continue;
         }
         
@@ -292,13 +292,13 @@ syntax_highlight_json(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             if ((len == 4 && strncmp(text+start_pos, "true", 4) == 0) ||
                 (len == 5 && strncmp(text+start_pos, "false", 5) == 0) ||
                 (len == 4 && strncmp(text+start_pos, "null", 4) == 0)) {
-                add_attr(attrs, start_pos, cur, &d_number);
+                add_color_attr(attrs, start_pos, cur, COLOR_NUMBER);
             }
             continue;
         }
         
         if (strchr("{}[],:", text[cur])) {
-            add_attr(attrs, cur, cur+1, &d_punctuation);
+            add_color_attr(attrs, cur, cur+1, COLOR_PUNCTUATION);
         }
 
         cur++;

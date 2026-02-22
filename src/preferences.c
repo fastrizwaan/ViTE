@@ -1,6 +1,7 @@
 #include "preferences.h"
 #include <adwaita.h>
 #include <glib/gi18n.h>
+#include "theme-manager.h"
 
 /* Forward declaration */
 static void on_save_button_visibility_toggled(GObject *object, GParamSpec *pspec, gpointer user_data);
@@ -133,12 +134,59 @@ create_indent_style_row(EditorWidget *editor)
     return row;
 }
 
+static void
+on_theme_changed(GObject *combo, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
+{
+    EditorWidget *editor = EDITOR_WIDGET(user_data);
+    guint idx = adw_combo_row_get_selected(ADW_COMBO_ROW(combo));
+    const char *name = theme_manager_get_name((int)idx);
+    if (!name) return;
+    
+    theme_manager_apply_theme(name);
+    theme_manager_save_selection(name);
+    
+    /* Invalidate syntax cache on the current editor */
+    SyntaxContext *ctx = editor_widget_get_syntax_context(editor);
+    if (ctx) syntax_context_invalidate_cache(ctx);
+    gtk_widget_queue_draw(GTK_WIDGET(editor));
+
+    /* Also invalidate all other editors across all tabs */
+    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(editor));
+    if (root) {
+        /* Queue a redraw of the entire window so all widgets pick up new colors */
+        gtk_widget_queue_draw(GTK_WIDGET(root));
+    }
+}
+
 void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
 {
     AdwDialog *dialog = adw_preferences_dialog_new();
     
     GtkWidget *page = adw_preferences_page_new();
     adw_preferences_dialog_add(ADW_PREFERENCES_DIALOG(dialog), ADW_PREFERENCES_PAGE(page));
+    
+    /* Group: Theme */
+    GtkWidget *group_theme = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_theme), _("Theme"));
+    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(group_theme));
+    
+    GtkWidget *theme_row = adw_combo_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(theme_row), _("Color Theme"));
+    
+    int count = theme_manager_get_count();
+    GtkStringList *theme_list = gtk_string_list_new(NULL);
+    const ViteTheme *current = theme_manager_get_current();
+    guint active_idx = 0;
+    for (int i = 0; i < count; i++) {
+        const char *n = theme_manager_get_name(i);
+        gtk_string_list_append(theme_list, n);
+        if (current && g_strcmp0(n, current->name) == 0)
+            active_idx = (guint)i;
+    }
+    adw_combo_row_set_model(ADW_COMBO_ROW(theme_row), G_LIST_MODEL(theme_list));
+    adw_combo_row_set_selected(ADW_COMBO_ROW(theme_row), active_idx);
+    g_signal_connect(theme_row, "notify::selected", G_CALLBACK(on_theme_changed), editor);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_theme), theme_row);
     
     /* Group: Display */
     GtkWidget *group_display = adw_preferences_group_new();

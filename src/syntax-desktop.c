@@ -15,7 +15,7 @@ syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *t
         
         /* Comment # */
         if (text[cur] == '#') {
-            add_attr(attrs, cur, len, &d_comment);
+            add_color_attr(attrs, cur, len, COLOR_COMMENT);
             cur = len;
             continue;
         }
@@ -24,18 +24,18 @@ syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *t
         if (text[cur] == '[') {
             /* Check if it's a section line (starts with [) - usually matches regex ^\[...\] */
             /* We can enforce start of line logic if needed, but simplistic is fine */
-            add_attr(attrs, cur, cur+1, &d_number); /* [ -> orange */
+            add_color_attr(attrs, cur, cur+1, COLOR_NUMBER); /* [ -> orange */
             cur++;
             
             size_t name_start = cur;
             while (cur < len && text[cur] != ']') cur++;
             
             if (cur > name_start) {
-                add_attr(attrs, name_start, cur, &d_function); /* Name -> Cyan */
+                add_color_attr(attrs, name_start, cur, COLOR_FUNCTION); /* Name -> Cyan */
             }
             
             if (cur < len && text[cur] == ']') {
-                add_attr(attrs, cur, cur+1, &d_number); /* ] -> orange */
+                add_color_attr(attrs, cur, cur+1, COLOR_NUMBER); /* ] -> orange */
                 cur++;
             }
             continue;
@@ -48,10 +48,10 @@ syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *t
         
         if (p < len && text[p] == '=') {
             /* Found key */
-            add_attr(attrs, cur, p, &d_tag); /* Key -> Red (or Tag color) */
+            add_color_attr(attrs, cur, p, COLOR_TAG); /* Key -> Red (or Tag color) */
             
             /* Highlight = as Cyan */
-            add_attr(attrs, p, p+1, &d_builtin); 
+            add_color_attr(attrs, p, p+1, COLOR_BUILTIN); 
             
             cur = p + 1;
             
@@ -60,15 +60,15 @@ syntax_highlight_desktop(SyntaxContext *ctx, PangoAttrList *attrs, const char *t
             size_t val_start = cur;
             while (cur < len) {
                 if (text[cur] == ';') {
-                    if (cur > val_start) add_attr(attrs, val_start, cur, &d_string);
-                    add_attr(attrs, cur, cur+1, &d_punctuation); /* ; -> Orange */
+                    if (cur > val_start) add_color_attr(attrs, val_start, cur, COLOR_STRING);
+                    add_color_attr(attrs, cur, cur+1, COLOR_PUNCTUATION); /* ; -> Orange */
                     cur++;
                     val_start = cur;
                 } else {
                     cur++;
                 }
             }
-            if (cur > val_start) add_attr(attrs, val_start, cur, &d_string);
+            if (cur > val_start) add_color_attr(attrs, val_start, cur, COLOR_STRING);
             continue;
         }
         

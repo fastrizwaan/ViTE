@@ -11,6 +11,7 @@
 #include "find-replace-bar.h"
 #include "editor-print.h"
 #include "status-bar.h"
+#include "theme-manager.h"
 
 /* Define file type entries for the menu */
 typedef struct {
@@ -2131,6 +2132,9 @@ load_css(void)
     "    min-width: 20px;"
     "}"
     ".titlebar-box { background: @headerbar_bg_color; }"
+    ".vite-tab-bar-container {"
+    "    background: @headerbar_bg_color;"
+    "}"
     "findbar { "
     "    background: @headerbar_bg_color;" 
     "    color: @headerbar_fg_color;"
@@ -2377,6 +2381,11 @@ load_css(void)
     "}"
     ".header-button:active {"
     "    background: alpha(@window_fg_color, 0.18);"
+    "}"
+    "list row:hover, "
+    "listview row:hover, "
+    ".navigation-sidebar row:hover {"
+    "    background-color: alpha(@window_fg_color, 0.08);"
     "}"
     );
 
@@ -5228,6 +5237,14 @@ on_open(GtkApplication *app, GFile **files, int n_files, char *hint G_GNUC_UNUSE
 
 
 
+static void
+on_app_startup(GApplication *app, gpointer user_data)
+{
+    (void)app;
+    (void)user_data;
+    theme_manager_init();
+}
+
 int
 main(int argc, char **argv)
 {
@@ -5241,9 +5258,11 @@ main(int argc, char **argv)
     textdomain (GETTEXT_PACKAGE);
 
     app = adw_application_new ("io.github.fastrizwaan.ViTE", G_APPLICATION_HANDLES_OPEN);
+    g_signal_connect(app, "startup", G_CALLBACK(on_app_startup), NULL);
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
     g_signal_connect(app, "open", G_CALLBACK(on_open), NULL);
     status = g_application_run(G_APPLICATION(app), argc, argv);
+    theme_manager_cleanup();
     g_object_unref(app);
     return status;
 }

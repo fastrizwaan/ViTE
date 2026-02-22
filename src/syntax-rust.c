@@ -51,7 +51,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                  cur++;
             }
             if (state >= STATE_RUST_ML_COMMENT) cur = len; 
-            add_attr(attrs, start_pos, cur, &d_comment);
+            add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
             continue;
         }
 
@@ -60,25 +60,25 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             size_t start_pos = cur;
             while (cur < len) {
                 if (text[cur] == '"') {
-                    add_attr(attrs, start_pos, cur + 1, &d_string); 
+                    add_color_attr(attrs, start_pos, cur + 1, COLOR_STRING); 
                     cur++;
                     state = STATE_ROOT;
                     start_pos = cur; 
                     break;
                 }
                 if (text[cur] == '\\') {
-                    add_attr(attrs, start_pos, cur, &d_string);
+                    add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                     size_t esc_start = cur;
                     cur++;
                     if (cur < len) cur++; 
-                    add_attr(attrs, esc_start, cur, &d_builtin); 
+                    add_color_attr(attrs, esc_start, cur, COLOR_BUILTIN); 
                     start_pos = cur;
                     continue; 
                 }
                 cur++;
             }
             if (state == STATE_IN_DOUBLE_QUOTE) {
-                add_attr(attrs, start_pos, cur, &d_string);
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
             }
             continue;
         }
@@ -92,7 +92,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
 
             /* Punctuation (Braces, parens, semicolons, etc) */
             if (strchr("{}()[].,;", text[cur])) {
-                add_attr(attrs, cur, cur + 1, &d_punctuation);
+                add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             }
@@ -100,14 +100,14 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             /* Comments */
             if (text[cur] == '/' && cur+1 < len) {
                 if (text[cur+1] == '/') {
-                    add_attr(attrs, cur, len, &d_comment);
+                    add_color_attr(attrs, cur, len, COLOR_COMMENT);
                     cur = len;
                     continue;
                 }
                 if (text[cur+1] == '*') {
                     state = STATE_RUST_ML_COMMENT;
                     cur += 2;
-                    add_attr(attrs, cur - 2, cur, &d_comment);
+                    add_color_attr(attrs, cur - 2, cur, COLOR_COMMENT);
                     continue;
                 }
             }
@@ -115,7 +115,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             /* Raw Strings r#... */
             if (text[cur] == 'r' && cur + 1 < len && (text[cur+1] == '#' || text[cur+1] == '"')) {
                 if (text[cur+1] == '"' || (cur+2 < len && text[cur+1] == '#' && text[cur+2] == '"')) {
-                     add_attr(attrs, cur, len, &d_string); 
+                     add_color_attr(attrs, cur, len, COLOR_STRING); 
                      cur = len; 
                      continue;
                 }
@@ -125,7 +125,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             if (text[cur] == 'b' && cur + 1 < len && text[cur+1] == '"') {
                 size_t start_pos = cur;
                 cur += 2; 
-                add_attr(attrs, start_pos, cur, &d_string); 
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING); 
                 state = STATE_IN_DOUBLE_QUOTE;
                 continue;
             }
@@ -134,7 +134,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             if (text[cur] == '"') {
                 size_t start_pos = cur;
                 cur++;
-                add_attr(attrs, start_pos, cur, &d_string); 
+                add_color_attr(attrs, start_pos, cur, COLOR_STRING); 
                 state = STATE_IN_DOUBLE_QUOTE;
                 continue;
             }
@@ -153,21 +153,21 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                      if (is_char) {
                          p = cur + 1;
                          if (text[p] == '\\') {
-                              add_attr(attrs, start_pos, p, &d_string);
-                              add_attr(attrs, p, p+2, &d_builtin); 
+                              add_color_attr(attrs, start_pos, p, COLOR_STRING);
+                              add_color_attr(attrs, p, p+2, COLOR_BUILTIN); 
                               p += 2;
-                              add_attr(attrs, p, p+1, &d_string); 
+                              add_color_attr(attrs, p, p+1, COLOR_STRING); 
                               cur = p + 1;
                          } else {
                               cur = p + 1;
-                              add_attr(attrs, start_pos, cur, &d_string);
+                              add_color_attr(attrs, start_pos, cur, COLOR_STRING);
                          }
                          continue;
                      } else {
                          // Lifetime -> Yellow (d_type)
                          cur++;
                          while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
-                         add_attr(attrs, start_pos, cur, &d_type); 
+                         add_color_attr(attrs, start_pos, cur, COLOR_TYPE); 
                          continue;
                      }
                 } else if (cur + 1 < len && text[cur+1] == '\\') {
@@ -175,15 +175,15 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                     size_t p = cur + 2;
                     if (p < len) p++; 
                     if (p < len && text[p] == '\'') {
-                        add_attr(attrs, start_pos, cur+1, &d_string); 
-                        add_attr(attrs, cur+1, cur+3, &d_builtin); 
-                        add_attr(attrs, cur+3, cur+4, &d_string); 
+                        add_color_attr(attrs, start_pos, cur+1, COLOR_STRING); 
+                        add_color_attr(attrs, cur+1, cur+3, COLOR_BUILTIN); 
+                        add_color_attr(attrs, cur+3, cur+4, COLOR_STRING); 
                         cur = cur + 4;
                         continue;
                     }
                 }
                 
-                add_attr(attrs, cur, cur + 1, &d_punctuation);
+                add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             }
@@ -191,15 +191,15 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             /* Attributes #[...] or #![...] */
             if (text[cur] == '#' && cur + 1 < len && (text[cur+1] == '[' || text[cur+1] == '!')) {
                 // Highlight #, [, ! as Grey
-                add_attr(attrs, cur, cur+1, &d_variable_c); // #
+                add_color_attr(attrs, cur, cur+1, COLOR_VARIABLE_C); // #
                 cur++;
                 if (cur < len && text[cur] == '!') {
-                     add_attr(attrs, cur, cur+1, &d_variable_c); // !
+                     add_color_attr(attrs, cur, cur+1, COLOR_VARIABLE_C); // !
                      cur++;
                 }
                 // now at [
                 if (cur < len && text[cur] == '[') {
-                     add_attr(attrs, cur, cur+1, &d_variable_c); // [
+                     add_color_attr(attrs, cur, cur+1, COLOR_VARIABLE_C); // [
                      cur++;
                      
                      // Parse inside attribute
@@ -211,7 +211,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                          
                          // Punctuation inside attribute (parentheses, commas, equals) -> Grey
                          if (strchr("(),=", text[cur])) {
-                             add_attr(attrs, cur, cur+1, &d_variable_c);
+                             add_color_attr(attrs, cur, cur+1, COLOR_VARIABLE_C);
                              cur++;
                              continue;
                          }
@@ -225,7 +225,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                                  cur++;
                              }
                              if (cur < len) cur++;
-                             add_attr(attrs, s_start, cur, &d_string);
+                             add_color_attr(attrs, s_start, cur, COLOR_STRING);
                              continue;
                          }
                          
@@ -244,13 +244,13 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                              size_t p = cur;
                              while (p < len && g_ascii_isspace(text[p])) p++;
                              if (p < len && text[p] == '(') {
-                                 add_attr(attrs, id_start, cur, &d_variable_c); // Attribute Name (derive, route)
+                                 add_color_attr(attrs, id_start, cur, COLOR_VARIABLE_C); // Attribute Name (derive, route)
                              } else {
                                  // Check if it's a key in key="value". If next char is =, then Grey.
                                  if (p < len && text[p] == '=') {
-                                     add_attr(attrs, id_start, cur, &d_variable_c); // Key
+                                     add_color_attr(attrs, id_start, cur, COLOR_VARIABLE_C); // Key
                                  } else {
-                                     add_attr(attrs, id_start, cur, &d_type); // Value/Arg (Yellow)
+                                     add_color_attr(attrs, id_start, cur, COLOR_TYPE); // Value/Arg (Yellow)
                                  }
                              }
                              continue;
@@ -261,7 +261,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                      
                      // closing ]
                      if (cur < len && text[cur] == ']') {
-                         add_attr(attrs, cur, cur+1, &d_variable_c);
+                         add_color_attr(attrs, cur, cur+1, COLOR_VARIABLE_C);
                          cur++;
                      }
                      continue;
@@ -291,7 +291,7 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                 }
                 while (cur < len && (g_ascii_isalnum(text[cur]))) cur++; 
                 
-                add_attr(attrs, start_pos, cur, &d_number);
+                add_color_attr(attrs, start_pos, cur, COLOR_NUMBER);
                 continue;
             }
 
@@ -305,13 +305,13 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                 // Handle Self/self specifically
                 if ((word_len == 4 && strncmp(word, "self", 4) == 0) || 
                     (word_len == 4 && strncmp(word, "Self", 4) == 0)) {
-                    add_attr(attrs, start_pos, cur, &d_type);
+                    add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
                     continue;
                 }
 
                 if (cur < len && text[cur] == '!') {
                     cur++; 
-                    add_attr(attrs, start_pos, cur, &d_function); 
+                    add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION); 
                     continue;
                 }
                 
@@ -319,23 +319,23 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                 while (p < len && g_ascii_isspace(text[p])) p++;
                 if (p < len && text[p] == '(') {
                     if (is_word_in_list(word, word_len, rust_keywords)) {
-                        add_attr(attrs, start_pos, cur, &d_keyword);
+                        add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD);
                     } else {
-                        add_attr(attrs, start_pos, cur, &d_function);
+                        add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
                     }
                     continue;
                 }
 
                 if (is_word_in_list(word, word_len, rust_keywords)) {
-                     add_attr(attrs, start_pos, cur, &d_keyword);
+                     add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD);
                 } else if (is_word_in_list(word, word_len, rust_types)) {
-                     add_attr(attrs, start_pos, cur, &d_type);
+                     add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
                 } else if (is_word_in_list(word, word_len, rust_constants)) {
-                     add_attr(attrs, start_pos, cur, &d_constant);
+                     add_color_attr(attrs, start_pos, cur, COLOR_CONSTANT);
                 } else if (g_ascii_isupper(word[0])) {
-                     add_attr(attrs, start_pos, cur, &d_type);
+                     add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
                 } else {
-                     add_attr(attrs, start_pos, cur, &d_variable);
+                     add_color_attr(attrs, start_pos, cur, COLOR_VARIABLE);
                 }
                 continue;
             }
@@ -343,30 +343,30 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
             /* Punctuation / Operators */
             /* Rainbow Brackets */
             if (strchr("([{", text[cur])) {
-                 const PangoColor *bracket_color;
+                 ViteColorSlot bracket_color;
                  int depth_mod = paren_depth % 3;
-                 if (depth_mod == 0) bracket_color = &d_punctuation;
-                 else if (depth_mod == 1) bracket_color = &d_keyword;
-                 else bracket_color = &d_logical;
-                 add_attr(attrs, cur, cur + 1, bracket_color);
+                 if (depth_mod == 0) bracket_color = COLOR_PUNCTUATION;
+                 else if (depth_mod == 1) bracket_color = COLOR_KEYWORD;
+                 else bracket_color = COLOR_LOGICAL;
+                 add_color_attr(attrs, cur, cur + 1, bracket_color);
                  paren_depth++;
                  cur++;
                  continue;
             }
             if (strchr(")]}", text[cur])) {
                  if (paren_depth > 0) paren_depth--;
-                 const PangoColor *bracket_color;
+                 ViteColorSlot bracket_color;
                  int depth_mod = paren_depth % 3;
-                 if (depth_mod == 0) bracket_color = &d_punctuation;
-                 else if (depth_mod == 1) bracket_color = &d_keyword;
-                 else bracket_color = &d_logical;
-                 add_attr(attrs, cur, cur + 1, bracket_color);
+                 if (depth_mod == 0) bracket_color = COLOR_PUNCTUATION;
+                 else if (depth_mod == 1) bracket_color = COLOR_KEYWORD;
+                 else bracket_color = COLOR_LOGICAL;
+                 add_color_attr(attrs, cur, cur + 1, bracket_color);
                  cur++;
                  continue;
             }
 
             if (strchr(",.;", text[cur])) {
-                 add_attr(attrs, cur, cur + 1, &d_punctuation);
+                 add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
                  cur++;
                  continue;
             }
@@ -381,10 +381,10 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                           // && and || -> Cyan
                           if ((text[cur] == '&' && text[cur+1] == '&') || 
                               (text[cur] == '|' && text[cur+1] == '|')) {
-                              add_attr(attrs, cur, cur + 2, &d_logical);
+                              add_color_attr(attrs, cur, cur + 2, COLOR_LOGICAL);
                           } else {
                               // compound ops like ==, +=, etc -> Cyan
-                              add_attr(attrs, cur, cur + 2, &d_logical);
+                              add_color_attr(attrs, cur, cur + 2, COLOR_LOGICAL);
                           }
                           cur += 2;
                           continue;
@@ -394,9 +394,9 @@ syntax_highlight_rust(SyntaxContext *ctx, PangoAttrList *attrs, const char *text
                  // Single Char Operator
                  // Check for '&' -> Grey
                  if (text[cur] == '&') {
-                     add_attr(attrs, cur, cur + 1, &d_variable_c); // Grey
+                     add_color_attr(attrs, cur, cur + 1, COLOR_VARIABLE_C); // Grey
                  } else {
-                     add_attr(attrs, cur, cur + 1, &d_logical); // Cyan
+                     add_color_attr(attrs, cur, cur + 1, COLOR_LOGICAL); // Cyan
                  }
                  cur++;
                  continue;
