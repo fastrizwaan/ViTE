@@ -228,8 +228,19 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
     size_t check_len = (size > 65536) ? 65536 : size;
     
     if (size >= 4) {
-        /* Check if it's valid UTF-8 first (optimization: check only first 64KB) */
-        if (!g_utf8_validate(data, check_len, NULL)) {
+        /* Check if it's valid UTF-8 first (optimization: check only first 64KB). */
+        const char *invalid_pos = NULL;
+        if (!g_utf8_validate(data, check_len, &invalid_pos)) {
+            /* If failure happens at the sampled boundary, it can be a valid file
+               truncated mid-codepoint by check_len. Validate full input then. */
+            if (size > check_len &&
+                invalid_pos &&
+                invalid_pos >= data + ((check_len > 4) ? (check_len - 4) : 0) &&
+                g_utf8_validate(data, size, NULL)) {
+                *enc = ENCODING_UTF8;
+                return;
+            }
+
             size_t le_count = 0;
             size_t be_count = 0;
             
