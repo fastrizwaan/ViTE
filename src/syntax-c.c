@@ -7,7 +7,6 @@ static const char *c_control_keywords[] = {
 };
 
 static const char *c_primitive_types[] = {
-    /* Primitive types in VSCode C grammar map to storage.type (Green in Solarized) */
     "bool", "char", "double", "float", "int", "long", "short", "signed", "unsigned", "void", 
     "size_t", "ssize_t", "ptrdiff_t", "int8_t", "uint8_t", "int16_t", "uint16_t",
     "int32_t", "uint32_t", "int64_t", "uint64_t", "intptr_t", "uintptr_t", NULL
@@ -463,8 +462,8 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 
                 gboolean is_keyword = is_word_in_list(word_start, word_len, c_keywords);
                 gboolean is_control_keyword = is_word_in_list(word_start, word_len, c_control_keywords);
-                gboolean is_storage_modifier = is_word_in_list(word_start, word_len, c_storage_modifiers);
                 gboolean is_primitive_type = is_word_in_list(word_start, word_len, c_primitive_types);
+                gboolean is_storage_modifier = is_word_in_list(word_start, word_len, c_storage_modifiers);
                 gboolean is_glib_type = is_word_in_list(word_start, word_len, glib_types);
                 gboolean is_std_type = is_word_in_list(word_start, word_len, std_types);
                 gboolean is_pointer_access = FALSE;
@@ -485,7 +484,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD);
                 } else if (is_control_keyword) {
                     add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
-                } else if (is_storage_modifier || is_primitive_type) {
+                } else if (is_primitive_type || is_storage_modifier) {
                     add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
                 } else if (is_func_call) {
                     add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
@@ -759,7 +758,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 size_t directive_len = cur - directive_start;
                 const char *directive = text + directive_start;
 
-                add_color_attr(attrs, directive_start, cur, COLOR_KEYWORD_CONTROL);
+                add_color_attr(attrs, directive_start, cur, COLOR_PREPROC);
 
                 if (directive_len == 7 && strncmp(directive, "include", 7) == 0) {
                     /* Skip whitespace */
@@ -863,8 +862,8 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
 
                 gboolean is_keyword = is_word_in_list(word_start, word_len, c_keywords);
                 gboolean is_control_keyword = is_word_in_list(word_start, word_len, c_control_keywords);
-                gboolean is_storage_modifier = is_word_in_list(word_start, word_len, c_storage_modifiers);
                 gboolean is_primitive_type = is_word_in_list(word_start, word_len, c_primitive_types);
+                gboolean is_storage_modifier = is_word_in_list(word_start, word_len, c_storage_modifiers);
                 gboolean is_glib_type = is_word_in_list(word_start, word_len, glib_types);
                 gboolean is_std_type = is_word_in_list(word_start, word_len, std_types);
                 gboolean is_pointer_access = FALSE;
@@ -881,7 +880,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     }
                 } else if (is_control_keyword) {
                     add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
-                } else if (is_storage_modifier || is_primitive_type) {
+                } else if (is_primitive_type || is_storage_modifier) {
                     add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
                 } else if (is_func_call) {
                      add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
