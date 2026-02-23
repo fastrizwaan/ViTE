@@ -1,0 +1,163 @@
+import xml.etree.ElementTree as ET
+import json
+import os
+import re
+import sys
+
+def parse_rgba(val):
+    m = re.match(r'#rgba\((\d+),(\d+),(\d+),([\d.]+)\)', val)
+    if m:
+        r, g, b, a = int(m.group(1)), int(m.group(2)), int(m.group(3)), float(m.group(4))
+        alpha = int(a * 255)
+        return f"#{r:02x}{g:02x}{b:02x}{alpha:02x}"
+    return val
+
+def convert_theme(xml_path, out_dir):
+    try:
+        tree = ET.parse(xml_path)
+    except Exception as e:
+        print(f"Skipping {xml_path}: {e}")
+        return
+
+    root = tree.getroot()
+    if root.tag != 'style-scheme':
+        print(f"Skipping {xml_path} - not a style-scheme")
+        return
+        
+    theme_name = root.get('name')
+    if not theme_name:
+        theme_name = os.path.basename(xml_path).replace('.xml', '')
+        
+    is_dark = True
+    metadata = root.find('metadata')
+    if metadata is not None:
+        for prop in metadata.findall('property'):
+            if prop.get('name') == 'variant':
+                if prop.text == 'light':
+                    is_dark = False
+    
+    colors = {}
+    for c in root.findall('color'):
+        name = c.get('name')
+        val = c.get('value')
+        if val and val.startswith('#rgba'):
+            val = parse_rgba(val)
+        colors[name] = val
+        
+    def resolve_color(val):
+        if not val:
+            return None
+        # Could be a direct hex
+        if val.startswith('#'):
+            if val.startswith('#rgba'):
+                return parse_rgba(val)
+            return val
+        # Or a named color
+        return colors.get(val, val)
+
+    vscode_colors = {}
+    token_colors = []
+    
+    def add_token(scope_list, fg=None, bg=None, bold=False, italic=False, underline=False):
+        if not fg and not bg and not bold and not italic and not underline:
+            return
+        settings = {}
+        if fg: settings['foreground'] = fg
+        if bg: settings['background'] = bg
+        
+        styles = []
+        if bold: styles.append('bold')
+        if italic: styles.append('italic')
+        if underline: styles.append('underline')
+        if styles: settings['fontStyle'] = ' '.join(styles)
+            
+        token_colors.append({
+            "scope": scope_list,
+            "settings": settings
+        })
+
+    for s in root.findall('style'):
+        name = s.get('name')
+        if not name: continue
+        
+        fg = resolve_color(s.get('foreground'))
+        bg = resolve_color(s.get('background'))
+        bold = s.get('bold') == 'true'
+        italic = s.get('italic') == 'true'
+        underline = s.get('italic') == 'true' # fallback approximation if requested
+        if s.get('underline') == 'true' or s.get('underline') == 'single':
+            underline = True
+        
+        # 1. Map to Global VSCode Editor Elements
+        if name == 'text':
+            if bg: vscode_colors['editor.background'] = bg
+            if fg: vscode_colors['editor.foreground'] = fg
+        elif name == 'selection':
+            if bg: vscode_colors['editor.selectionBackground'] = bg
+            if fg: vscode_colors['editor.selectionForeground'] = fg
+        elif name == 'current-line':
+            if bg: vscode_colors['editor.lineHighlightBackground'] = bg
+        elif name == 'line-numbers':
+            if fg: vscode_colors['editorLineNumber.foreground'] = fg
+            # if bg: vscode_colors['editorLineNumber.background'] = bg
+        elif name == 'cursor':
+            if fg: vscode_colors['editorCursor.foreground'] = fg
+        elif name == 'search-match':
+            if bg: vscode_colors['editor.findMatchBackground'] = bg
+        elif name == 'bracket-match':
+            if bg: vscode_colors['editorBracketMatch.background'] = bg
+            if fg: vscode_colors['editorBracketMatch.border'] = fg
+            
+        # 2. Syntax Token Mapping (using standard TS scopes mostly)
+        scope_targets = []
+        
+        # General definition mappings
+        if 'comment' in name: scope_targets = ['comment']
+        elif 'string' in name: scope_targets = ['string']
+        elif 'keyword' in name: scope_targets = ['keyword']
+        elif 'statement' in name: scope_targets = ['keyword.control']
+        elif 'type' in name or 'class' in name: scope_targets = ['entity.name.type', 'support.type']
+        elif 'constant' in name: scope_targets = ['constant']
+        elif 'floating-point' in name or 'decimal' in name: scope_targets = ['constant.numeric']
+        elif 'function' in name: scope_targets = ['entity.name.function', 'support.function']
+        elif 'identifier' in name or 'variable' in name: scope_targets = ['variable']
+        elif 'preprocessor' in name or 'macro' in name: scope_targets = ['keyword.control.directive']
+        elif 'special-char' in name or 'operator' in name: scope_targets = ['keyword.operator', 'punctuation']
+        
+        if scope_targets:
+            add_token(scope_targets, fg, bg, bold, italic, underline)
+            
+    # Generic backup scopes if any are completely missing in the GNOME theme (sometimes they rely heavily on defaults)
+    
+    out_dict = {
+        "name": theme_name,
+        "type": "dark" if is_dark else "light",
+        "colors": vscode_colors,
+        "tokenColors": token_colors
+    }
+    
+    out_name = os.path.basename(xml_path).replace('.xml', '.json')
+    out_path = os.path.join(out_dir, out_name)
+    with open(out_path, 'w') as f:
+        json.dump(out_dict, f, indent=4)
+        print(f"[{theme_name}] Converted {os.path.basename(xml_path)} -> {out_name}")
+
+def main():
+    in_dir = '/var/home/rizvan/vite_backup_42_theme_multi_needs_improvement/gnome-text-editor-49.0/src/styles'
+    out_dir = '/var/home/rizvan/ViTE/vscode-themes'
+    os.makedirs(out_dir, exist_ok=True)
+    
+    if not os.path.isdir(in_dir):
+        print(f"Error: Could not find source directory {in_dir}")
+        sys.exit(1)
+        
+    count = 0
+    for f in os.listdir(in_dir):
+        if f.endswith('.xml'):
+            convert_theme(os.path.join(in_dir, f), out_dir)
+            count += 1
+            
+    print(f"\nSuccessfully created {count} JSON themes in {out_dir}")
+
+if __name__ == '__main__':
+    main()
