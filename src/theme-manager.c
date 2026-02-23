@@ -634,12 +634,17 @@ scan_theme_directory(const char *dir_path)
 
     const char *filename;
     while ((filename = g_dir_read_name(dir)) != NULL) {
-        if (!g_str_has_suffix(filename, ".json")) continue;
+        if (g_strcmp0(filename, ".") == 0 || g_strcmp0(filename, "..") == 0) continue;
 
         char *full_path = g_build_filename(dir_path, filename, NULL);
-        ViteTheme *theme = load_theme_from_json(full_path);
-        if (theme) {
-            g_ptr_array_add(all_themes, theme);
+        
+        if (g_file_test(full_path, G_FILE_TEST_IS_DIR)) {
+            scan_theme_directory(full_path);
+        } else if (g_str_has_suffix(filename, ".json")) {
+            ViteTheme *theme = load_theme_from_json(full_path);
+            if (theme) {
+                g_ptr_array_add(all_themes, theme);
+            }
         }
         g_free(full_path);
     }
