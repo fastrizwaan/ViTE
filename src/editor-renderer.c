@@ -81,6 +81,9 @@ render_context_init(SnapshotRenderContext *ctx, EditorWidget *self, GtkSnapshot 
         self->color_gutter_bg = theme->gutter_bg;
         self->color_line_number = theme->gutter_fg;
         self->color_line_highlight = theme->line_highlight;
+        self->color_selection = theme->selection;
+        self->color_find_match = theme->find_match;
+        self->color_find_match_highlight = theme->find_match_highlight;
     } else {
         /* Fallback if theme not initialized yet */
         gtk_widget_get_color(GTK_WIDGET(self), &self->color_text);
@@ -97,6 +100,9 @@ render_context_init(SnapshotRenderContext *ctx, EditorWidget *self, GtkSnapshot 
         self->color_line_highlight.alpha = ctx->is_dark ? 0.04 : 0.03;
         self->color_line_number = self->color_text;
         self->color_line_number.alpha = 0.5;
+        self->color_selection = (GdkRGBA){0.2, 0.4, 0.8, 0.35};
+        self->color_find_match = (GdkRGBA){1.0, 0.8, 0.4, 0.2};
+        self->color_find_match_highlight = ctx->is_dark ? (GdkRGBA){0.8, 0.8, 0.8, 0.15} : (GdkRGBA){0.6, 0.6, 0.6, 0.2};
     }
     
     guint64 theme_revision = theme_manager_get_revision();
@@ -404,12 +410,11 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
                                 double rx = pango_units_to_double(rs[2*r]), rw = pango_units_to_double(rs[2*r+1]-rs[2*r]);
                                 if (rw > 0) {
                                     if (match.start == self->current_match_offset) {
-                                        GdkRGBA f = {1.0, 0.8, 0.4, 0.2}, b = {1.0, 0.6, 0.0, 1.0};
-                                        gtk_snapshot_append_color(snapshot, &f, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                                        gtk_snapshot_append_color(snapshot, &self->color_find_match, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                                        GdkRGBA b = {1.0, 0.6, 0.0, 1.0}; /* Keep border orange for visibility, or remove it */
                                         gtk_snapshot_append_border(snapshot, &GSK_ROUNDED_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh), (float[4]){1,1,1,1}, (GdkRGBA[4]){b,b,b,b});
                                     } else {
-                                        GdkRGBA f = ctx->is_dark ? (GdkRGBA){0.8, 0.8, 0.8, 0.15} : (GdkRGBA){0.6, 0.6, 0.6, 0.2};
-                                        gtk_snapshot_append_color(snapshot, &f, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                                        gtk_snapshot_append_color(snapshot, &self->color_find_match_highlight, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
                                         GdkRGBA u = ctx->is_dark ? (GdkRGBA){0.7, 0.7, 0.7, 0.4} : (GdkRGBA){0.5, 0.5, 0.5, 0.5};
                                         gtk_snapshot_append_color(snapshot, &u, &GRAPHENE_RECT_INIT((float)rx, (float)(ry+rh-1), (float)rw, 1.0f));
                                     }
@@ -503,7 +508,7 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
         if (s1 < line_end_off && s2 > line_start_off && s1 != s2) {
             size_t si1 = MAX(s1, line_start_off + chunk_padding) - (line_start_off + chunk_padding);
             size_t si2 = MIN(s2, line_start_off + chunk_padding + len) - (line_start_off + chunk_padding);
-            if (len == 0 && s2 > line_start_off) gtk_snapshot_append_color(snapshot, &(GdkRGBA){0.2, 0.4, 0.8, 0.35}, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)layout_h));
+            if (len == 0 && s2 > line_start_off) gtk_snapshot_append_color(snapshot, &self->color_selection, &GRAPHENE_RECT_INIT(0, 0, (float)width, (float)layout_h));
             else if (len > 0 && si1 < si2) {
                 PangoLayoutIter *iter = pango_layout_get_iter(layout);
                 int l_idx = 0, l_cnt = pango_layout_get_line_count(layout);
@@ -519,7 +524,7 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
                         int *rs, nrs; pango_layout_line_get_x_ranges(pl, (int)MAX(si1, (size_t)ls), (int)MIN(si2, (size_t)le), &rs, &nrs);
                         for (int r = 0; r < nrs; r++) {
                             double rx = pango_units_to_double(rs[2*r]), rw = pango_units_to_double(rs[2*r+1]-rs[2*r]);
-                            if (rw > 0) gtk_snapshot_append_color(snapshot, &(GdkRGBA){0.2, 0.4, 0.8, 0.35}, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
+                            if (rw > 0) gtk_snapshot_append_color(snapshot, &self->color_selection, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
                         }
                         g_free(rs);
                         if (s2 > line_start_off + chunk_padding + (size_t)le) {
@@ -533,7 +538,7 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
                                 ew = (width + scroll_x) - dx;
                                 ex = dx;
                             }
-                            if (ew > 0) gtk_snapshot_append_color(snapshot, &(GdkRGBA){0.2, 0.4, 0.8, 0.35}, &GRAPHENE_RECT_INIT((float)ex, (float)ry, (float)ew, (float)rh));
+                            if (ew > 0) gtk_snapshot_append_color(snapshot, &self->color_selection, &GRAPHENE_RECT_INIT((float)ex, (float)ry, (float)ew, (float)rh));
                         }
                     }
                     l_idx++;

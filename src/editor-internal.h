@@ -60,6 +60,9 @@ struct _EditorWidget {
     GdkRGBA color_line_highlight;
     GdkRGBA color_line_number;
     GdkRGBA color_gutter_bg;
+    GdkRGBA color_selection;
+    GdkRGBA color_find_match;
+    GdkRGBA color_find_match_highlight;
     
     double line_height;
     double ascent;
