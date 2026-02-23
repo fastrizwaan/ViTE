@@ -4,6 +4,7 @@
 #include <glib/gstdio.h>
 #include <string.h>
 #include <math.h>
+#include "editor-widget.h"
 
 /* --- Static State --- */
 static GPtrArray *all_themes = NULL;  /* ViteTheme* */
@@ -83,14 +84,60 @@ set_default_dark_theme(ViteTheme *theme)
 }
 
 static void
+apply_theme_inheritance_and_fallback(ViteTheme *theme, int *slot_scores)
+{
+    /* Fallback inheritance: unset slots inherit from parent scope colors.
+     * This matches how VSCode inherits styles from broader scopes. */
+    #define INHERIT(child, parent) \
+        if ((!slot_scores || slot_scores[child] == 0) && (!slot_scores || slot_scores[parent] > 0)) { \
+            theme->syntax[child] = theme->syntax[parent]; \
+        }
+
+    INHERIT(COLOR_PREPROC,    COLOR_KEYWORD)    /* preprocessor ← keyword */
+    INHERIT(COLOR_OPERATOR,   COLOR_KEYWORD)    /* operator ← keyword */
+    INHERIT(COLOR_LOGICAL,    COLOR_OPERATOR)   /* logical ← operator ← keyword */
+    INHERIT(COLOR_LOGICAL,    COLOR_KEYWORD)    /* logical ← keyword (if operator also unset) */
+    INHERIT(COLOR_VARIABLE_C, COLOR_VARIABLE)   /* C variable ← variable */
+    INHERIT(COLOR_PROPERTY,   COLOR_VARIABLE)   /* property ← variable */
+    INHERIT(COLOR_KEYWORD_CONTROL, COLOR_KEYWORD)/* control keyword ← keyword */
+    INHERIT(COLOR_CONSTANT,   COLOR_NUMBER)     /* constant ← number */
+    INHERIT(COLOR_DECORATOR,  COLOR_FUNCTION)   /* decorator ← function */
+    INHERIT(COLOR_BUILTIN,    COLOR_FUNCTION)   /* builtin ← function */
+    
+    INHERIT(COLOR_STORAGE,    COLOR_KEYWORD)    /* storage (primitive types) ← keyword */
+    INHERIT(COLOR_CONSTANT_LANG, COLOR_CONSTANT)/* true/false ← constant */
+    #undef INHERIT
+
+    /* For any completely unset slots (even after inheritance), fall back to editor foreground */
+    PangoColor fg_pango;
+    fg_pango.red   = (guint16)(theme->editor_fg.red   * 65535);
+    fg_pango.green = (guint16)(theme->editor_fg.green * 65535);
+    fg_pango.blue  = (guint16)(theme->editor_fg.blue  * 65535);
+
+    for (int i = 0; i < COLOR_SLOT_COUNT; i++) {
+        if (i >= COLOR_BRACKET_1 && i <= COLOR_BRACKET_UNMATCHED) continue;
+        
+        if (!slot_scores) {
+            /* If no slot_scores provided (built-in theme), we check if the slot is empty (all 0s) */
+            if (theme->syntax[i].red == 0 && theme->syntax[i].green == 0 && theme->syntax[i].blue == 0) {
+                 theme->syntax[i] = fg_pango;
+            }
+        } else if (slot_scores[i] == 0) {
+            theme->syntax[i] = fg_pango;
+        }
+    }
+}
+
+
+static void
 set_default_light_theme(ViteTheme *theme)
 {
-    /* One Light colors */
+    /* Atom One Light Modern colors */
     gdk_rgba_parse(&theme->editor_bg, "#F2F2F2");
-    gdk_rgba_parse(&theme->editor_fg, "#383A42");
+    gdk_rgba_parse(&theme->editor_fg, "#24292e");
     gdk_rgba_parse(&theme->gutter_bg, "#F2F2F2");
-    gdk_rgba_parse(&theme->gutter_fg, "#9DA5B4");
-    gdk_rgba_parse(&theme->gutter_active_fg, "#383A42");
+    gdk_rgba_parse(&theme->gutter_fg, "#1b1f234d");
+    gdk_rgba_parse(&theme->gutter_active_fg, "#24292e");
     gdk_rgba_parse(&theme->line_highlight, "#E8E8E8");
     gdk_rgba_parse(&theme->selection, "#6D6D6D25");
     gdk_rgba_parse(&theme->cursor_color, "#044289");
@@ -112,32 +159,32 @@ set_default_light_theme(ViteTheme *theme)
     gdk_rgba_parse(&theme->scrollbar_hover, "#959da544");
     gdk_rgba_parse(&theme->scrollbar_active, "#959da588");
 
-    pango_color_parse(&theme->syntax[COLOR_KEYWORD], "#a626a4");
-    pango_color_parse(&theme->syntax[COLOR_BUILTIN], "#0184bc");
-    pango_color_parse(&theme->syntax[COLOR_STRING], "#50a14f");
-    pango_color_parse(&theme->syntax[COLOR_COMMENT], "#a0a1a7");
+    pango_color_parse(&theme->syntax[COLOR_KEYWORD], "#A626A4");
+    pango_color_parse(&theme->syntax[COLOR_BUILTIN], "#0184BC");
+    pango_color_parse(&theme->syntax[COLOR_STRING], "#50A14F");
+    pango_color_parse(&theme->syntax[COLOR_COMMENT], "#A0A1A7");
     pango_color_parse(&theme->syntax[COLOR_NUMBER], "#986801");
-    pango_color_parse(&theme->syntax[COLOR_FUNCTION], "#4078f2");
-    pango_color_parse(&theme->syntax[COLOR_TYPE], "#c18401");
-    pango_color_parse(&theme->syntax[COLOR_DECORATOR], "#a626a4");
-    pango_color_parse(&theme->syntax[COLOR_VARIABLE], "#e45649");
-    pango_color_parse(&theme->syntax[COLOR_VARIABLE_C], "#383a42");
-    pango_color_parse(&theme->syntax[COLOR_CONSTANT], "#e45649");
-    pango_color_parse(&theme->syntax[COLOR_TAG], "#e45649");
-    pango_color_parse(&theme->syntax[COLOR_OPERATOR], "#986801");
-    pango_color_parse(&theme->syntax[COLOR_PUNCTUATION], "#986801");
+    pango_color_parse(&theme->syntax[COLOR_FUNCTION], "#4078F2");
+    pango_color_parse(&theme->syntax[COLOR_TYPE], "#C18401");
+    pango_color_parse(&theme->syntax[COLOR_DECORATOR], "#A626A4");
+    pango_color_parse(&theme->syntax[COLOR_VARIABLE], "#E45649");
+    pango_color_parse(&theme->syntax[COLOR_VARIABLE_C], "#383A42");
+    pango_color_parse(&theme->syntax[COLOR_CONSTANT], "#986801");
+    pango_color_parse(&theme->syntax[COLOR_TAG], "#E45649");
+    pango_color_parse(&theme->syntax[COLOR_OPERATOR], "#383A42");
+    pango_color_parse(&theme->syntax[COLOR_PUNCTUATION], "#383A42");
     pango_color_parse(&theme->syntax[COLOR_ATTRIBUTE], "#986801");
-    pango_color_parse(&theme->syntax[COLOR_PARAM], "#e45649");
-    pango_color_parse(&theme->syntax[COLOR_PROPERTY], "#0184bc");
-    pango_color_parse(&theme->syntax[COLOR_PREPROC], "#a626a4");
-    pango_color_parse(&theme->syntax[COLOR_LOGICAL], "#0184bc");
+    pango_color_parse(&theme->syntax[COLOR_PARAM], "#383A42");
+    pango_color_parse(&theme->syntax[COLOR_PROPERTY], "#696C77");
+    pango_color_parse(&theme->syntax[COLOR_PREPROC], "#A626A4");
+    pango_color_parse(&theme->syntax[COLOR_LOGICAL], "#383A42");
 
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_1], "#0431FA");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_2], "#319331");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_3], "#7B3814");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_4], "#0431FA");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_5], "#319331");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#7B3814");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_1], "#005cc5");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_2], "#e36209");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_3], "#5a32a3");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_4], "#005cc5");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_5], "#e36209");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#5a32a3");
     pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], "#FF1111");
 
     theme->is_dark = FALSE;
@@ -564,18 +611,8 @@ load_theme_from_json(const char *path)
     }
 
     /* Reset all syntax slots to foreground color so uncovered scopes
-     * don't leak hardcoded One Dark/Light fallback colors */
-    {
-        PangoColor fg_pango;
-        fg_pango.red   = (guint16)(theme->editor_fg.red   * 65535);
-        fg_pango.green = (guint16)(theme->editor_fg.green * 65535);
-        fg_pango.blue  = (guint16)(theme->editor_fg.blue  * 65535);
-        for (int i = 0; i < COLOR_SLOT_COUNT; i++) {
-            /* Skip bracket slots as they are already initialized by parse_editor_colors */
-            if (i >= COLOR_BRACKET_1 && i <= COLOR_BRACKET_UNMATCHED) continue;
-            theme->syntax[i] = fg_pango;
-        }
-    }
+     * don't leak hardcoded One Dark/Light fallback colors.
+     * Handled by apply_theme_inheritance_and_fallback. */
 
     /* Parse token colors for syntax */
     int slot_scores[COLOR_SLOT_COUNT];
@@ -585,26 +622,7 @@ load_theme_from_json(const char *path)
         if (token_colors) parse_token_colors(token_colors, theme, slot_scores);
     }
 
-    /* Fallback inheritance: unset slots inherit from parent scope colors.
-     * This matches how VSCode inherits styles from broader scopes. */
-    #define INHERIT(child, parent) \
-        if (slot_scores[child] == 0 && slot_scores[parent] > 0) { \
-            theme->syntax[child] = theme->syntax[parent]; \
-        }
-    INHERIT(COLOR_PREPROC,    COLOR_KEYWORD)    /* preprocessor ← keyword */
-    INHERIT(COLOR_OPERATOR,   COLOR_KEYWORD)    /* operator ← keyword */
-    INHERIT(COLOR_LOGICAL,    COLOR_OPERATOR)   /* logical ← operator ← keyword */
-    INHERIT(COLOR_LOGICAL,    COLOR_KEYWORD)    /* logical ← keyword (if operator also unset) */
-    INHERIT(COLOR_VARIABLE_C, COLOR_VARIABLE)   /* C variable ← variable */
-    INHERIT(COLOR_PROPERTY,   COLOR_VARIABLE)   /* property ← variable */
-    INHERIT(COLOR_KEYWORD_CONTROL, COLOR_KEYWORD)/* control keyword ← keyword */
-    INHERIT(COLOR_CONSTANT,   COLOR_NUMBER)     /* constant ← number */
-    INHERIT(COLOR_DECORATOR,  COLOR_FUNCTION)   /* decorator ← function */
-    INHERIT(COLOR_BUILTIN,    COLOR_FUNCTION)   /* builtin ← function */
-    
-    INHERIT(COLOR_STORAGE,    COLOR_KEYWORD)    /* storage (primitive types) ← keyword */
-    INHERIT(COLOR_CONSTANT_LANG, COLOR_CONSTANT)/* true/false ← constant */
-    #undef INHERIT
+    apply_theme_inheritance_and_fallback(theme, slot_scores);
 
     /* Detect dark/light from actual background color */
     theme->is_dark = detect_is_dark(&theme->editor_bg);
@@ -843,11 +861,76 @@ generate_css(const ViteTheme *theme)
 
 /* --- Public API --- */
 
+static void
+invalidate_editors_recursive(GtkWidget *widget)
+{
+    if (!widget) return;
+    if (EDITOR_IS_WIDGET(widget)) {
+        EditorWidget *ed = EDITOR_WIDGET(widget);
+        SyntaxContext *ctx = editor_widget_get_syntax_context(ed);
+        if (ctx) syntax_context_invalidate_cache(ctx);
+        gtk_widget_queue_draw(widget);
+        return;
+    }
+
+    GtkWidget *child = gtk_widget_get_first_child(widget);
+    while (child) {
+        invalidate_editors_recursive(child);
+        child = gtk_widget_get_next_sibling(child);
+    }
+}
+
+static void
+on_system_theme_changed(AdwStyleManager *style_mgr G_GNUC_UNUSED, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data G_GNUC_UNUSED)
+{
+    /* Only auto-switch if we are specifically using the Auto theme */
+    if (current_theme && g_strcmp0(current_theme->name, "ViTE Built-In (Auto)") == 0) {
+        /* Re-apply the Auto theme. theme_manager_apply_theme will check system
+         * state and copy the correct Light/Dark values into the target Auto theme struct */
+        theme_manager_apply_theme("ViTE Built-In (Auto)");
+
+        /* Invalidate all open editors so they redraw with the updated target colors */
+        GListModel *toplevels = gtk_window_get_toplevels();
+        guint n_windows = g_list_model_get_n_items(toplevels);
+        for (guint i = 0; i < n_windows; i++) {
+            GObject *win = g_list_model_get_item(toplevels, i);
+            if (GTK_IS_WIDGET(win)) {
+                invalidate_editors_recursive(GTK_WIDGET(win));
+                gtk_widget_queue_draw(GTK_WIDGET(win));
+            }
+            g_object_unref(win);
+        }
+    }
+}
+
 void
 theme_manager_init(void)
 {
     if (all_themes) return;
     all_themes = g_ptr_array_new_with_free_func((GDestroyNotify)theme_free);
+
+    /* ALWAYS set up initial built-in themes first */
+    ViteTheme *fallback_auto = g_new0(ViteTheme, 1);
+    fallback_auto->name = g_strdup("ViTE Built-In (Auto)");
+    fallback_auto->file_path = NULL;
+    /* Start with dark as dummy, will be overridden upon apply */
+    set_default_dark_theme(fallback_auto);
+    apply_theme_inheritance_and_fallback(fallback_auto, NULL);
+    g_ptr_array_add(all_themes, fallback_auto);
+
+    ViteTheme *fallback_dark = g_new0(ViteTheme, 1);
+    fallback_dark->name = g_strdup("One Dark (Built-in)");
+    fallback_dark->file_path = NULL;
+    set_default_dark_theme(fallback_dark);
+    apply_theme_inheritance_and_fallback(fallback_dark, NULL);
+    g_ptr_array_add(all_themes, fallback_dark);
+    
+    ViteTheme *fallback_light = g_new0(ViteTheme, 1);
+    fallback_light->name = g_strdup("One Light (Built-in)");
+    fallback_light->file_path = NULL;
+    set_default_light_theme(fallback_light);
+    apply_theme_inheritance_and_fallback(fallback_light, NULL);
+    g_ptr_array_add(all_themes, fallback_light);
 
     /* Scan multiple directories for themes */
     /* 1. Find themes relative to executable */
@@ -886,15 +969,12 @@ theme_manager_init(void)
         g_free(user_themes);
     }
 
-    /* Set up an initial default theme if none loaded */
-    if (all_themes->len == 0) {
-        g_warning("No theme files found; using built-in One Dark");
-        ViteTheme *fallback = g_new0(ViteTheme, 1);
-        fallback->name = g_strdup("One Dark (Built-in)");
-        fallback->file_path = NULL;
-        set_default_dark_theme(fallback);
-        g_ptr_array_add(all_themes, fallback);
+    /* Print a warning ONLY if no external themes were loaded (we check for 3 built-ins) */
+    if (all_themes->len <= 3) {
+        g_warning("No external theme files found; using only built-in themes");
     }
+
+    AdwStyleManager *style_mgr = adw_style_manager_get_default();
 
     /* Apply saved theme or default */
     char *saved = theme_manager_load_selection();
@@ -902,10 +982,13 @@ theme_manager_init(void)
         theme_manager_apply_theme(saved);
         g_free(saved);
     } else {
-        /* Default to the first theme (usually OneDark) */
+        /* Default to Auto (the first item we added) */
         ViteTheme *first = g_ptr_array_index(all_themes, 0);
         theme_manager_apply_theme(first->name);
     }
+    
+    /* Auto-sync with system theme if using built-ins */
+    g_signal_connect(style_mgr, "notify::dark", G_CALLBACK(on_system_theme_changed), NULL);
 }
 
 void
@@ -955,8 +1038,28 @@ theme_manager_apply_theme(const char *theme_name)
     }
 
     if (!target) {
-        g_warning("Theme '%s' not found", theme_name);
+        g_warning("Theme '%s' not found, falling back to 'ViTE Built-In (Auto)'", theme_name);
+        if (g_strcmp0(theme_name, "ViTE Built-In (Auto)") != 0) {
+            theme_manager_apply_theme("ViTE Built-In (Auto)");
+        }
         return;
+    }
+
+    AdwStyleManager *style_mgr = adw_style_manager_get_default();
+
+    /* Intercept "ViTE Built-In (Auto)" and dynamically update its payload
+     * to mirror Either One Dark or One Light based on system dark mode. */
+    if (g_strcmp0(target->name, "ViTE Built-In (Auto)") == 0) {
+        if (adw_style_manager_get_color_scheme(style_mgr) != ADW_COLOR_SCHEME_DEFAULT) {
+            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_DEFAULT);
+        }
+        gboolean is_dark = adw_style_manager_get_dark(style_mgr);
+        if (is_dark) {
+            set_default_dark_theme(target);
+        } else {
+            set_default_light_theme(target);
+        }
+        apply_theme_inheritance_and_fallback(target, NULL);
     }
 
     theme_revision++;
@@ -970,8 +1073,6 @@ theme_manager_apply_theme(const char *theme_name)
         g_object_unref(current_css_provider);
         current_css_provider = NULL;
     }
-
-    AdwStyleManager *style_mgr = adw_style_manager_get_default();
 
     if (is_default_theme(target->name)) {
         /* Default themes: use native GTK4/Adwaita colors.
@@ -996,7 +1097,9 @@ theme_manager_apply_theme(const char *theme_name)
         g_free(css);
 
         /* Set Adw color scheme based on theme darkness */
-        if (target->is_dark) {
+        if (g_strcmp0(target->name, "ViTE Built-In (Auto)") == 0) {
+            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_DEFAULT);
+        } else if (target->is_dark) {
             adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_DARK);
         } else {
             adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_LIGHT);
