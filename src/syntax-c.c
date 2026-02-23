@@ -1,31 +1,42 @@
 #include "syntax-internal.h"
 #include <string.h>
 
+static const char *c_control_keywords[] = {
+    "break", "case", "continue", "default", "do", "else", 
+    "for", "goto", "if", "return", "switch", "while", 
+    /* Primitive types in VSCode C grammar map to Cyan, matching control keywords */
+    "bool", "char", "double", "float", "int", "long", "short", "signed", "unsigned", "void", 
+    "size_t", "ssize_t", "ptrdiff_t", "int8_t", "uint8_t", "int16_t", "uint16_t",
+    "int32_t", "uint32_t", "int64_t", "uint64_t", "intptr_t", "uintptr_t", NULL
+};
+
+static const char *c_storage_modifiers[] = {
+    "auto", "const", "extern", "inline", "register", "restrict", "static", "volatile", NULL
+};
+
 static const char *c_keywords[] = {
-    "auto", "bool", "break", "case", "catch", "char", "class", "const", "continue", 
-    "default", "delete", "do", "double", "else", "enum", "extern", "float", 
-    "for", "friend", "goto", "if", "inline", "int", "long", "namespace", "new", 
-    "operator", "private", "protected", "public", "register", "restrict", "return", 
-    "short", "signed", "sizeof", "static", "struct", "switch", "template", "this", 
-    "throw", "try", "typedef", "typename", "union", "unsigned", "using", "virtual", "void", "volatile", "while", 
-    "_Bool", "_Complex", "_Imaginary", NULL
+    "catch", "class", "delete", "friend", "namespace", "new", 
+    "operator", "private", "protected", "public", "sizeof", "template", "this", 
+    "throw", "try", "typename", "using", "virtual", NULL
 };
 
 static const char *c_special_constants[] = {
     "NULL", "TRUE", "FALSE", "true", "false", NULL
 };
 
+/* glib specific types */
 static const char *glib_types[] = {
     "gboolean", "gpointer", "gconstpointer", "gchar", "guchar", "gint", "guint",
     "gshort", "gushort", "glong", "gulong", "gint8", "guint8", "gint16", "guint16",
-    "gint32", "guint32", "gint64", "guint64", "gsize", "gssize", "goffset",
-    "gfloat", "gdouble", "gunichar", "GObject", "GType", "GError", "GList", "GSList", "GHashTable",
-    "GPtrArray", "GBytes", "GString", NULL
+    "gint32", "guint32", "gint64", "guint64", "gfloat", "gdouble", "gsize", "gssize",
+    "goffset", "gintptr", "guintptr", "gunichar", "GObject", "GType", "GError", 
+    "GList", "GSList", "GHashTable", "GPtrArray", "GBytes", "GString", NULL
 };
 
+/* standard C structs/unions mapping to Blue */
 static const char *std_types[] = {
-    "size_t", "ssize_t", "ptrdiff_t", "int8_t", "uint8_t", "int16_t", "uint16_t",
-    "int32_t", "uint32_t", "int64_t", "uint64_t", "intptr_t", "uintptr_t", NULL
+    "struct", "union", "enum", "typedef",
+    "_Bool", "_Complex", "_Imaginary", NULL
 };
 
 void 
@@ -378,14 +389,14 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 continue;
             }
             if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE_C);
+                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE);
                 cur += 2;
                 /* Highlight member after -> in red */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
                 if (cur < len && (g_ascii_isalpha(text[cur]) || text[cur] == '_')) {
                     size_t m_start = cur;
                     while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
-                    add_color_attr(attrs, m_start, cur, COLOR_VARIABLE);
+                    add_color_attr(attrs, m_start, cur, COLOR_VARIABLE_C);
                 }
                 continue;
             }
@@ -433,7 +444,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     break;
                 }
                 if (num_end > start_pos) add_color_attr(attrs, start_pos, num_end, COLOR_NUMBER);
-                if (num_end < cur) add_color_attr(attrs, num_end, cur, COLOR_VARIABLE);
+                if (num_end < cur) add_color_attr(attrs, num_end, cur, COLOR_VARIABLE_C);
                 continue;
             }
             
@@ -446,8 +457,10 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 const char *word_start = text + start_pos;
                 
                 gboolean is_keyword = is_word_in_list(word_start, word_len, c_keywords);
-                gboolean is_type_list = is_word_in_list(word_start, word_len, glib_types) || 
-                                      is_word_in_list(word_start, word_len, std_types);
+                gboolean is_control_keyword = is_word_in_list(word_start, word_len, c_control_keywords);
+                gboolean is_storage_modifier = is_word_in_list(word_start, word_len, c_storage_modifiers);
+                gboolean is_glib_type = is_word_in_list(word_start, word_len, glib_types);
+                gboolean is_std_type = is_word_in_list(word_start, word_len, std_types);
                 gboolean is_pointer_access = FALSE;
                 
                 /* Peek for -> */
@@ -464,12 +477,20 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
 
                 if (is_keyword) {
                     add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD);
+                } else if (is_control_keyword) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
+                } else if (is_storage_modifier) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
                 } else if (is_func_call) {
                     add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
-                } else if (is_word_in_list(word_start, word_len, c_special_constants) || 
-                           is_pointer_access || is_type_list || 
-                           g_ascii_isupper(word_start[0]) || 
-                           (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
+                } else if (is_word_in_list(word_start, word_len, c_special_constants)) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_CONSTANT_LANG);
+                } else if (is_pointer_access || is_glib_type) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
+                } else if (is_std_type || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
+                } else if (g_ascii_isupper(word_start[0])) {
+                    /* Types are conventionally capitalized */
                     add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
                 } else {
                     /* Parameter Name */
@@ -502,7 +523,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 cur++;
                 continue;
             } else if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE_C);
+                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE);
                 cur += 2;
                 /* Highlight member after -> */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -517,7 +538,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     if (p + 1 < len && text[p] == '-' && text[p+1] == '>') {
                         add_color_attr(attrs, m_start, m_end, COLOR_TYPE);
                     } else {
-                        add_color_attr(attrs, m_start, m_end, COLOR_VARIABLE);
+                        add_color_attr(attrs, m_start, m_end, COLOR_VARIABLE_C);
                     }
                     /* We don't continue here; the loop will continue from cur (m_end) */
                 }
@@ -699,6 +720,8 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             if (text[cur] == '#') {
                 size_t start_pos = cur;
                 cur++;
+                add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
+                
                 /* Allow space between # and directive */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
                 
@@ -709,7 +732,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 size_t directive_len = cur - directive_start;
                 const char *directive = text + directive_start;
 
-                add_color_attr(attrs, start_pos, cur, COLOR_PREPROC);
+                add_color_attr(attrs, directive_start, cur, COLOR_KEYWORD_CONTROL);
 
                 if (directive_len == 7 && strncmp(directive, "include", 7) == 0) {
                     /* Skip whitespace */
@@ -720,9 +743,23 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                         char close = (open == '<') ? '>' : open;
                         size_t path_start = cur;
                         cur++;
-                        while (cur < len && text[cur] != close) cur++;
-                        if (cur < len) cur++; /* include closer */
+                        
+                        /* Color the open quote/bracket */
                         add_color_attr(attrs, path_start, cur, COLOR_STRING);
+                        
+                        size_t inner_start = cur;
+                        while (cur < len && text[cur] != close) cur++;
+                        
+                        /* Color the inner path */
+                        if (cur > inner_start) {
+                            add_color_attr(attrs, inner_start, cur, COLOR_STRING);
+                        }
+                        
+                        /* Color the close quote/bracket */
+                        if (cur < len) {
+                            add_color_attr(attrs, cur, cur + 1, COLOR_STRING);
+                            cur++; /* include closer */
+                        }
                     }
                 } else if ((directive_len == 6 && strncmp(directive, "define", 6) == 0) ||
                            (directive_len == 5 && strncmp(directive, "ifdef", 5) == 0) ||
@@ -778,7 +815,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     break;
                 }
                 if (num_end > start_pos) add_color_attr(attrs, start_pos, num_end, COLOR_NUMBER);
-                if (num_end < cur) add_color_attr(attrs, num_end, cur, COLOR_VARIABLE);
+                if (num_end < cur) add_color_attr(attrs, num_end, cur, COLOR_VARIABLE_C);
                 continue;
             }
 
@@ -798,8 +835,10 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 if (peek < len && text[peek] == '(') is_func_call = TRUE;
 
                 gboolean is_keyword = is_word_in_list(word_start, word_len, c_keywords);
-                gboolean is_type_list = is_word_in_list(word_start, word_len, glib_types) || 
-                                      is_word_in_list(word_start, word_len, std_types);
+                gboolean is_control_keyword = is_word_in_list(word_start, word_len, c_control_keywords);
+                gboolean is_storage_modifier = is_word_in_list(word_start, word_len, c_storage_modifiers);
+                gboolean is_glib_type = is_word_in_list(word_start, word_len, glib_types);
+                gboolean is_std_type = is_word_in_list(word_start, word_len, std_types);
                 gboolean is_pointer_access = FALSE;
                 
                 /* Peek for -> */
@@ -812,18 +851,19 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     if (word_len == 4 && strncmp(word_start, "enum", 4) == 0) {
                         state = STATE_C_ENUM_WAIT_LBRACE;
                     }
+                } else if (is_control_keyword) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
+                } else if (is_storage_modifier) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
                 } else if (is_func_call) {
                      add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
                      state = STATE_C_PARAMS;
-                } else if (is_word_in_list(word_start, word_len, c_special_constants) ||
-                           is_pointer_access || is_type_list ||
-                           g_ascii_isupper(word_start[0]) || 
-                           (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
+                } else if (is_word_in_list(word_start, word_len, c_special_constants)) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_CONSTANT_LANG);
+                } else if (is_pointer_access || is_glib_type) {
                     add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
-                } else if (is_all_caps(word_start, word_len)) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_CONSTANT);
-                } else {
-                    add_color_attr(attrs, start_pos, cur, COLOR_VARIABLE_C);
+                } else if (is_std_type || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
+                    add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
                 }
                 continue;
             }
@@ -843,7 +883,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                  continue;
             }
             if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE_C);
+                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE);
                 cur += 2;
                 /* Highlight member after -> in red */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -858,7 +898,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     if (p + 1 < len && text[p] == '-' && text[p+1] == '>') {
                         add_color_attr(attrs, m_start, m_end, COLOR_TYPE);
                     } else {
-                        add_color_attr(attrs, m_start, m_end, COLOR_VARIABLE);
+                        add_color_attr(attrs, m_start, m_end, COLOR_VARIABLE_C);
                     }
                 }
                 continue;

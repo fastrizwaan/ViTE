@@ -137,16 +137,17 @@ typedef struct {
 /* Ordered from most specific to least specific for priority matching */
 static const ScopeMapping scope_map[] = {
     { "keyword.operator.logical",         COLOR_LOGICAL },
-    { "keyword.operator.comparison",       COLOR_LOGICAL },
+    { "keyword.operator.comparison",   COLOR_LOGICAL },
     { "keyword.operator",              COLOR_OPERATOR },
-    { "keyword.control.directive",         COLOR_PREPROC },
-    { "keyword.control",               COLOR_KEYWORD },
+    { "keyword.control.directive",     COLOR_PREPROC },
+    { "keyword.control",               COLOR_KEYWORD_CONTROL },
     { "keyword.other.unit",            COLOR_NUMBER },
     { "keyword",                       COLOR_KEYWORD },
-    { "storage.type",                  COLOR_KEYWORD },
-    { "storage.modifier",              COLOR_KEYWORD },
-    { "storage",                       COLOR_KEYWORD },
+    { "storage.type",                  COLOR_STORAGE },
+    { "storage.modifier",              COLOR_STORAGE },
+    { "storage",                       COLOR_STORAGE },
     { "constant.numeric",              COLOR_NUMBER },
+    { "constant.language",             COLOR_CONSTANT_LANG },
     { "constant.character.escape",     COLOR_BUILTIN },
     { "constant.other.color",          COLOR_BUILTIN },
     { "constant.other.symbol",         COLOR_BUILTIN },
@@ -174,15 +175,9 @@ static const ScopeMapping scope_map[] = {
     { "meta.class",                    COLOR_TYPE },
     { "markup.heading",                COLOR_TAG },
     { "markup.bold",                   COLOR_ATTRIBUTE },
-    { "markup.italic",                 COLOR_KEYWORD },
-    { "markup.inserted",               COLOR_STRING },
-    { "markup.deleted",                COLOR_VARIABLE },
-    { "markup.changed",                COLOR_KEYWORD },
-    { "markup.link",                   COLOR_BUILTIN },
-    { "markup.raw",                    COLOR_STRING },
-    { "markup.quote",                  COLOR_ATTRIBUTE },
-    { "punctuation.definition.comment",COLOR_COMMENT },
-    { "punctuation.definition.string", COLOR_STRING },
+    { "markup.italic",                 COLOR_PROPERTY },
+    { "punctuation.definition.comment",COLOR_PUNCTUATION },
+    { "punctuation.definition.string", COLOR_PUNCTUATION },
     { "punctuation.separator",         COLOR_PUNCTUATION },
     { "punctuation.definition",        COLOR_PUNCTUATION },
     { "punctuation.terminator",        COLOR_PUNCTUATION },
@@ -204,44 +199,62 @@ scope_starts_with(const char *scope, const char *prefix)
 
 /* Try to match a single scope string against our mapping table.
    Handles compound scopes like "source.c keyword.operator" by trying
-   each space-separated part. Returns TRUE if matched, and sets *slot.
+   each space-separated part. Returns a match score (higher is better),
+   and sets *slot.
    If is_compound is non-NULL, sets it to TRUE if the original scope
    was a compound (language-qualified) scope. */
-static gboolean
+static int
 match_scope(const char *scope_str, ViteColorSlot *slot, gboolean *is_compound)
 {
     if (is_compound) *is_compound = FALSE;
 
     /* If scope contains spaces (compound scope like "source.c keyword.operator"),
-     * try each part individually, picking the last matching one */
+     * try the last part, picking the highest scoring one but penalize it because 
+     * generic scopes should override language-specific (compound) rules normally,
+     * unless the generic rule is entirely missing. */
     if (strchr(scope_str, ' ')) {
         char **parts = g_strsplit(scope_str, " ", -1);
-        gboolean found = FALSE;
+        int best_score = 0;
+        ViteColorSlot best_slot = 0;
+        
+        int last_part = -1;
         for (int p = 0; parts[p]; p++) {
             char *trimmed = g_strstrip(parts[p]);
-            if (trimmed[0] == '\0') continue;
-            if (trimmed[0] == '>') continue; /* skip ">" separators */
+            if (trimmed[0] != '\0' && trimmed[0] != '>') {
+                last_part = p;
+            }
+        }
+
+        if (last_part >= 0) {
+            char *trimmed = g_strstrip(parts[last_part]);
             for (int i = 0; scope_map[i].scope != NULL; i++) {
                 if (scope_starts_with(trimmed, scope_map[i].scope)) {
-                    *slot = scope_map[i].slot;
-                    found = TRUE;
-                    if (is_compound) *is_compound = TRUE;
-                    break;
+                    int score = (strlen(scope_map[i].scope) * 1000) / strlen(trimmed);
+                    /* Penalize compound contexts so generic definitions will win */
+                    score /= 4; 
+                    if (score > best_score) {
+                        best_score = score;
+                        best_slot = scope_map[i].slot;
+                    }
                 }
             }
         }
         g_strfreev(parts);
-        return found;
+        if (best_score > 0) {
+            *slot = best_slot;
+            if (is_compound) *is_compound = TRUE;
+        }
+        return best_score;
     }
 
     /* Simple single-scope matching */
     for (int i = 0; scope_map[i].scope != NULL; i++) {
         if (scope_starts_with(scope_str, scope_map[i].scope)) {
             *slot = scope_map[i].slot;
-            return TRUE;
+            return (strlen(scope_map[i].scope) * 1000) / strlen(scope_str);
         }
     }
-    return FALSE;
+    return 0;
 }
 
 /* --- JSON Parsing --- */
@@ -333,11 +346,11 @@ parse_editor_colors(JsonObject *colors, ViteTheme *theme)
 }
 
 static void
-parse_token_colors(JsonArray *token_colors, ViteTheme *theme, gboolean *slot_set_out)
+parse_token_colors(JsonArray *token_colors, ViteTheme *theme, int *slot_scores_out)
 {
-    /* Track which slots have been set — first match wins per slot */
-    gboolean slot_set[COLOR_SLOT_COUNT];
-    memset(slot_set, 0, sizeof(slot_set));
+    /* Track which slots have been set using their best score */
+    int slot_scores[COLOR_SLOT_COUNT];
+    memset(slot_scores, 0, sizeof(slot_scores));
 
     guint n = json_array_get_length(token_colors);
     for (guint i = 0; i < n; i++) {
@@ -385,11 +398,12 @@ parse_token_colors(JsonArray *token_colors, ViteTheme *theme, gboolean *slot_set
             const char *scope_str = g_ptr_array_index(scopes, si);
             ViteColorSlot slot;
             gboolean is_compound = FALSE;
-            if (match_scope(scope_str, &slot, &is_compound)) {
-                /* First match wins per slot */
-                if (!slot_set[slot]) {
+            int score = match_scope(scope_str, &slot, &is_compound);
+            if (score > 0) {
+                /* Higher score wins. Equal score from later in JSON wins. */
+                if (score >= slot_scores[slot]) {
                     theme->syntax[slot] = color;
-                    slot_set[slot] = TRUE;
+                    slot_scores[slot] = score;
                 }
             }
         }
@@ -397,8 +411,8 @@ parse_token_colors(JsonArray *token_colors, ViteTheme *theme, gboolean *slot_set
     }
 
     /* Copy out which slots were set */
-    if (slot_set_out) {
-        memcpy(slot_set_out, slot_set, sizeof(slot_set));
+    if (slot_scores_out) {
+        memcpy(slot_scores_out, slot_scores, sizeof(slot_scores));
     }
 }
 
@@ -409,18 +423,93 @@ detect_is_dark(const GdkRGBA *bg)
     return lum < 0.5;
 }
 
+/* Removes JSON comments (single/multi) and trailing commas to allow json-glib to parse VSCode Themes */
+static char *
+clean_json_string(const char *input)
+{
+    size_t len = strlen(input);
+    char *out = g_malloc(len + 1);
+    size_t j = 0;
+    gboolean in_string = FALSE;
+    gboolean in_single_line_comment = FALSE;
+    gboolean in_multi_line_comment = FALSE;
+    
+    for (size_t i = 0; i < len; i++) {
+        if (in_single_line_comment) {
+            if (input[i] == '\n') {
+                in_single_line_comment = FALSE;
+                out[j++] = input[i]; /* preserve line numbers */
+            }
+            continue;
+        }
+        if (in_multi_line_comment) {
+            if (input[i] == '*' && i + 1 < len && input[i+1] == '/') {
+                in_multi_line_comment = FALSE;
+                i++;
+            } else if (input[i] == '\n') {
+                out[j++] = input[i]; /* preserve line numbers */
+            }
+            continue;
+        }
+        if (!in_string) {
+            if (input[i] == '/' && i + 1 < len) {
+                if (input[i+1] == '/') {
+                    in_single_line_comment = TRUE;
+                    i++;
+                    continue;
+                } else if (input[i+1] == '*') {
+                    in_multi_line_comment = TRUE;
+                    i++;
+                    continue;
+                }
+            }
+        }
+        if (input[i] == '"' && (i == 0 || input[i-1] != '\\' || (i > 1 && input[i-2] == '\\'))) {
+            in_string = !in_string;
+        }
+        out[j++] = input[i];
+    }
+    out[j] = '\0';
+    
+    /* Second pass: Remove trailing commas before } or ] */
+    for (size_t i = 0; i < j; i++) {
+        if (out[i] == ',') {
+            /* Look ahead for } or ] */
+            size_t k = i + 1;
+            while (k < j && g_ascii_isspace(out[k])) k++;
+            if (k < j && (out[k] == '}' || out[k] == ']')) {
+                out[i] = ' '; /* Erase trailing comma */
+            }
+        }
+    }
+    return out;
+}
+
 static ViteTheme *
 load_theme_from_json(const char *path)
 {
     GError *error = NULL;
-    JsonParser *parser = json_parser_new();
+    char *contents = NULL;
+    gsize length = 0;
 
-    if (!json_parser_load_from_file(parser, path, &error)) {
+    if (!g_file_get_contents(path, &contents, &length, &error)) {
+        g_warning("Could not read theme file '%s': %s", path, error->message);
+        g_error_free(error);
+        return NULL;
+    }
+
+    char *cleaned_json = clean_json_string(contents);
+    g_free(contents);
+
+    JsonParser *parser = json_parser_new();
+    if (!json_parser_load_from_data(parser, cleaned_json, -1, &error)) {
         g_warning("Could not parse theme '%s': %s", path, error->message);
         g_error_free(error);
+        g_free(cleaned_json);
         g_object_unref(parser);
         return NULL;
     }
+    g_free(cleaned_json);
 
     JsonNode *root = json_parser_get_root(parser);
     if (!JSON_NODE_HOLDS_OBJECT(root)) {
@@ -468,17 +557,17 @@ load_theme_from_json(const char *path)
     }
 
     /* Parse token colors for syntax */
-    gboolean slot_set[COLOR_SLOT_COUNT];
-    memset(slot_set, 0, sizeof(slot_set));
+    int slot_scores[COLOR_SLOT_COUNT];
+    memset(slot_scores, 0, sizeof(slot_scores));
     if (json_object_has_member(obj, "tokenColors")) {
         JsonArray *token_colors = json_object_get_array_member(obj, "tokenColors");
-        if (token_colors) parse_token_colors(token_colors, theme, slot_set);
+        if (token_colors) parse_token_colors(token_colors, theme, slot_scores);
     }
 
     /* Fallback inheritance: unset slots inherit from parent scope colors.
      * This matches how VSCode inherits styles from broader scopes. */
     #define INHERIT(child, parent) \
-        if (!slot_set[child] && slot_set[parent]) { \
+        if (slot_scores[child] == 0 && slot_scores[parent] > 0) { \
             theme->syntax[child] = theme->syntax[parent]; \
         }
     INHERIT(COLOR_PREPROC,    COLOR_KEYWORD)    /* preprocessor ← keyword */
@@ -487,9 +576,13 @@ load_theme_from_json(const char *path)
     INHERIT(COLOR_LOGICAL,    COLOR_KEYWORD)    /* logical ← keyword (if operator also unset) */
     INHERIT(COLOR_VARIABLE_C, COLOR_VARIABLE)   /* C variable ← variable */
     INHERIT(COLOR_PROPERTY,   COLOR_VARIABLE)   /* property ← variable */
+    INHERIT(COLOR_KEYWORD_CONTROL, COLOR_KEYWORD)/* control keyword ← keyword */
     INHERIT(COLOR_CONSTANT,   COLOR_NUMBER)     /* constant ← number */
     INHERIT(COLOR_DECORATOR,  COLOR_FUNCTION)   /* decorator ← function */
     INHERIT(COLOR_BUILTIN,    COLOR_FUNCTION)   /* builtin ← function */
+    
+    INHERIT(COLOR_STORAGE,    COLOR_KEYWORD)    /* storage (primitive types) ← keyword */
+    INHERIT(COLOR_CONSTANT_LANG, COLOR_CONSTANT)/* true/false ← constant */
     #undef INHERIT
 
     /* Detect dark/light from actual background color */

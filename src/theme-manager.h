@@ -7,6 +7,7 @@
 /* Semantic color slots for syntax highlighting */
 typedef enum {
     COLOR_KEYWORD,
+    COLOR_KEYWORD_CONTROL,
     COLOR_BUILTIN,
     COLOR_STRING,
     COLOR_COMMENT,
@@ -17,7 +18,9 @@ typedef enum {
     COLOR_VARIABLE,
     COLOR_VARIABLE_C,
     COLOR_CONSTANT,
+    COLOR_CONSTANT_LANG,
     COLOR_TAG,
+    COLOR_STORAGE,
     COLOR_OPERATOR,
     COLOR_PUNCTUATION,
     COLOR_ATTRIBUTE,
