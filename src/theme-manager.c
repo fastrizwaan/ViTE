@@ -213,26 +213,20 @@ scope_starts_with(const char *scope, const char *prefix)
     return (next == '\0' || next == '.');
 }
 
-/* Try to match a single scope string against our mapping table.
-   Handles compound scopes like "source.c keyword.operator" by trying
-   each space-separated part. Returns a match score (higher is better),
-   and sets *slot.
-   If is_compound is non-NULL, sets it to TRUE if the original scope
-   was a compound (language-qualified) scope. */
-static int
-match_scope(const char *scope_str, ViteColorSlot *slot, gboolean *is_compound)
+/* Apply a single JSON rule to all map slots that subclass it.
+ * E.g. json rule "keyword" applies to map slot "keyword.control" because
+ * "keyword.control" starts with "keyword". */
+static void
+apply_rule_to_slots(const char *json_rule, PangoColor color, ViteTheme *theme, int *slot_scores)
 {
-    if (is_compound) *is_compound = FALSE;
+    char **parts = NULL;
+    const char *actual_rule = json_rule;
+    int penalty = 1;
 
     /* If scope contains spaces (compound scope like "source.c keyword.operator"),
-     * try the last part, picking the highest scoring one but penalize it because 
-     * generic scopes should override language-specific (compound) rules normally,
-     * unless the generic rule is entirely missing. */
-    if (strchr(scope_str, ' ')) {
-        char **parts = g_strsplit(scope_str, " ", -1);
-        int best_score = 0;
-        ViteColorSlot best_slot = 0;
-        
+     * try the last part. We penalize compound matches so generic definitions will win. */
+    if (strchr(json_rule, ' ')) {
+        parts = g_strsplit(json_rule, " ", -1);
         int last_part = -1;
         for (int p = 0; parts[p]; p++) {
             char *trimmed = g_strstrip(parts[p]);
@@ -240,37 +234,30 @@ match_scope(const char *scope_str, ViteColorSlot *slot, gboolean *is_compound)
                 last_part = p;
             }
         }
-
         if (last_part >= 0) {
-            char *trimmed = g_strstrip(parts[last_part]);
-            for (int i = 0; scope_map[i].scope != NULL; i++) {
-                if (scope_starts_with(trimmed, scope_map[i].scope)) {
-                    int score = (strlen(scope_map[i].scope) * 1000) / strlen(trimmed);
-                    /* Penalize compound contexts so generic definitions will win */
-                    score /= 4; 
-                    if (score > best_score) {
-                        best_score = score;
-                        best_slot = scope_map[i].slot;
-                    }
-                }
+            actual_rule = parts[last_part];
+        }
+        penalty = 4;
+    }
+
+    char *trimmed_rule = g_strstrip(g_strdup(actual_rule));
+
+    for (int i = 0; scope_map[i].scope != NULL; i++) {
+        /* Does our mapped scope start with the JSON rule? */
+        if (scope_starts_with(scope_map[i].scope, trimmed_rule)) {
+            int score = (strlen(trimmed_rule) * 1000) / strlen(scope_map[i].scope);
+            score /= penalty;
+
+            ViteColorSlot slot = scope_map[i].slot;
+            if (score > 0 && score >= slot_scores[slot]) {
+                theme->syntax[slot] = color;
+                slot_scores[slot] = score;
             }
         }
-        g_strfreev(parts);
-        if (best_score > 0) {
-            *slot = best_slot;
-            if (is_compound) *is_compound = TRUE;
-        }
-        return best_score;
     }
 
-    /* Simple single-scope matching */
-    for (int i = 0; scope_map[i].scope != NULL; i++) {
-        if (scope_starts_with(scope_str, scope_map[i].scope)) {
-            *slot = scope_map[i].slot;
-            return (strlen(scope_map[i].scope) * 1000) / strlen(scope_str);
-        }
-    }
-    return 0;
+    g_free(trimmed_rule);
+    if (parts) g_strfreev(parts);
 }
 
 /* --- JSON Parsing --- */
@@ -437,16 +424,7 @@ parse_token_colors(JsonArray *token_colors, ViteTheme *theme, int *slot_scores_o
 
         for (guint si = 0; si < scopes->len; si++) {
             const char *scope_str = g_ptr_array_index(scopes, si);
-            ViteColorSlot slot;
-            gboolean is_compound = FALSE;
-            int score = match_scope(scope_str, &slot, &is_compound);
-            if (score > 0) {
-                /* Higher score wins. Equal score from later in JSON wins. */
-                if (score >= slot_scores[slot]) {
-                    theme->syntax[slot] = color;
-                    slot_scores[slot] = score;
-                }
-            }
+            apply_rule_to_slots(scope_str, color, theme, slot_scores);
         }
         g_ptr_array_free(scopes, TRUE);
     }
