@@ -71,6 +71,14 @@ set_default_dark_theme(ViteTheme *theme)
     pango_color_parse(&theme->syntax[COLOR_PREPROC], "#c678dd");
     pango_color_parse(&theme->syntax[COLOR_LOGICAL], "#56b6c2");
 
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_1], "#FFD700");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_2], "#DA70D6");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_3], "#87CEFA");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_4], "#FFD700");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_5], "#DA70D6");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#87CEFA");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], "#FF1111");
+
     theme->is_dark = TRUE;
 }
 
@@ -123,6 +131,14 @@ set_default_light_theme(ViteTheme *theme)
     pango_color_parse(&theme->syntax[COLOR_PROPERTY], "#0184bc");
     pango_color_parse(&theme->syntax[COLOR_PREPROC], "#a626a4");
     pango_color_parse(&theme->syntax[COLOR_LOGICAL], "#0184bc");
+
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_1], "#0431FA");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_2], "#319331");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_3], "#7B3814");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_4], "#0431FA");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_5], "#319331");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#7B3814");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], "#FF1111");
 
     theme->is_dark = FALSE;
 }
@@ -577,6 +593,8 @@ load_theme_from_json(const char *path)
         fg_pango.green = (guint16)(theme->editor_fg.green * 65535);
         fg_pango.blue  = (guint16)(theme->editor_fg.blue  * 65535);
         for (int i = 0; i < COLOR_SLOT_COUNT; i++) {
+            /* Skip bracket slots as they are already initialized by parse_editor_colors */
+            if (i >= COLOR_BRACKET_1 && i <= COLOR_BRACKET_UNMATCHED) continue;
             theme->syntax[i] = fg_pango;
         }
     }
