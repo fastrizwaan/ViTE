@@ -101,10 +101,9 @@ editor_minimap_draw(EditorWidget *self, GtkSnapshot *snapshot, double x, double 
     if (!self->doc || !self->minimap_enabled) return;
 
     /* Draw Background */
-    GdkRGBA bg_color = {1.0, 1.0, 1.0, 1.0}; /* Match editor-renderer default */
+    GdkRGBA bg_color = self->color_background;
     gboolean is_dark = FALSE;
     if (self->color_text.red > 0.5) { /* Dark theme detection */
-        bg_color = (GdkRGBA){0.11, 0.11, 0.11, 1.0}; /* Match editor-renderer dark bg */
         is_dark = TRUE;
     }
     gtk_snapshot_append_color(snapshot, &bg_color, &GRAPHENE_RECT_INIT(x, y, w, h));
