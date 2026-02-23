@@ -63,7 +63,9 @@ void add_color_attr(PangoAttrList *attrs, int start, int end, ViteColorSlot slot
 
 /* --- Helper Functions --- */
 void set_line_end_state(SyntaxContext *ctx, size_t line_index, SyntaxState state);
+void set_line_end_state_with_depth(SyntaxContext *ctx, size_t line_index, SyntaxState state, int bracket_depth);
 SyntaxState get_line_start_state(SyntaxContext *ctx, size_t line_index);
+int get_line_start_bracket_depth(SyntaxContext *ctx, size_t line_index);
 
 gboolean is_all_caps(const char *s, size_t len);
 gboolean is_word_in_list(const char *word, size_t len, const char **list);

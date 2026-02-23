@@ -347,13 +347,29 @@ get_line_start_state(SyntaxContext *ctx, size_t line_index)
 {
     if (line_index == 0) return STATE_ROOT;
     if (line_index - 1 < ctx->state_chain->len) {
-        return (SyntaxState)ctx->state_chain->data[line_index - 1];
+        return (SyntaxState)(ctx->state_chain->data[line_index - 1] & 0x1F);
     }
     return STATE_ROOT; /* Default if unknown, though usually we process in order */
 }
 
+int
+get_line_start_bracket_depth(SyntaxContext *ctx, size_t line_index)
+{
+    if (line_index == 0) return 0;
+    if (line_index - 1 < ctx->state_chain->len) {
+        return (ctx->state_chain->data[line_index - 1] >> 5) & 0x07;
+    }
+    return 0;
+}
+
 void
 set_line_end_state(SyntaxContext *ctx, size_t line_index, SyntaxState state)
+{
+    set_line_end_state_with_depth(ctx, line_index, state, 0);
+}
+
+void
+set_line_end_state_with_depth(SyntaxContext *ctx, size_t line_index, SyntaxState state, int bracket_depth)
 {
     if (line_index >= ctx->state_chain->len) {
         /* fill gaps with ROOT if any (shouldn't happen with sequential access) */
@@ -363,7 +379,12 @@ set_line_end_state(SyntaxContext *ctx, size_t line_index, SyntaxState state)
             ctx->state_chain->data[i] = STATE_ROOT;
         }
     }
-    ctx->state_chain->data[line_index] = (guint8)state;
+    
+    /* Clamp depth to 0-7 to fit in 3 bits */
+    if (bracket_depth > 7) bracket_depth = 7;
+    if (bracket_depth < 0) bracket_depth = 0;
+    
+    ctx->state_chain->data[line_index] = (guint8)((state & 0x1F) | (bracket_depth << 5));
 }
 
 gboolean

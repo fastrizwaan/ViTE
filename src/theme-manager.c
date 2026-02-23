@@ -287,6 +287,15 @@ parse_editor_colors(JsonObject *colors, ViteTheme *theme)
 {
     const char *val;
 
+    /* Bracket Pair Defaults (VSCode standards) */
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_1], "#FFD700"); /* Yellow */
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_2], "#DA70D6"); /* Fuchsia */
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_3], "#87CEFA"); /* Blue */
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_4], "#FFD700");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_5], "#DA70D6");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#87CEFA");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], "#FF1111");
+
     /* Editor */
     if ((val = json_object_get_string_safe(colors, "editor.background")))
         parse_hex_color_to_rgba(val, &theme->editor_bg);
@@ -343,6 +352,22 @@ parse_editor_colors(JsonObject *colors, ViteTheme *theme)
 
     /* Gutter BG same as editor bg by default */
     theme->gutter_bg = theme->editor_bg;
+
+    /* Bracket Pair Customizations */
+    if ((val = json_object_get_string_safe(colors, "editorBracketHighlight.foreground1")))
+        pango_color_parse(&theme->syntax[COLOR_BRACKET_1], val);
+    if ((val = json_object_get_string_safe(colors, "editorBracketHighlight.foreground2")))
+        pango_color_parse(&theme->syntax[COLOR_BRACKET_2], val);
+    if ((val = json_object_get_string_safe(colors, "editorBracketHighlight.foreground3")))
+        pango_color_parse(&theme->syntax[COLOR_BRACKET_3], val);
+    if ((val = json_object_get_string_safe(colors, "editorBracketHighlight.foreground4")))
+        pango_color_parse(&theme->syntax[COLOR_BRACKET_4], val);
+    if ((val = json_object_get_string_safe(colors, "editorBracketHighlight.foreground5")))
+        pango_color_parse(&theme->syntax[COLOR_BRACKET_5], val);
+    if ((val = json_object_get_string_safe(colors, "editorBracketHighlight.foreground6")))
+        pango_color_parse(&theme->syntax[COLOR_BRACKET_6], val);
+    if ((val = json_object_get_string_safe(colors, "editorBracketHighlight.unexpectedBracket.foreground")))
+        pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], val);
 }
 
 static void

@@ -46,6 +46,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
     if (!attrs) {
         size_t cur = 0;
         int paren_depth = 0;
+        int bracket_depth = get_line_start_bracket_depth(ctx, line_index);
         
         while (cur < len) {
             /* 1. Handling Multi-line Comment States */
@@ -128,13 +129,14 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             cur++;
         }
         
-        set_line_end_state(ctx, line_index, state);
+        set_line_end_state_with_depth(ctx, line_index, state, bracket_depth);
         return;
     }
 
 
     size_t cur = 0;
-    int paren_depth = 0;
+    int paren_depth = 0; /* specifically for params */
+    int bracket_depth = get_line_start_bracket_depth(ctx, line_index); /* for bracket pair colorization */
     while (cur < len) {
         if (state == STATE_C_ENUM_ML_COMMENT) {
             size_t start_pos = cur;
@@ -500,14 +502,19 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             }
             /* Rainbow Brackets in Params */
             if (strchr("([{", text[cur])) {
-                 add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
-                 paren_depth++;
+                 int color_idx = COLOR_BRACKET_1 + (bracket_depth % 6);
+                 add_color_attr(attrs, cur, cur + 1, color_idx);
+                 if (text[cur] == '(') paren_depth++;
+                 bracket_depth++;
                  cur++;
                  continue;
             }
             if (strchr(")]}", text[cur])) {
-                 if (paren_depth > 0) paren_depth--;
-                 add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                 if (text[cur] == ')' && paren_depth > 0) paren_depth--;
+                 if (bracket_depth > 0) bracket_depth--;
+                 
+                 int color_idx = COLOR_BRACKET_1 + (bracket_depth % 6);
+                 add_color_attr(attrs, cur, cur + 1, color_idx);
                  
                  /* If closing param paren, switch state */
                  if (text[cur] == ')' && paren_depth == 0) {
@@ -602,8 +609,24 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 continue;
             }
             
-            /* Punctuation (Braces, parens, semicolons, etc) */
-            if (strchr("{}()[].,;", text[cur])) {
+            /* Bracket Pair Colorization */
+            if (strchr("([{", text[cur])) {
+                int color_idx = COLOR_BRACKET_1 + (bracket_depth % 6);
+                add_color_attr(attrs, cur, cur + 1, color_idx);
+                bracket_depth++;
+                cur++;
+                continue;
+            }
+            if (strchr(")]}", text[cur])) {
+                if (bracket_depth > 0) bracket_depth--;
+                int color_idx = COLOR_BRACKET_1 + (bracket_depth % 6);
+                add_color_attr(attrs, cur, cur + 1, color_idx);
+                cur++;
+                continue;
+            }
+
+            /* Regular Punctuation (semicolons, commas, dots) */
+            if (strchr(".,;", text[cur])) {
                 add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
@@ -961,9 +984,9 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
         }
         
         /* IMPORTANT: Save the computed state! */
-        set_line_end_state(ctx, line_index, state);
+        set_line_end_state_with_depth(ctx, line_index, state, bracket_depth);
         return;
     }
     
-    set_line_end_state(ctx, line_index, state);
+    set_line_end_state_with_depth(ctx, line_index, state, bracket_depth);
 }
