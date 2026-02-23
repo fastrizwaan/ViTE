@@ -746,7 +746,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             if (text[cur] == '#') {
                 size_t start_pos = cur;
                 cur++;
-                add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
+                add_color_attr(attrs, start_pos, cur, COLOR_PREPROC);
                 
                 /* Allow space between # and directive */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
