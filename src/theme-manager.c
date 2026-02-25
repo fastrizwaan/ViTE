@@ -813,13 +813,19 @@ generate_css(const ViteTheme *theme)
         "@define-color headerbar_fg_color %s;\n"
         "@define-color window_bg_color %s;\n"
         "@define-color window_fg_color %s;\n"
-        "@define-color view_bg_color %s;\n",
-        c_chrome, c_fg, c_bg, c_fg, c_bg);
+        "@define-color view_bg_color %s;\n"
+        "@define-color dialog_bg_color %s;\n"
+        "@define-color dialog_fg_color %s;\n"
+        "@define-color popover_bg_color %s;\n"
+        "@define-color popover_fg_color %s;\n",
+        c_chrome, c_fg, c_bg, c_fg, c_bg,
+        c_surface, c_fg, c_surface, c_fg);
 
     /* --- Window / Root --- */
     g_string_append_printf(css,
         "window, window.background { background-color: %s; color: %s; }\n",
         c_bg, c_fg);
+
 
     /* --- Tab bar container: use chrome bg for consistency --- */
     g_string_append_printf(css,
