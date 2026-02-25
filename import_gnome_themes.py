@@ -168,7 +168,7 @@ def convert_theme(xml_path, out_dir):
         print(f"[{theme_name}] Converted {os.path.basename(xml_path)} -> {out_name}")
 
 def main():
-    in_dir = '/var/home/rizvan/vite_backup_42_theme_multi_needs_improvement/gnome-text-editor-49.0/src/styles'
+    in_dir = '/var/home/rizvan/ViTE/gnome-text-editor-49.0/src/styles'
     out_dir = '/var/home/rizvan/ViTE/vscode-themes'
     os.makedirs(out_dir, exist_ok=True)
     
