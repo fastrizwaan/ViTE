@@ -23,7 +23,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
     /* Check for Code Block Start/End at line start */
     /* Only if it starts with ``` */
     if (len >= 3 && strncmp(text, "```", 3) == 0) {
-        add_color_attr(attrs, 0, len, COLOR_STRING); /* Color fence green */
+        add_color_attr(ctx, attrs, 0, len, COLOR_STRING); /* Color fence green */
         if (in_code_block) {
             /* End of block */
             state = STATE_ROOT;
@@ -36,7 +36,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
     }
     
     if (in_code_block) {
-        add_color_attr(attrs, 0, len, COLOR_STRING); /* All content index code block is string color */
+        add_color_attr(ctx, attrs, 0, len, COLOR_STRING); /* All content index code block is string color */
         set_line_end_state(ctx, line_index, STATE_MD_CODE_BLOCK);
         return;
     }
@@ -49,7 +49,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
         while (i < len && text[i] == '#') i++;
         if (i <= 6 && (i == len || g_ascii_isspace(text[i]))) {
             /* It is a header */
-            add_color_attr(attrs, 0, len, COLOR_KEYWORD); /* Header color */
+            add_color_attr(ctx, attrs, 0, len, COLOR_KEYWORD); /* Header color */
             set_line_end_state(ctx, line_index, STATE_ROOT);
             return;
         }
@@ -58,7 +58,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
     /* Blockquotes: > */
     if (text[0] == '>') {
         /* Treat as comment color */
-        add_color_attr(attrs, 0, len, COLOR_COMMENT);
+        add_color_attr(ctx, attrs, 0, len, COLOR_COMMENT);
         set_line_end_state(ctx, line_index, STATE_ROOT);
         return;
     }
@@ -74,7 +74,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
            }
        }
        if (is_hr) {
-           add_color_attr(attrs, 0, len, COLOR_COMMENT);
+           add_color_attr(ctx, attrs, 0, len, COLOR_COMMENT);
            set_line_end_state(ctx, line_index, STATE_ROOT);
            return;
        }
@@ -93,7 +93,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
             while (cur < len && text[cur] != '`') cur++;
             if (cur < len) {
                 cur++; /* consume closing ` */
-                add_color_attr(attrs, start, cur, COLOR_STRING);
+                add_color_attr(ctx, attrs, start, cur, COLOR_STRING);
             }
             continue;
         }
@@ -105,7 +105,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
             if (cur < len) {
                 /* Found closing bracket */
                 cur++;
-                add_color_attr(attrs, link_text_start, cur, COLOR_FUNCTION); /* Link Text Blue */
+                add_color_attr(ctx, attrs, link_text_start, cur, COLOR_FUNCTION); /* Link Text Blue */
                 
                 if (cur < len && text[cur] == '(') {
                     size_t url_start = cur;
@@ -113,7 +113,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
                     while (cur < len && text[cur] != ')') cur++;
                     if (cur < len) {
                         cur++;
-                        add_color_attr(attrs, url_start, cur, COLOR_COMMENT); /* URL Grey */
+                        add_color_attr(ctx, attrs, url_start, cur, COLOR_COMMENT); /* URL Grey */
                     }
                 }
             }
@@ -126,7 +126,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
         if ((text[cur] == '-' || text[cur] == '*' || text[cur] == '+') && 
             (cur == 0 || g_ascii_isspace(text[cur-1])) &&
             (cur + 1 < len && g_ascii_isspace(text[cur+1]))) {
-            add_color_attr(attrs, cur, cur+1, COLOR_OPERATOR);
+            add_color_attr(ctx, attrs, cur, cur+1, COLOR_OPERATOR);
             cur++;
             continue;
         }
@@ -136,7 +136,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
              size_t num_start = cur;
              while (cur < len && g_ascii_isdigit(text[cur])) cur++;
              if (cur < len && text[cur] == '.') {
-                 add_color_attr(attrs, num_start, cur+1, COLOR_OPERATOR);
+                 add_color_attr(ctx, attrs, num_start, cur+1, COLOR_OPERATOR);
                  cur++;
              }
              continue;
@@ -144,7 +144,7 @@ syntax_highlight_markdown(SyntaxContext *ctx,
         
         /* Bold/Italic markers (Basic) */
         if (strncmp(text + cur, "**", 2) == 0 || strncmp(text + cur, "__", 2) == 0) {
-            add_color_attr(attrs, cur, cur+2, COLOR_TYPE); /* Gold/Yellow for bold markers */
+            add_color_attr(ctx, attrs, cur, cur+2, COLOR_TYPE); /* Gold/Yellow for bold markers */
             cur += 2;
             continue;
         }

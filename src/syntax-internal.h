@@ -58,8 +58,8 @@ typedef struct {
 /* --- Color System (Theme-Driven) --- */
 
 /* Add a syntax-colored attribute using a ViteColorSlot.
-   Looks up the actual color from the current theme. */
-void add_color_attr(PangoAttrList *attrs, int start, int end, ViteColorSlot slot);
+   Looks up the actual color from the current theme using the context's language. */
+void add_color_attr(SyntaxContext *ctx, PangoAttrList *attrs, int start, int end, ViteColorSlot slot);
 
 /* --- Helper Functions --- */
 void set_line_end_state(SyntaxContext *ctx, size_t line_index, SyntaxState state);

@@ -108,24 +108,49 @@ def convert_theme(xml_path, out_dir):
             if bg: vscode_colors['editorBracketMatch.background'] = bg
             if fg: vscode_colors['editorBracketMatch.border'] = fg
             
+        lang_suffix = ""
+        base_name = name
+        if ':' in name:
+            parts = name.split(':', 1)
+            # Map some gnome prefixes to standard vscode suffixes
+            # e.g. "c:comment" -> "comment.c"
+            lang_prefix = parts[0]
+            if lang_prefix != 'def':
+                lang_suffix = "." + lang_prefix
+            base_name = parts[1]
+
         # 2. Syntax Token Mapping (using standard TS scopes mostly)
         scope_targets = []
         
         # General definition mappings
-        if 'comment' in name: scope_targets = ['comment']
-        elif 'string' in name: scope_targets = ['string']
-        elif 'keyword' in name: scope_targets = ['keyword']
-        elif 'statement' in name: scope_targets = ['keyword.control']
-        elif 'type' in name or 'class' in name: scope_targets = ['entity.name.type', 'support.type']
-        elif 'constant' in name: scope_targets = ['constant']
-        elif 'floating-point' in name or 'decimal' in name: scope_targets = ['constant.numeric']
-        elif 'function' in name: scope_targets = ['entity.name.function', 'support.function']
-        elif 'identifier' in name or 'variable' in name: scope_targets = ['variable']
-        elif 'preprocessor' in name or 'macro' in name: scope_targets = ['keyword.control.directive']
-        elif 'special-char' in name or 'operator' in name: scope_targets = ['keyword.operator', 'punctuation']
+        if 'comment' in base_name: scope_targets = ['comment']
+        elif 'string' in base_name or 'template-literal' in base_name or 'attribute-value' in base_name or 'included-file' in base_name: scope_targets = ['string']
+        elif 'built-in-function' in base_name or 'built-in-method' in base_name: scope_targets = ['support.function']
+        elif 'built-in-constructor' in base_name: scope_targets = ['support.type']
+        elif 'function' in base_name or 'method' in base_name or 'command' in base_name: scope_targets = ['entity.name.function']
+        elif 'keyword' in base_name: scope_targets = ['keyword']
+        elif 'statement' in base_name: scope_targets = ['keyword.control']
+        elif 'type' in base_name or 'class' in base_name: scope_targets = ['entity.name.type']
+        elif 'boolean' in base_name: scope_targets = ['constant.language.boolean']
+        elif 'null' in base_name: scope_targets = ['constant.language.null']
+        elif 'constant' in base_name: scope_targets = ['constant']
+        elif 'floating-point' in base_name or 'decimal' in base_name or 'number' in base_name: scope_targets = ['constant.numeric']
+        elif 'parameter' in base_name: scope_targets = ['variable.parameter']
+        elif 'property' in base_name: scope_targets = ['variable.other.property']
+        elif 'identifier' in base_name or 'variable' in base_name: scope_targets = ['variable']
+        elif 'preprocessor' in base_name or 'macro' in base_name or 'include' in base_name: scope_targets = ['keyword.control.directive']
+        elif 'special-char' in base_name: scope_targets = ['constant.character.escape']
+        elif 'operator' in base_name: scope_targets = ['keyword.operator']
+        elif 'punctuation' in base_name: scope_targets = ['punctuation']
+        elif 'storage-class' in base_name: scope_targets = ['storage.modifier']
+        elif 'enum-name' in base_name: scope_targets = ['entity.name.type.enum']
+        elif 'attribute-name' in base_name: scope_targets = ['entity.other.attribute-name']
+        elif 'tag' in base_name: scope_targets = ['entity.name.tag']
         
         if scope_targets:
-            add_token(scope_targets, fg, bg, bold, italic, underline)
+            # Append language suffix to make it textmate compatible
+            final_scopes = [s + lang_suffix for s in scope_targets]
+            add_token(final_scopes, fg, bg, bold, italic, underline)
             
     # Generic backup scopes if any are completely missing in the GNOME theme (sometimes they rely heavily on defaults)
     

@@ -92,13 +92,13 @@ syntax_highlight_bash(SyntaxContext *ctx,
             char q = (s == STATE_IN_DOUBLE_QUOTE) ? '"' : '\'';
             while (cur < len) {
                 if (text[cur] == '\\' && s == STATE_IN_DOUBLE_QUOTE) {
-                    add_color_attr(attrs, cur, cur + 1, COLOR_LOGICAL);
+                    add_color_attr(ctx, attrs, cur, cur + 1, COLOR_LOGICAL);
                     cur++;
                     if (cur < len) cur++;
                     continue;
                 }
                 if (text[cur] == q) {
-                    add_color_attr(attrs, cur, cur + 1, COLOR_STRING);
+                    add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING);
                     cur++;
                     BASH_POP();
                     is_cmd_start = FALSE;
@@ -106,7 +106,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
                 }
                 if (s == STATE_IN_DOUBLE_QUOTE && text[cur] == '$' && cur + 1 < len) {
                     if (text[cur+1] == '(') {
-                        add_color_attr(attrs, cur, cur + 2, COLOR_STRING); /* Green delimeter */
+                        add_color_attr(ctx, attrs, cur, cur + 2, COLOR_STRING); /* Green delimeter */
                         cur += 2;
                         BASH_PUSH(STATE_BASH_CMD_SUBST);
                         is_cmd_start = TRUE;
@@ -115,33 +115,33 @@ syntax_highlight_bash(SyntaxContext *ctx,
                     /* Simple variable interpolation */
                     size_t v_start = cur++;
                     if (text[cur] == '{') {
-                        add_color_attr(attrs, v_start, v_start + 2, COLOR_STRING); /* ${ in Green */
+                        add_color_attr(ctx, attrs, v_start, v_start + 2, COLOR_STRING); /* ${ in Green */
                         cur++;
                         size_t var_content_start = cur;
                         while (cur < len && text[cur] != '}') cur++;
-                        if (cur > var_content_start) add_color_attr(attrs, var_content_start, cur, COLOR_VARIABLE); /* XXX in Red */
+                        if (cur > var_content_start) add_color_attr(ctx, attrs, var_content_start, cur, COLOR_VARIABLE); /* XXX in Red */
                         if (cur < len) {
-                            add_color_attr(attrs, cur, cur + 1, COLOR_STRING); /* } in Green */
+                            add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING); /* } in Green */
                             cur++;
                         }
                     } else if (g_ascii_isdigit(text[cur]) || strchr("?#@$!*", text[cur])) {
                         cur++;
-                        add_color_attr(attrs, v_start, cur, COLOR_TYPE);
+                        add_color_attr(ctx, attrs, v_start, cur, COLOR_TYPE);
                     } else if (g_ascii_isalpha(text[cur]) || text[cur] == '_') {
                         while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
-                        add_color_attr(attrs, v_start, cur, COLOR_VARIABLE);
+                        add_color_attr(ctx, attrs, v_start, cur, COLOR_VARIABLE);
                     }
                     continue;
                 }
                 if (s == STATE_IN_DOUBLE_QUOTE && text[cur] == '`') {
-                    add_color_attr(attrs, cur, cur + 1, COLOR_STRING); /* Green delimeter */
+                    add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING); /* Green delimeter */
                     cur++;
                     BASH_PUSH(STATE_SH_BACKTICK);
                     is_cmd_start = TRUE;
                     goto next_loop;
                 }
                 
-                add_color_attr(attrs, cur, cur + 1, COLOR_STRING);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING);
                 cur++;
             }
             continue;
@@ -153,13 +153,13 @@ syntax_highlight_bash(SyntaxContext *ctx,
         }
 
         if (text[cur] == '#') {
-            add_color_attr(attrs, cur, len, COLOR_COMMENT);
+            add_color_attr(ctx, attrs, cur, len, COLOR_COMMENT);
             in_export_context = FALSE;
             break;
         }
 
         if (text[cur] == '\\') {
-            add_color_attr(attrs, cur, cur + 1, COLOR_LOGICAL);
+            add_color_attr(ctx, attrs, cur, cur + 1, COLOR_LOGICAL);
             cur++;
             gboolean is_eol_cont = TRUE;
             for (size_t i = cur; i < len; i++) if (!g_ascii_isspace(text[i])) { is_eol_cont = FALSE; break; }
@@ -169,14 +169,14 @@ syntax_highlight_bash(SyntaxContext *ctx,
 
         /* End of command substitution */
         if (text[cur] == ')' && s == STATE_BASH_CMD_SUBST) {
-            add_color_attr(attrs, cur, cur + 1, COLOR_STRING); /* Green delimeter */
+            add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING); /* Green delimeter */
             cur++;
             BASH_POP();
             is_cmd_start = FALSE;
             goto next_loop;
         }
         if (text[cur] == '`' && s == STATE_SH_BACKTICK) {
-            add_color_attr(attrs, cur, cur + 1, COLOR_STRING); /* Green delimeter */
+            add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING); /* Green delimeter */
             cur++;
             BASH_POP();
             is_cmd_start = FALSE;
@@ -187,11 +187,11 @@ syntax_highlight_bash(SyntaxContext *ctx,
         if (strchr(";&|()<>[]{}", text[cur])) {
             in_export_context = FALSE;
             if (cur + 1 < len && ((text[cur] == '&' && text[cur+1] == '&') || (text[cur] == '|' && text[cur+1] == '|'))) {
-                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE_C);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_VARIABLE_C);
                 cur += 2;
                 is_cmd_start = TRUE;
             } else if (text[cur] == ';' && cur + 1 < len && text[cur+1] == ';') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_PUNCTUATION);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_PUNCTUATION);
                 cur += 2;
                 if (BASH_CUR == STATE_BASH_CASE_BODY) {
                      BASH_POP(); /* Pop BODY, return to CASE (pattern) */
@@ -215,7 +215,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
                    else bracket_color = COLOR_LOGICAL;                         /* Cyan */
                 }
                 
-                add_color_attr(attrs, cur, cur + 1, bracket_color);
+                add_color_attr(ctx, attrs, cur, cur + 1, bracket_color);
                 
                 /* Case statement `)` handling */
                 if (text[cur] == ')' && BASH_CUR == STATE_BASH_CASE) {
@@ -227,7 +227,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
                 cur++;
                 continue;
             } else {
-                add_color_attr(attrs, cur, cur + 1, COLOR_VARIABLE_C);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_VARIABLE_C);
                 cur++;
                 is_cmd_start = TRUE;
             }
@@ -236,7 +236,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
 
         /* String start */
         if (text[cur] == '"' || text[cur] == '\'') {
-            add_color_attr(attrs, cur, cur + 1, COLOR_STRING);
+            add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING);
             BASH_PUSH((text[cur] == '"') ? STATE_IN_DOUBLE_QUOTE : STATE_IN_SINGLE_QUOTE);
             cur++;
             continue;
@@ -248,7 +248,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
 
             /* Subshell start check first inside word-start block */
             if (text[cur] == '$' && cur + 1 < len && text[cur+1] == '(') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_STRING); /* Green delimeter */
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_STRING); /* Green delimeter */
                 cur += 2;
                 BASH_PUSH(STATE_BASH_CMD_SUBST);
                 is_cmd_start = TRUE;
@@ -258,21 +258,21 @@ syntax_highlight_bash(SyntaxContext *ctx,
             if (text[cur] == '$') {
                 cur++;
                 if (cur < len && text[cur] == '{') {
-                    add_color_attr(attrs, start, start + 2, COLOR_PUNCTUATION); /* ${ delimeter */
+                    add_color_attr(ctx, attrs, start, start + 2, COLOR_PUNCTUATION); /* ${ delimeter */
                     cur++;
                     size_t var_content_start = cur;
                     while (cur < len && text[cur] != '}') cur++;
-                    if (cur > var_content_start) add_color_attr(attrs, var_content_start, cur, COLOR_VARIABLE); /* XXX in Red */
+                    if (cur > var_content_start) add_color_attr(ctx, attrs, var_content_start, cur, COLOR_VARIABLE); /* XXX in Red */
                     if (cur < len) {
-                        add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION); /* } delimeter */
+                        add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION); /* } delimeter */
                         cur++;
                     }
                 } else if (cur < len && (g_ascii_isdigit(text[cur]) || strchr("?#@$!*", text[cur]))) {
                     cur++;
-                    add_color_attr(attrs, start, cur, COLOR_TYPE);
+                    add_color_attr(ctx, attrs, start, cur, COLOR_TYPE);
                 } else {
                     while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
-                    add_color_attr(attrs, start, cur, COLOR_VARIABLE);
+                    add_color_attr(ctx, attrs, start, cur, COLOR_VARIABLE);
                 }
                 is_cmd_start = FALSE;
                 continue;
@@ -285,13 +285,13 @@ syntax_highlight_bash(SyntaxContext *ctx,
             size_t w_len = cur - start;
 
             if (text[start] == '-') {
-                add_color_attr(attrs, start, cur, COLOR_NUMBER); /* Flags Orange */
+                add_color_attr(ctx, attrs, start, cur, COLOR_NUMBER); /* Flags Orange */
                 is_cmd_start = FALSE;
                 continue;
             }
 
             if (in_case_patterns && text[start] != ';') {
-                add_color_attr(attrs, start, cur, COLOR_VARIABLE);
+                add_color_attr(ctx, attrs, start, cur, COLOR_VARIABLE);
                 continue;
             }
             
@@ -299,8 +299,8 @@ syntax_highlight_bash(SyntaxContext *ctx,
             if (cur < len && text[cur] == '=') {
                 size_t var_end = cur;
                 if (var_end > start && text[var_end-1] == '+') var_end--;
-                add_color_attr(attrs, start, var_end, COLOR_VARIABLE);
-                add_color_attr(attrs, var_end, cur + 1, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, start, var_end, COLOR_VARIABLE);
+                add_color_attr(ctx, attrs, var_end, cur + 1, COLOR_LOGICAL);
                 cur++;
                 
                 if (in_export_context) {
@@ -308,7 +308,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
                     if (cur < len && text[cur] != '"' && text[cur] != '\'') {
                         size_t val_start = cur;
                         while (cur < len && !g_ascii_isspace(text[cur]) && !strchr(";&|()<>", text[cur])) cur++;
-                        if (cur > val_start) add_color_attr(attrs, val_start, cur, COLOR_VARIABLE);
+                        if (cur > val_start) add_color_attr(ctx, attrs, val_start, cur, COLOR_VARIABLE);
                     }
                 }
                 
@@ -317,7 +317,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
             }
 
             if (is_word_in_list(text + start, w_len, (const char*[]){"if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac", "in", "function", NULL})) {
-                add_color_attr(attrs, start, cur, COLOR_KEYWORD);
+                add_color_attr(ctx, attrs, start, cur, COLOR_KEYWORD);
                 if (strncmp(text + start, "in", 2) == 0) in_case_patterns = TRUE;
                 if (strncmp(text + start, "case", 4) == 0) {
                      BASH_PUSH(STATE_BASH_CASE);
@@ -328,35 +328,35 @@ syntax_highlight_bash(SyntaxContext *ctx,
                 is_cmd_start = strchr("if then else elif do in", text[start]) != NULL;
                 in_export_context = FALSE;
             } else if (match_word(text, start, len, bash_keywords)) {
-                add_color_attr(attrs, start, cur, COLOR_KEYWORD);
+                add_color_attr(ctx, attrs, start, cur, COLOR_KEYWORD);
                 if (is_word_in_list(text + start, w_len, (const char*[]){"export", "local", "declare", "readonly", "typeset", NULL})) {
                     in_export_context = TRUE;
                 }
                 is_cmd_start = FALSE;
             } else if (match_word(text, start, len, bash_booleans)) {
-                add_color_attr(attrs, start, cur, COLOR_NUMBER); /* Booleans stay Orange */
+                add_color_attr(ctx, attrs, start, cur, COLOR_NUMBER); /* Booleans stay Orange */
                 is_cmd_start = FALSE;
             } else if (in_export_context) {
-                add_color_attr(attrs, start, cur, COLOR_VARIABLE); /* Variables in export are Red */
+                add_color_attr(ctx, attrs, start, cur, COLOR_VARIABLE); /* Variables in export are Red */
                 is_cmd_start = FALSE;
             } else if (is_cmd_start) {
                 if (match_word(text, start, len, bash_builtins)) {
-                    add_color_attr(attrs, start, cur, COLOR_LOGICAL); /* 1st word Builtin -> Cyan */
+                    add_color_attr(ctx, attrs, start, cur, COLOR_LOGICAL); /* 1st word Builtin -> Cyan */
                 } else {
-                    add_color_attr(attrs, start, cur, COLOR_FUNCTION); /* 1st word command -> Blue */
+                    add_color_attr(ctx, attrs, start, cur, COLOR_FUNCTION); /* 1st word command -> Blue */
                 }
                 is_cmd_start = FALSE;
             } else if (g_ascii_isdigit(text[start])) {
-                add_color_attr(attrs, start, cur, COLOR_NUMBER);
+                add_color_attr(ctx, attrs, start, cur, COLOR_NUMBER);
                 is_cmd_start = FALSE;
             } else {
-                add_color_attr(attrs, start, cur, COLOR_STRING); /* Arguments -> Green */
+                add_color_attr(ctx, attrs, start, cur, COLOR_STRING); /* Arguments -> Green */
             }
             continue;
         }
 
         if (text[cur] == '`') {
-            add_color_attr(attrs, cur, cur + 1, COLOR_STRING);
+            add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING);
             cur++;
             BASH_PUSH(STATE_SH_BACKTICK);
             is_cmd_start = TRUE;
@@ -364,7 +364,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
         }
 
         /* Fallback */
-        add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+        add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
         cur++;
 
     next_loop: ;

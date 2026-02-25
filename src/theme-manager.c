@@ -100,6 +100,7 @@ apply_theme_inheritance_and_fallback(ViteTheme *theme, int *slot_scores)
     INHERIT(COLOR_VARIABLE_C, COLOR_VARIABLE)   /* C variable ← variable */
     INHERIT(COLOR_PROPERTY,   COLOR_VARIABLE)   /* property ← variable */
     INHERIT(COLOR_KEYWORD_CONTROL, COLOR_KEYWORD)/* control keyword ← keyword */
+    INHERIT(COLOR_KEYWORD,    COLOR_KEYWORD_CONTROL)/* keyword ← control keyword */
     INHERIT(COLOR_CONSTANT,   COLOR_NUMBER)     /* constant ← number */
     INHERIT(COLOR_DECORATOR,  COLOR_FUNCTION)   /* decorator ← function */
     INHERIT(COLOR_BUILTIN,    COLOR_FUNCTION)   /* builtin ← function */
@@ -260,12 +261,61 @@ scope_starts_with(const char *scope, const char *prefix)
     return (next == '\0' || next == '.');
 }
 
+static SyntaxLanguage
+detect_language_from_scope(const char *scope)
+{
+    /* Simple substring checks for common VSCode scope language suffixes/prefixes */
+    if (g_str_has_suffix(scope, ".c") || strstr(scope, ".c ") || strstr(scope, "source.c")) return LANG_C;
+    if (g_str_has_suffix(scope, ".cpp") || strstr(scope, ".cpp ") || strstr(scope, "source.cpp")) return LANG_C;
+    if (g_str_has_suffix(scope, ".h") || strstr(scope, ".h ") || strstr(scope, "source.h")) return LANG_C;
+    
+    if (g_str_has_suffix(scope, ".python") || strstr(scope, ".python ") || strstr(scope, "source.python")) return LANG_PYTHON;
+    if (g_str_has_suffix(scope, ".py") || strstr(scope, ".py ") || strstr(scope, "source.py")) return LANG_PYTHON;
+    
+    if (g_str_has_suffix(scope, ".js") || strstr(scope, ".js ") || strstr(scope, "source.js")) return LANG_JAVASCRIPT;
+    if (g_str_has_suffix(scope, ".ts") || strstr(scope, ".ts ") || strstr(scope, "source.ts")) return LANG_JAVASCRIPT;
+    
+    if (g_str_has_suffix(scope, ".sh") || strstr(scope, ".sh ") || strstr(scope, "source.sh") || strstr(scope, "source.shell")) return LANG_BASH;
+    
+    if (g_str_has_suffix(scope, ".json") || strstr(scope, ".json ") || strstr(scope, "source.json")) return LANG_JSON;
+    if (g_str_has_suffix(scope, ".yaml") || strstr(scope, ".yaml ") || strstr(scope, "source.yaml")) return LANG_YAML;
+    if (g_str_has_suffix(scope, ".yml") || strstr(scope, ".yml ") || strstr(scope, "source.yml")) return LANG_YAML;
+    if (g_str_has_suffix(scope, ".xml") || strstr(scope, ".xml ") || strstr(scope, "text.xml")) return LANG_XML;
+    if (g_str_has_suffix(scope, ".html") || strstr(scope, ".html ") || strstr(scope, "text.html")) return LANG_XML;
+    
+    if (g_str_has_suffix(scope, ".rust") || strstr(scope, ".rust ") || strstr(scope, "source.rust")) return LANG_RUST;
+    if (g_str_has_suffix(scope, ".rs") || strstr(scope, ".rs ") || strstr(scope, "source.rs")) return LANG_RUST;
+    
+    if (g_str_has_suffix(scope, ".markdown") || strstr(scope, ".markdown ") || strstr(scope, "text.html.markdown")) return LANG_MARKDOWN;
+    if (g_str_has_suffix(scope, ".md") || strstr(scope, ".md ") || strstr(scope, "source.md")) return LANG_MARKDOWN;
+
+    return LANG_NONE;
+}
+
+static void strip_lang_suffix(char *rule) {
+    const char *suffixes[] = {
+        ".cpp", ".python", ".yaml", ".rust", ".html", 
+        ".json", ".xml", ".bash", ".shell", ".markdown",
+        ".javascript",
+        ".py", ".js", ".ts", ".sh", ".rs", ".md", ".c", ".h", 
+        NULL
+    };
+    for (int i = 0; suffixes[i]; i++) {
+        if (g_str_has_suffix(rule, suffixes[i])) {
+            rule[strlen(rule) - strlen(suffixes[i])] = '\0';
+            return;
+        }
+    }
+}
+
 /* Apply a single JSON rule to all map slots that subclass it.
  * E.g. json rule "keyword" applies to map slot "keyword.control" because
  * "keyword.control" starts with "keyword". */
 static void
-apply_rule_to_slots(const char *json_rule, PangoColor color, ViteTheme *theme, int *slot_scores)
+apply_rule_to_slots(const char *json_rule, PangoColor color, ViteTheme *theme, int *slot_scores, int slot_scores_lang[VITE_LANG_COUNT][COLOR_SLOT_COUNT])
 {
+    SyntaxLanguage lang = detect_language_from_scope(json_rule);
+
     char **parts = NULL;
     const char *actual_rule = json_rule;
     int penalty = 1;
@@ -284,10 +334,13 @@ apply_rule_to_slots(const char *json_rule, PangoColor color, ViteTheme *theme, i
         if (last_part >= 0) {
             actual_rule = parts[last_part];
         }
-        penalty = 4;
+        if (lang == LANG_NONE) penalty = 4;
     }
 
     char *trimmed_rule = g_strstrip(g_strdup(actual_rule));
+    if (lang != LANG_NONE) {
+        strip_lang_suffix(trimmed_rule);
+    }
 
     for (int i = 0; scope_map[i].scope != NULL; i++) {
         /* Does our mapped scope start with the JSON rule? */
@@ -296,9 +349,17 @@ apply_rule_to_slots(const char *json_rule, PangoColor color, ViteTheme *theme, i
             score /= penalty;
 
             ViteColorSlot slot = scope_map[i].slot;
-            if (score > 0 && score >= slot_scores[slot]) {
-                theme->syntax[slot] = color;
-                slot_scores[slot] = score;
+            if (lang != LANG_NONE) {
+                if (score > 0 && score >= slot_scores_lang[lang][slot]) {
+                    theme->syntax_lang[lang][slot] = color;
+                    theme->has_lang_syntax[lang][slot] = TRUE;
+                    slot_scores_lang[lang][slot] = score;
+                }
+            } else {
+                if (score > 0 && score >= slot_scores[slot]) {
+                    theme->syntax[slot] = color;
+                    slot_scores[slot] = score;
+                }
             }
         }
     }
@@ -427,6 +488,9 @@ parse_token_colors(JsonArray *token_colors, ViteTheme *theme, int *slot_scores_o
     int slot_scores[COLOR_SLOT_COUNT];
     memset(slot_scores, 0, sizeof(slot_scores));
 
+    int slot_scores_lang[VITE_LANG_COUNT][COLOR_SLOT_COUNT];
+    memset(slot_scores_lang, 0, sizeof(slot_scores_lang));
+
     guint n = json_array_get_length(token_colors);
     for (guint i = 0; i < n; i++) {
         JsonNode *elem = json_array_get_element(token_colors, i);
@@ -471,7 +535,7 @@ parse_token_colors(JsonArray *token_colors, ViteTheme *theme, int *slot_scores_o
 
         for (guint si = 0; si < scopes->len; si++) {
             const char *scope_str = g_ptr_array_index(scopes, si);
-            apply_rule_to_slots(scope_str, color, theme, slot_scores);
+            apply_rule_to_slots(scope_str, color, theme, slot_scores, slot_scores_lang);
         }
         g_ptr_array_free(scopes, TRUE);
     }

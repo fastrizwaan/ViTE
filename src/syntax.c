@@ -26,9 +26,9 @@ syntax_get_theme_mode(void)
     return theme ? theme->is_dark : TRUE;
 }
 
-/* New, clean color attribute function: looks up color from current theme */
+/* New, clean color attribute function: looks up color from current theme with language override check */
 void
-add_color_attr(PangoAttrList *attrs, int start, int end, ViteColorSlot slot)
+add_color_attr(SyntaxContext *ctx, PangoAttrList *attrs, int start, int end, ViteColorSlot slot)
 {
     if (start >= end) return;
     if (!attrs) return;
@@ -37,7 +37,18 @@ add_color_attr(PangoAttrList *attrs, int start, int end, ViteColorSlot slot)
     const ViteTheme *theme = theme_manager_get_current();
     if (!theme) return;
 
-    const PangoColor *c = &theme->syntax[slot];
+    const PangoColor *c = NULL;
+    if (ctx) {
+        SyntaxLanguage lang = syntax_context_get_language(ctx);
+        if (lang > 0 && lang < VITE_LANG_COUNT && theme->has_lang_syntax[lang][slot]) {
+            c = &theme->syntax_lang[lang][slot];
+        }
+    }
+    
+    if (!c) {
+        c = &theme->syntax[slot];
+    }
+
     PangoAttribute *attr = pango_attr_foreground_new(c->red, c->green, c->blue);
     attr->start_index = start;
     attr->end_index = end;

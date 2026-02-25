@@ -151,7 +151,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                  cur++;
             }
             if (state == STATE_C_ENUM_ML_COMMENT) cur = len;
-            add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
+            add_color_attr(ctx, attrs, start_pos, cur, COLOR_COMMENT);
             continue;
         }
         if (state == STATE_C_PARAMS_ML_COMMENT) {
@@ -165,27 +165,27 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                  cur++;
             }
             if (state == STATE_C_PARAMS_ML_COMMENT) cur = len;
-            add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
+            add_color_attr(ctx, attrs, start_pos, cur, COLOR_COMMENT);
             continue;
         }
         if (state == STATE_C_ENUM_WAIT_LBRACE) {
             if (g_ascii_isspace(text[cur])) { cur++; continue; }
             if (text[cur] == '{') {
                 state = STATE_C_ENUM;
-                add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             }
             if (text[cur] == ';') {
                 state = STATE_ROOT;
-                add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             }
             if (g_ascii_isalpha(text[cur]) || text[cur] == '_') {
                 size_t s_pos = cur;
                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
-                add_color_attr(attrs, s_pos, cur, COLOR_TYPE);
+                add_color_attr(ctx, attrs, s_pos, cur, COLOR_TYPE);
                 continue;
             }
             cur++;
@@ -195,7 +195,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             if (g_ascii_isspace(text[cur])) { cur++; continue; }
             if (text[cur] == '/') {
                 if (cur + 1 < len && text[cur+1] == '/') {
-                    add_color_attr(attrs, cur, len, COLOR_COMMENT);
+                    add_color_attr(ctx, attrs, cur, len, COLOR_COMMENT);
                     cur = len;
                     continue;
                 }
@@ -212,30 +212,30 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                          cur++;
                     }
                     if (state == STATE_C_ENUM_ML_COMMENT) cur = len;
-                    add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_COMMENT);
                     continue;
                 }
             }
             if (text[cur] == '}') {
                 state = STATE_ROOT;
-                add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             }
             if (g_ascii_isalpha(text[cur]) || text[cur] == '_') {
                 size_t s_pos = cur;
                 while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
-                add_color_attr(attrs, s_pos, cur, COLOR_CONSTANT);
+                add_color_attr(ctx, attrs, s_pos, cur, COLOR_CONSTANT);
                 continue;
             }
             if (g_ascii_isdigit(text[cur])) {
                  size_t s_pos = cur;
                  while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '.')) cur++;
-                 add_color_attr(attrs, s_pos, cur, COLOR_NUMBER);
+                 add_color_attr(ctx, attrs, s_pos, cur, COLOR_NUMBER);
                  continue;
             }
             if (strchr("=,+-*/%&|^<>!?:", text[cur])) {
-                add_color_attr(attrs, cur, cur + 1, COLOR_OPERATOR);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_OPERATOR);
                 cur++;
                 continue;
             }
@@ -249,7 +249,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 continue;
             }
             if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
-                add_color_attr(attrs, cur, len, COLOR_COMMENT);
+                add_color_attr(ctx, attrs, cur, len, COLOR_COMMENT);
                 cur = len;
                 continue;
             }
@@ -266,7 +266,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                      cur++;
                 }
                 if (state == STATE_C_PARAMS_ML_COMMENT) cur = len;
-                add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
+                add_color_attr(ctx, attrs, start_pos, cur, COLOR_COMMENT);
                 continue;
             }
             
@@ -281,7 +281,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                      }
                      /* Escape Sequences */
                      if (text[cur] == '\\') {
-                         if (cur > start_pos) add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                         if (cur > start_pos) add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                          size_t esc_start = cur;
                          cur++;
                          if (cur < len) {
@@ -297,7 +297,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                                  cur++;
                              }
                          }
-                         add_color_attr(attrs, esc_start, cur, COLOR_BUILTIN); /* Cyan */
+                         add_color_attr(ctx, attrs, esc_start, cur, COLOR_BUILTIN); /* Cyan */
                          start_pos = cur;
                          continue;
                      }
@@ -305,7 +305,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                      if (text[cur] == '%') {
                          /* Add attribute for string part before % */
                          if (cur > start_pos) {
-                             add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                             add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                          }
                          
                          size_t fmt_start = cur;
@@ -332,9 +332,9 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                          /* Parse specifier */
                          if (cur < len && strchr("diuoxXfFeEgGaAcspn%", text[cur])) {
                              cur++;
-                             add_color_attr(attrs, fmt_start, cur, COLOR_NUMBER);
+                             add_color_attr(ctx, attrs, fmt_start, cur, COLOR_NUMBER);
                          } else {
-                             add_color_attr(attrs, fmt_start, cur, COLOR_STRING); 
+                             add_color_attr(ctx, attrs, fmt_start, cur, COLOR_STRING); 
                          }
                          start_pos = cur; /* Reset start for next string chunk */
                          continue;
@@ -343,7 +343,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 }
                 /* Add remaining string part */
                 if (cur > start_pos) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                 }
                 continue;
             }
@@ -357,7 +357,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                      }
                      /* Escape Sequences */
                      if (text[cur] == '\\') {
-                         if (cur > start_pos) add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                         if (cur > start_pos) add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                          size_t esc_start = cur;
                          cur++;
                          if (cur < len) {
@@ -366,46 +366,46 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                              else if (g_ascii_isdigit(text[cur])) { while (cur < len && g_ascii_isdigit(text[cur])) cur++; }
                              else cur++;
                          }
-                         add_color_attr(attrs, esc_start, cur, COLOR_BUILTIN);
+                         add_color_attr(ctx, attrs, esc_start, cur, COLOR_BUILTIN);
                          start_pos = cur;
                          continue;
                      }
                      cur++;
                 }
-                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                 continue;
             }
             /* Check for ')' moved to generic bracket block below */
 
             if (text[cur] == '!' && (cur + 1 >= len || text[cur+1] != '=')) {
-                add_color_attr(attrs, cur, cur + 1, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_LOGICAL);
                 cur++;
                 continue;
             }
             if (text[cur] == '&' && cur + 1 < len && text[cur+1] == '&') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_LOGICAL);
                 cur += 2;
                 continue;
             }
             if (text[cur] == '|' && cur + 1 < len && text[cur+1] == '|') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_LOGICAL);
                 cur += 2;
                 continue;
             }
             if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_VARIABLE);
                 cur += 2;
                 /* Highlight member after -> in red */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
                 if (cur < len && (g_ascii_isalpha(text[cur]) || text[cur] == '_')) {
                     size_t m_start = cur;
                     while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
-                    add_color_attr(attrs, m_start, cur, COLOR_VARIABLE_C);
+                    add_color_attr(ctx, attrs, m_start, cur, COLOR_VARIABLE_C);
                 }
                 continue;
             }
             if (text[cur] == '*' || text[cur] == '&') {
-                add_color_attr(attrs, cur, cur + 1, COLOR_OPERATOR);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_OPERATOR);
                 cur++;
                 continue;
             }
@@ -447,8 +447,8 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     }
                     break;
                 }
-                if (num_end > start_pos) add_color_attr(attrs, start_pos, num_end, COLOR_NUMBER);
-                if (num_end < cur) add_color_attr(attrs, num_end, cur, COLOR_VARIABLE_C);
+                if (num_end > start_pos) add_color_attr(ctx, attrs, start_pos, num_end, COLOR_NUMBER);
+                if (num_end < cur) add_color_attr(ctx, attrs, num_end, cur, COLOR_VARIABLE_C);
                 continue;
             }
             
@@ -481,32 +481,32 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 if (peek < len && text[peek] == '(') is_func_call = TRUE;
 
                 if (is_keyword) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_KEYWORD);
                 } else if (is_control_keyword) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
                 } else if (is_primitive_type || is_storage_modifier) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_STORAGE);
                 } else if (is_func_call) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_FUNCTION);
                 } else if (is_word_in_list(word_start, word_len, c_special_constants)) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_CONSTANT_LANG);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_CONSTANT_LANG);
                 } else if (is_pointer_access || is_glib_type) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_TYPE);
                 } else if (is_std_type || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_STORAGE);
                 } else if (g_ascii_isupper(word_start[0])) {
                     /* Types are conventionally capitalized */
-                    add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_TYPE);
                 } else {
                     /* Parameter Name */
-                    add_color_attr(attrs, start_pos, cur, COLOR_PARAM);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_PARAM);
                 }
                 continue;
             }
             /* Rainbow Brackets in Params */
             if (strchr("([{", text[cur])) {
                  int color_idx = COLOR_BRACKET_1 + (bracket_depth % 6);
-                 add_color_attr(attrs, cur, cur + 1, color_idx);
+                 add_color_attr(ctx, attrs, cur, cur + 1, color_idx);
                  if (text[cur] == '(') paren_depth++;
                  bracket_depth++;
                  cur++;
@@ -517,7 +517,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                  if (bracket_depth > 0) bracket_depth--;
                  
                  int color_idx = COLOR_BRACKET_1 + (bracket_depth % 6);
-                 add_color_attr(attrs, cur, cur + 1, color_idx);
+                 add_color_attr(ctx, attrs, cur, cur + 1, color_idx);
                  
                  /* If closing param paren, switch state */
                  if (text[cur] == ')' && paren_depth == 0) {
@@ -529,11 +529,11 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
 
             /* Default fallback for punctuation in params */
             if (strchr(".;", text[cur])) {
-                add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             } else if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_VARIABLE);
                 cur += 2;
                 /* Highlight member after -> */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -546,20 +546,20 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     size_t p = m_end;
                     while (p < len && g_ascii_isspace(text[p])) p++;
                     if (p + 1 < len && text[p] == '-' && text[p+1] == '>') {
-                        add_color_attr(attrs, m_start, m_end, COLOR_TYPE);
+                        add_color_attr(ctx, attrs, m_start, m_end, COLOR_TYPE);
                     } else {
-                        add_color_attr(attrs, m_start, m_end, COLOR_VARIABLE_C);
+                        add_color_attr(ctx, attrs, m_start, m_end, COLOR_VARIABLE_C);
                     }
                     /* We don't continue here; the loop will continue from cur (m_end) */
                 }
                 continue;
             } else if (text[cur] == '!' && (cur + 1 >= len || text[cur+1] != '=')) {
-                add_color_attr(attrs, cur, cur + 1, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_LOGICAL);
             } else if (text[cur] == '&' && cur + 1 < len && text[cur+1] == '&') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_LOGICAL);
                 cur++;
             } else if (text[cur] == '|' && cur + 1 < len && text[cur+1] == '|') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_LOGICAL);
                 cur++;
             } else {
                 /* Arithmetic and Assignment Operators in params */
@@ -569,21 +569,21 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                          text[cur] == '/' || text[cur] == '%' || text[cur] == '=' ||
                          text[cur] == '<' || text[cur] == '>' || text[cur] == '!' ||
                          text[cur] == '&' || text[cur] == '|' || text[cur] == '^') && text[cur+1] == '=') {
-                        add_color_attr(attrs, cur, cur + 2, COLOR_OPERATOR);
+                        add_color_attr(ctx, attrs, cur, cur + 2, COLOR_OPERATOR);
                         cur++;
                         handled = TRUE;
                     } else if (text[cur] == '<' && text[cur+1] == '<') {
-                        add_color_attr(attrs, cur, cur + 2, COLOR_OPERATOR);
+                        add_color_attr(ctx, attrs, cur, cur + 2, COLOR_OPERATOR);
                         cur++;
                         handled = TRUE;
                     } else if (text[cur] == '>' && text[cur+1] == '>') {
-                        add_color_attr(attrs, cur, cur + 2, COLOR_OPERATOR);
+                        add_color_attr(ctx, attrs, cur, cur + 2, COLOR_OPERATOR);
                         cur++;
                         handled = TRUE;
                     }
                 }
                 if (!handled && strchr("+-*/%=<>^|&?:", text[cur])) {
-                    add_color_attr(attrs, cur, cur + 1, COLOR_OPERATOR);
+                    add_color_attr(ctx, attrs, cur, cur + 1, COLOR_OPERATOR);
                 }
             }
             cur++;
@@ -601,7 +601,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                  cur++;
             }
             if (state == STATE_IN_ML_COMMENT) cur = len;
-            add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
+            add_color_attr(ctx, attrs, start_pos, cur, COLOR_COMMENT);
             continue;
         }
         
@@ -615,7 +615,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             /* Bracket Pair Colorization */
             if (strchr("([{", text[cur])) {
                 int color_idx = COLOR_BRACKET_1 + (bracket_depth % 6);
-                add_color_attr(attrs, cur, cur + 1, color_idx);
+                add_color_attr(ctx, attrs, cur, cur + 1, color_idx);
                 bracket_depth++;
                 cur++;
                 continue;
@@ -623,21 +623,21 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             if (strchr(")]}", text[cur])) {
                 if (bracket_depth > 0) bracket_depth--;
                 int color_idx = COLOR_BRACKET_1 + (bracket_depth % 6);
-                add_color_attr(attrs, cur, cur + 1, color_idx);
+                add_color_attr(ctx, attrs, cur, cur + 1, color_idx);
                 cur++;
                 continue;
             }
 
             /* Regular Punctuation (semicolons, commas, dots) */
             if (strchr(".,;", text[cur])) {
-                add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             }
             
             /* Comments */
             if (text[cur] == '/' && cur+1 < len && text[cur+1] == '/') {
-                add_color_attr(attrs, cur, len, COLOR_COMMENT);
+                add_color_attr(ctx, attrs, cur, len, COLOR_COMMENT);
                 cur = len;
                 continue;
             }
@@ -654,7 +654,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     cur++;
                 }
                 if (state == STATE_IN_ML_COMMENT) cur = len;
-                add_color_attr(attrs, start_pos, cur, COLOR_COMMENT);
+                add_color_attr(ctx, attrs, start_pos, cur, COLOR_COMMENT);
                 continue;
             }
 
@@ -671,7 +671,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                      if (text[cur] == '%') {
                          /* Add attribute for string part before % */
                          if (cur > start_pos) {
-                             add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                             add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                          }
                          
                          size_t fmt_start = cur;
@@ -698,9 +698,9 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                          /* Parse specifier */
                          if (cur < len && strchr("diuoxXfFeEgGaAcspn%", text[cur])) {
                              cur++;
-                             add_color_attr(attrs, fmt_start, cur, COLOR_NUMBER);
+                             add_color_attr(ctx, attrs, fmt_start, cur, COLOR_NUMBER);
                          } else {
-                             add_color_attr(attrs, fmt_start, cur, COLOR_STRING); 
+                             add_color_attr(ctx, attrs, fmt_start, cur, COLOR_STRING); 
                          }
                          start_pos = cur; /* Reset start for next string chunk */
                          continue;
@@ -709,7 +709,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 }
                 /* Add remaining string part */
                 if (cur > start_pos) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                 }
                 continue;
             }
@@ -723,7 +723,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                      }
                      /* Escape Sequences */
                      if (text[cur] == '\\') {
-                         if (cur > start_pos) add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                         if (cur > start_pos) add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                          size_t esc_start = cur;
                          cur++;
                          if (cur < len) {
@@ -732,13 +732,13 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                              else if (g_ascii_isdigit(text[cur])) { while (cur < len && g_ascii_isdigit(text[cur])) cur++; }
                              else cur++;
                          }
-                         add_color_attr(attrs, esc_start, cur, COLOR_BUILTIN);
+                         add_color_attr(ctx, attrs, esc_start, cur, COLOR_BUILTIN);
                          start_pos = cur;
                          continue;
                      }
                      cur++;
                 }
-                add_color_attr(attrs, start_pos, cur, COLOR_STRING);
+                add_color_attr(ctx, attrs, start_pos, cur, COLOR_STRING);
                 continue;
             }
             
@@ -746,7 +746,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             if (text[cur] == '#') {
                 size_t start_pos = cur;
                 cur++;
-                add_color_attr(attrs, start_pos, cur, COLOR_PREPROC);
+                add_color_attr(ctx, attrs, start_pos, cur, COLOR_PREPROC);
                 
                 /* Allow space between # and directive */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -758,7 +758,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 size_t directive_len = cur - directive_start;
                 const char *directive = text + directive_start;
 
-                add_color_attr(attrs, directive_start, cur, COLOR_PREPROC);
+                add_color_attr(ctx, attrs, directive_start, cur, COLOR_PREPROC);
 
                 if (directive_len == 7 && strncmp(directive, "include", 7) == 0) {
                     /* Skip whitespace */
@@ -771,19 +771,19 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                         cur++;
                         
                         /* Color the open quote/bracket */
-                        add_color_attr(attrs, path_start, cur, COLOR_STRING);
+                        add_color_attr(ctx, attrs, path_start, cur, COLOR_STRING);
                         
                         size_t inner_start = cur;
                         while (cur < len && text[cur] != close) cur++;
                         
                         /* Color the inner path */
                         if (cur > inner_start) {
-                            add_color_attr(attrs, inner_start, cur, COLOR_STRING);
+                            add_color_attr(ctx, attrs, inner_start, cur, COLOR_STRING);
                         }
                         
                         /* Color the close quote/bracket */
                         if (cur < len) {
-                            add_color_attr(attrs, cur, cur + 1, COLOR_STRING);
+                            add_color_attr(ctx, attrs, cur, cur + 1, COLOR_STRING);
                             cur++; /* include closer */
                         }
                     }
@@ -800,7 +800,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                         while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) {
                             cur++;
                         }
-                        add_color_attr(attrs, macro_start, cur, COLOR_FUNCTION);
+                        add_color_attr(ctx, attrs, macro_start, cur, COLOR_FUNCTION);
                     }
                 }
                 continue;
@@ -840,8 +840,8 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     }
                     break;
                 }
-                if (num_end > start_pos) add_color_attr(attrs, start_pos, num_end, COLOR_NUMBER);
-                if (num_end < cur) add_color_attr(attrs, num_end, cur, COLOR_VARIABLE_C);
+                if (num_end > start_pos) add_color_attr(ctx, attrs, start_pos, num_end, COLOR_NUMBER);
+                if (num_end < cur) add_color_attr(ctx, attrs, num_end, cur, COLOR_VARIABLE_C);
                 continue;
             }
 
@@ -874,23 +874,23 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 if (p + 1 < len && text[p] == '-' && text[p+1] == '>') is_pointer_access = TRUE;
 
                 if (is_keyword) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_KEYWORD);
                     if (word_len == 4 && strncmp(word_start, "enum", 4) == 0) {
                         state = STATE_C_ENUM_WAIT_LBRACE;
                     }
                 } else if (is_control_keyword) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_KEYWORD_CONTROL);
                 } else if (is_primitive_type || is_storage_modifier) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_STORAGE);
                 } else if (is_func_call) {
-                     add_color_attr(attrs, start_pos, cur, COLOR_FUNCTION);
+                     add_color_attr(ctx, attrs, start_pos, cur, COLOR_FUNCTION);
                      state = STATE_C_PARAMS;
                 } else if (is_word_in_list(word_start, word_len, c_special_constants)) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_CONSTANT_LANG);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_CONSTANT_LANG);
                 } else if (is_pointer_access || is_glib_type) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_TYPE);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_TYPE);
                 } else if (is_std_type || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
-                    add_color_attr(attrs, start_pos, cur, COLOR_STORAGE);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_STORAGE);
                 }
                 continue;
             }
@@ -898,19 +898,19 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
             /* Operators and Punctuation */
             /* Rainbow Brackets */
             if (strchr("([{", text[cur])) {
-                 add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                 add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
                  paren_depth++;
                  cur++;
                  continue;
             }
             if (strchr(")]}", text[cur])) {
                  if (paren_depth > 0) paren_depth--;
-                 add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                 add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
                  cur++;
                  continue;
             }
             if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_VARIABLE);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_VARIABLE);
                 cur += 2;
                 /* Highlight member after -> in red */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -923,25 +923,25 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     size_t p = m_end;
                     while (p < len && g_ascii_isspace(text[p])) p++;
                     if (p + 1 < len && text[p] == '-' && text[p+1] == '>') {
-                        add_color_attr(attrs, m_start, m_end, COLOR_TYPE);
+                        add_color_attr(ctx, attrs, m_start, m_end, COLOR_TYPE);
                     } else {
-                        add_color_attr(attrs, m_start, m_end, COLOR_VARIABLE_C);
+                        add_color_attr(ctx, attrs, m_start, m_end, COLOR_VARIABLE_C);
                     }
                 }
                 continue;
             }
             if (text[cur] == '!' && (cur + 1 >= len || text[cur+1] != '=')) {
-                add_color_attr(attrs, cur, cur + 1, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_LOGICAL);
                 cur++;
                 continue;
             }
             if (text[cur] == '&' && cur + 1 < len && text[cur+1] == '&') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_LOGICAL);
                 cur += 2;
                 continue;
             }
             if (text[cur] == '|' && cur + 1 < len && text[cur+1] == '|') {
-                add_color_attr(attrs, cur, cur + 2, COLOR_LOGICAL);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_LOGICAL);
                 cur += 2;
                 continue;
             }
@@ -952,30 +952,30 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                      text[cur] == '/' || text[cur] == '%' || text[cur] == '=' ||
                      text[cur] == '<' || text[cur] == '>' || text[cur] == '!' ||
                      text[cur] == '&' || text[cur] == '|' || text[cur] == '^') && text[cur+1] == '=') {
-                    add_color_attr(attrs, cur, cur + 2, COLOR_OPERATOR);
+                    add_color_attr(ctx, attrs, cur, cur + 2, COLOR_OPERATOR);
                     cur += 2;
                     continue;
                 }
                 if (text[cur] == '<' && text[cur+1] == '<') {
-                    add_color_attr(attrs, cur, cur + 2, COLOR_OPERATOR);
+                    add_color_attr(ctx, attrs, cur, cur + 2, COLOR_OPERATOR);
                     cur += 2;
                     continue;
                 }
                 if (text[cur] == '>' && text[cur+1] == '>') {
-                    add_color_attr(attrs, cur, cur + 2, COLOR_OPERATOR);
+                    add_color_attr(ctx, attrs, cur, cur + 2, COLOR_OPERATOR);
                     cur += 2;
                     continue;
                 }
             }
 
             if (strchr("+-*/%=<>^|&?:", text[cur])) {
-                add_color_attr(attrs, cur, cur + 1, COLOR_OPERATOR);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_OPERATOR);
                 cur++;
                 continue;
             }
 
             if (strchr(".;", text[cur])) {
-                add_color_attr(attrs, cur, cur + 1, COLOR_PUNCTUATION);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_PUNCTUATION);
                 cur++;
                 continue;
             }

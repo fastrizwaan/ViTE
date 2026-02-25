@@ -38,6 +38,9 @@ typedef enum {
     COLOR_SLOT_COUNT
 } ViteColorSlot;
 
+#define VITE_LANG_COUNT 16
+
+
 /* Centralized theme palette */
 typedef struct {
     /* Editor / Widget colors (GdkRGBA) */
@@ -74,6 +77,10 @@ typedef struct {
 
     /* Syntax colors (PangoColor — used directly by add_color_attr) */
     PangoColor syntax[COLOR_SLOT_COUNT];
+
+    /* Language-specific overrides */
+    PangoColor syntax_lang[VITE_LANG_COUNT][COLOR_SLOT_COUNT];
+    gboolean has_lang_syntax[VITE_LANG_COUNT][COLOR_SLOT_COUNT];
 
     /* Metadata */
     gboolean is_dark;
