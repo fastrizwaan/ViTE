@@ -761,7 +761,7 @@ generate_css(const ViteTheme *theme)
     GdkRGBA fg = theme->editor_fg;
 
     /* Chrome bg: slightly darker for dark themes, slightly lighter for light */
-    double shift = 0.04;
+    double shift = 0.02;
     GdkRGBA chrome_bg = {
         shift_color(bg.red,   shift, !theme->is_dark),
         shift_color(bg.green, shift, !theme->is_dark),
@@ -770,7 +770,7 @@ generate_css(const ViteTheme *theme)
     };
 
     /* Surface bg: between chrome and editor (for popovers, dialogs) */
-    double shift2 = 0.02;
+    double shift2 = 0.04;
     GdkRGBA surface_bg = {
         shift_color(bg.red,   shift2, !theme->is_dark),
         shift_color(bg.green, shift2, !theme->is_dark),
@@ -780,23 +780,23 @@ generate_css(const ViteTheme *theme)
 
     /* Border: subtle separator */
     GdkRGBA border = {
-        shift_color(bg.red,   0.08, !theme->is_dark),
-        shift_color(bg.green, 0.08, !theme->is_dark),
-        shift_color(bg.blue,  0.08, !theme->is_dark),
+        shift_color(bg.red,   0.10, !theme->is_dark),
+        shift_color(bg.green, 0.10, !theme->is_dark),
+        shift_color(bg.blue,  0.10, !theme->is_dark),
         0.5
     };
 
     /* Hover: slight brightness change */
     GdkRGBA hover_bg = {
-        shift_color(bg.red,   0.06, !theme->is_dark),
-        shift_color(bg.green, 0.06, !theme->is_dark),
-        shift_color(bg.blue,  0.06, !theme->is_dark),
+        shift_color(bg.red,   0.10, !theme->is_dark),
+        shift_color(bg.green, 0.10, !theme->is_dark),
+        shift_color(bg.blue,  0.10, !theme->is_dark),
         1.0
     };
 
     /* Dim foreground for secondary text */
     GdkRGBA dim_fg = fg;
-    dim_fg.alpha = 0.6;
+    dim_fg.alpha = 0.4;
 
     char c_chrome[64], c_surface[64], c_bg[64], c_fg[64], c_border[64], c_hover[64], c_dim[64];
     rgba_to_css(&chrome_bg, c_chrome, sizeof(c_chrome));
