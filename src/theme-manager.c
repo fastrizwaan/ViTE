@@ -796,7 +796,7 @@ generate_css(const ViteTheme *theme)
 
     /* Dim foreground for secondary text */
     GdkRGBA dim_fg = fg;
-    dim_fg.alpha = 0.4;
+    dim_fg.alpha = 0.8;
 
     char c_chrome[64], c_surface[64], c_bg[64], c_fg[64], c_border[64], c_hover[64], c_dim[64];
     rgba_to_css(&chrome_bg, c_chrome, sizeof(c_chrome));
