@@ -38,21 +38,61 @@ add_color_attr(SyntaxContext *ctx, PangoAttrList *attrs, int start, int end, Vit
     if (!theme) return;
 
     const PangoColor *c = NULL;
+    guint8 style_mask = 0;
+
     if (ctx) {
         SyntaxLanguage lang = syntax_context_get_language(ctx);
-        if (lang > 0 && lang < VITE_LANG_COUNT && theme->has_lang_syntax[lang][slot]) {
-            c = &theme->syntax_lang[lang][slot];
+        if (lang > 0 && lang < VITE_LANG_COUNT) {
+            if (theme->has_lang_syntax[lang][slot]) {
+                c = &theme->syntax_lang[lang][slot];
+            }
+            if (theme->has_lang_style_set[lang][slot]) {
+                style_mask = theme->syntax_lang_style[lang][slot];
+            }
         }
     }
     
     if (!c) {
         c = &theme->syntax[slot];
     }
+    
+    /* Fallback to non-lang style if lang-specific one wasn't explicitly set */
+    if (ctx) {
+        SyntaxLanguage lang = syntax_context_get_language(ctx);
+        if (lang > 0 && lang < VITE_LANG_COUNT && !theme->has_lang_style_set[lang][slot]) {
+            style_mask = theme->syntax_style[slot];
+        }
+    } else {
+        style_mask = theme->syntax_style[slot];
+    }
 
-    PangoAttribute *attr = pango_attr_foreground_new(c->red, c->green, c->blue);
-    attr->start_index = start;
-    attr->end_index = end;
-    pango_attr_list_insert(attrs, attr);
+    if (c) {
+        PangoAttribute *attr = pango_attr_foreground_new(c->red, c->green, c->blue);
+        attr->start_index = start;
+        attr->end_index = end;
+        pango_attr_list_insert(attrs, attr);
+    }
+
+    if (style_mask & VITE_FONT_STYLE_BOLD) {
+        PangoAttribute *attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+        attr->start_index = start;
+        attr->end_index = end;
+        pango_attr_list_insert(attrs, attr);
+    }
+
+    if (style_mask & VITE_FONT_STYLE_ITALIC) {
+        PangoAttribute *attr = pango_attr_style_new(PANGO_STYLE_ITALIC);
+        attr->start_index = start;
+        attr->end_index = end;
+        pango_attr_list_insert(attrs, attr);
+    }
+
+    if (style_mask & VITE_FONT_STYLE_UNDERLINE) {
+        PangoAttribute *attr = pango_attr_underline_new(PANGO_UNDERLINE_SINGLE);
+        attr->start_index = start;
+        attr->end_index = end;
+        pango_attr_list_insert(attrs, attr);
+    }
 }
 
 SyntaxContext *

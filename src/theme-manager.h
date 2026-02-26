@@ -40,6 +40,10 @@ typedef enum {
 
 #define VITE_LANG_COUNT 16
 
+/* Font style bitflags */
+#define VITE_FONT_STYLE_BOLD      (1 << 0)
+#define VITE_FONT_STYLE_ITALIC    (1 << 1)
+#define VITE_FONT_STYLE_UNDERLINE (1 << 2)
 
 /* Centralized theme palette */
 typedef struct {
@@ -77,10 +81,14 @@ typedef struct {
 
     /* Syntax colors (PangoColor — used directly by add_color_attr) */
     PangoColor syntax[COLOR_SLOT_COUNT];
+    guint8 syntax_style[COLOR_SLOT_COUNT];
+    gboolean has_style_set[COLOR_SLOT_COUNT];
 
     /* Language-specific overrides */
     PangoColor syntax_lang[VITE_LANG_COUNT][COLOR_SLOT_COUNT];
+    guint8 syntax_lang_style[VITE_LANG_COUNT][COLOR_SLOT_COUNT];
     gboolean has_lang_syntax[VITE_LANG_COUNT][COLOR_SLOT_COUNT];
+    gboolean has_lang_style_set[VITE_LANG_COUNT][COLOR_SLOT_COUNT];
 
     /* Metadata */
     gboolean is_dark;

@@ -87,9 +87,12 @@ set_default_dark_theme(ViteTheme *theme)
 static void
 apply_theme_inheritance_and_fallback(ViteTheme *theme, int *slot_scores)
 {
-    /* Fallback inheritance: unset slots inherit from parent scope colors.
+    /* Fallback inheritance: unset slots inherit from parent scope colors and styles.
      * This matches how VSCode inherits styles from broader scopes. */
     #define INHERIT(child, parent) \
+        if (!theme->has_style_set[child] && theme->has_style_set[parent]) { \
+            theme->syntax_style[child] = theme->syntax_style[parent]; \
+        } \
         if ((!slot_scores || slot_scores[child] == 0) && (!slot_scores || slot_scores[parent] > 0)) { \
             theme->syntax[child] = theme->syntax[parent]; \
         }
@@ -311,11 +314,11 @@ static void strip_lang_suffix(char *rule) {
     }
 }
 
-/* Apply a single JSON rule to all map slots that subclass it.
+/* Apply a single JSON/YAML rule to all map slots that subclass it.
  * E.g. json rule "keyword" applies to map slot "keyword.control" because
  * "keyword.control" starts with "keyword". */
 static void
-apply_rule_to_slots(const char *json_rule, PangoColor color, ViteTheme *theme, int *slot_scores, int slot_scores_lang[VITE_LANG_COUNT][COLOR_SLOT_COUNT])
+apply_rule_to_slots(const char *json_rule, const PangoColor *color, guint8 style_mask, gboolean has_style, ViteTheme *theme, int *slot_scores, int slot_scores_lang[VITE_LANG_COUNT][COLOR_SLOT_COUNT])
 {
     SyntaxLanguage lang = detect_language_from_scope(json_rule);
 
@@ -354,13 +357,25 @@ apply_rule_to_slots(const char *json_rule, PangoColor color, ViteTheme *theme, i
             ViteColorSlot slot = scope_map[i].slot;
             if (lang != LANG_NONE) {
                 if (score > 0 && score >= slot_scores_lang[lang][slot]) {
-                    theme->syntax_lang[lang][slot] = color;
-                    theme->has_lang_syntax[lang][slot] = TRUE;
+                    if (color) {
+                        theme->syntax_lang[lang][slot] = *color;
+                        theme->has_lang_syntax[lang][slot] = TRUE;
+                    }
+                    if (has_style) {
+                        theme->syntax_lang_style[lang][slot] = style_mask;
+                        theme->has_lang_style_set[lang][slot] = TRUE;
+                    }
                     slot_scores_lang[lang][slot] = score;
                 }
             } else {
                 if (score > 0 && score >= slot_scores[slot]) {
-                    theme->syntax[slot] = color;
+                    if (color) {
+                        theme->syntax[slot] = *color;
+                    }
+                    if (has_style) {
+                        theme->syntax_style[slot] = style_mask;
+                        theme->has_style_set[slot] = TRUE;
+                    }
                     slot_scores[slot] = score;
                 }
             }
@@ -500,15 +515,29 @@ parse_token_colors(JsonArray *token_colors, ViteTheme *theme, int *slot_scores_o
         if (!JSON_NODE_HOLDS_OBJECT(elem)) continue;
         JsonObject *rule = json_node_get_object(elem);
 
-        /* Get settings.foreground */
+        /* Get settings */
         if (!json_object_has_member(rule, "settings")) continue;
         JsonObject *settings = json_object_get_object_member(rule, "settings");
         if (!settings) continue;
+        
         const char *fg = json_object_get_string_safe(settings, "foreground");
-        if (!fg) continue;
-
         PangoColor color;
-        if (!parse_hex_color_to_pango(fg, &color)) continue;
+        PangoColor *color_ptr = NULL;
+        if (fg && parse_hex_color_to_pango(fg, &color)) {
+            color_ptr = &color;
+        }
+
+        const char *fs = json_object_get_string_safe(settings, "fontStyle");
+        guint8 style_mask = 0;
+        gboolean has_style = FALSE;
+        if (fs) {
+            has_style = TRUE;
+            if (strstr(fs, "bold")) style_mask |= VITE_FONT_STYLE_BOLD;
+            if (strstr(fs, "italic")) style_mask |= VITE_FONT_STYLE_ITALIC;
+            if (strstr(fs, "underline")) style_mask |= VITE_FONT_STYLE_UNDERLINE;
+        }
+
+        if (!color_ptr && !has_style) continue;
 
         /* Get scope — can be string or array */
         JsonNode *scope_node = json_object_has_member(rule, "scope") ?
@@ -538,7 +567,7 @@ parse_token_colors(JsonArray *token_colors, ViteTheme *theme, int *slot_scores_o
 
         for (guint si = 0; si < scopes->len; si++) {
             const char *scope_str = g_ptr_array_index(scopes, si);
-            apply_rule_to_slots(scope_str, color, theme, slot_scores, slot_scores_lang);
+            apply_rule_to_slots(scope_str, color_ptr, style_mask, has_style, theme, slot_scores, slot_scores_lang);
         }
         g_ptr_array_free(scopes, TRUE);
     }
@@ -839,13 +868,36 @@ load_theme_from_yaml(const char *path)
                 else if (g_strcmp0(key, "scrollbar_active") == 0) parse_hex_color_to_rgba(val, &theme->scrollbar_active);
             } else if (state >= 2) { /* syntax */
                 PangoColor color;
-                if (parse_hex_color_to_pango(val, &color)) {
+                PangoColor *color_ptr = NULL;
+                guint8 style_mask = 0;
+                gboolean has_style = FALSE;
+                
+                char *val_copy = g_strdup(val);
+                char *token = strtok(val_copy, " ");
+                while (token) {
+                    if (token[0] == '#' && parse_hex_color_to_pango(token, &color)) {
+                        color_ptr = &color;
+                    } else if (g_ascii_strcasecmp(token, "bold") == 0) {
+                        style_mask |= VITE_FONT_STYLE_BOLD;
+                        has_style = TRUE;
+                    } else if (g_ascii_strcasecmp(token, "italic") == 0) {
+                        style_mask |= VITE_FONT_STYLE_ITALIC;
+                        has_style = TRUE;
+                    } else if (g_ascii_strcasecmp(token, "underline") == 0) {
+                        style_mask |= VITE_FONT_STYLE_UNDERLINE;
+                        has_style = TRUE;
+                    }
+                    token = strtok(NULL, " ");
+                }
+                g_free(val_copy);
+
+                if (color_ptr || has_style) {
                     if (state == 2 || current_lang == LANG_NONE) { /* common syntax */
-                        apply_rule_to_slots(key, color, theme, slot_scores, slot_scores_lang);
+                        apply_rule_to_slots(key, color_ptr, style_mask, has_style, theme, slot_scores, slot_scores_lang);
                     } else if (state == 3 && current_lang != LANG_NONE) {
                         /* Create a scoped rule equivalent like 'keyword.python' */
                         char *scoped_key = g_strdup_printf("%s.%s", key, current_lang_str);
-                        apply_rule_to_slots(scoped_key, color, theme, slot_scores, slot_scores_lang);
+                        apply_rule_to_slots(scoped_key, color_ptr, style_mask, has_style, theme, slot_scores, slot_scores_lang);
                         g_free(scoped_key);
                     }
                 }
