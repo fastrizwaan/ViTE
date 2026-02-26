@@ -62,7 +62,7 @@ set_default_dark_theme(ViteTheme *theme)
     pango_color_parse(&theme->syntax[COLOR_TYPE], "#F5D18C"); /* was e5c07b */
     pango_color_parse(&theme->syntax[COLOR_DECORATOR], "#73D0DF"); /* was 56b6c2 */
     pango_color_parse(&theme->syntax[COLOR_VARIABLE], "#EF828C"); /* was e06c75 */
-    pango_color_parse(&theme->syntax[COLOR_VARIABLE_C], "#E8E8E8"); /* was d1d1d1 */
+    pango_color_parse(&theme->syntax[COLOR_MEMBER], "#E8E8E8"); /* was d1d1d1 */
     pango_color_parse(&theme->syntax[COLOR_CONSTANT], "#EF828C"); /* was e06c75 */
     pango_color_parse(&theme->syntax[COLOR_TAG], "#EF828C"); /* was e06c75 */
     pango_color_parse(&theme->syntax[COLOR_OPERATOR], "#E3AC7A"); /* was d19a66 */
@@ -101,7 +101,7 @@ apply_theme_inheritance_and_fallback(ViteTheme *theme, int *slot_scores)
     INHERIT(COLOR_OPERATOR,   COLOR_KEYWORD)    /* operator ← keyword */
     INHERIT(COLOR_LOGICAL,    COLOR_OPERATOR)   /* logical ← operator ← keyword */
     INHERIT(COLOR_LOGICAL,    COLOR_KEYWORD)    /* logical ← keyword (if operator also unset) */
-    INHERIT(COLOR_VARIABLE_C, COLOR_VARIABLE)   /* C variable ← variable */
+    INHERIT(COLOR_MEMBER, COLOR_VARIABLE)   /* C member ← variable */
     INHERIT(COLOR_PROPERTY,   COLOR_VARIABLE)   /* property ← variable */
     INHERIT(COLOR_KEYWORD_CONTROL, COLOR_KEYWORD)/* control keyword ← keyword */
     INHERIT(COLOR_KEYWORD,    COLOR_KEYWORD_CONTROL)/* keyword ← control keyword */
@@ -173,7 +173,7 @@ set_default_light_theme(ViteTheme *theme)
     pango_color_parse(&theme->syntax[COLOR_TYPE], "#C18401");
     pango_color_parse(&theme->syntax[COLOR_DECORATOR], "#A626A4");
     pango_color_parse(&theme->syntax[COLOR_VARIABLE], "#E45649");
-    pango_color_parse(&theme->syntax[COLOR_VARIABLE_C], "#383A42");
+    pango_color_parse(&theme->syntax[COLOR_MEMBER], "#383A42");
     pango_color_parse(&theme->syntax[COLOR_CONSTANT], "#986801");
     pango_color_parse(&theme->syntax[COLOR_TAG], "#E45649");
     pango_color_parse(&theme->syntax[COLOR_OPERATOR], "#383A42");
@@ -224,8 +224,7 @@ static const ScopeMapping scope_map[] = {
     { "variable.parameter",            COLOR_PARAM },
     { "variable.interpolation",        COLOR_VARIABLE },
     { "variable.other.property",       COLOR_PROPERTY },
-    { "variable.other.member",         COLOR_VARIABLE_C },
-    { "variable.c",                    COLOR_VARIABLE_C },
+    { "variable.other.member",         COLOR_MEMBER },
     { "variable",                      COLOR_VARIABLE },
     { "string.regexp",                 COLOR_BUILTIN },
     { "string",                        COLOR_STRING },

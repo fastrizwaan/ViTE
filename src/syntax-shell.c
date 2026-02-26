@@ -187,7 +187,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
         if (strchr(";&|()<>[]{}", text[cur])) {
             in_export_context = FALSE;
             if (cur + 1 < len && ((text[cur] == '&' && text[cur+1] == '&') || (text[cur] == '|' && text[cur+1] == '|'))) {
-                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_VARIABLE_C);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_MEMBER);
                 cur += 2;
                 is_cmd_start = TRUE;
             } else if (text[cur] == ';' && cur + 1 < len && text[cur+1] == ';') {
@@ -227,7 +227,7 @@ syntax_highlight_bash(SyntaxContext *ctx,
                 cur++;
                 continue;
             } else {
-                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_VARIABLE_C);
+                add_color_attr(ctx, attrs, cur, cur + 1, COLOR_MEMBER);
                 cur++;
                 is_cmd_start = TRUE;
             }
