@@ -221,6 +221,8 @@ static const ScopeMapping scope_map[] = {
     { "variable.parameter",            COLOR_PARAM },
     { "variable.interpolation",        COLOR_VARIABLE },
     { "variable.other.property",       COLOR_PROPERTY },
+    { "variable.other.member",         COLOR_VARIABLE_C },
+    { "variable.c",                    COLOR_VARIABLE_C },
     { "variable",                      COLOR_VARIABLE },
     { "string.regexp",                 COLOR_BUILTIN },
     { "string",                        COLOR_STRING },
@@ -705,6 +707,171 @@ theme_free(ViteTheme *theme)
     g_free(theme);
 }
 
+static ViteTheme *
+load_theme_from_yaml(const char *path)
+{
+    GError *error = NULL;
+    char *contents = NULL;
+    gsize length = 0;
+
+    if (!g_file_get_contents(path, &contents, &length, &error)) {
+        g_warning("Could not read yaml theme file '%s': %s", path, error->message);
+        g_error_free(error);
+        return NULL;
+    }
+
+    ViteTheme *theme = g_new0(ViteTheme, 1);
+    theme->file_path = g_strdup(path);
+    /* default dark for now */
+    set_default_dark_theme(theme);
+
+    /* Very simple line-by-line parser */
+    char **lines = g_strsplit(contents, "\n", -1);
+    g_free(contents);
+    
+    int state = 0; /* 0: root, 1: ui, 2: syntax, 3: syntax_lang */
+    char current_lang_str[64] = {0};
+    SyntaxLanguage current_lang = LANG_NONE;
+    int slot_scores[COLOR_SLOT_COUNT] = {0};
+    int slot_scores_lang[VITE_LANG_COUNT][COLOR_SLOT_COUNT] = {{0}};
+    
+    for (int i = 0; lines[i] != NULL; i++) {
+        char *line = lines[i];
+        /* strip comments: only if '#' is preceded by space, or is the first char */
+        char *comment = strchr(line, '#');
+        while (comment) {
+            if (comment == line || g_ascii_isspace(*(comment - 1))) {
+                *comment = '\0';
+                break;
+            }
+            comment = strchr(comment + 1, '#');
+        }
+        
+        char *trimmed = g_strstrip(g_strdup(line));
+        if (trimmed[0] == '\0') {
+            g_free(trimmed);
+            continue;
+        }
+        
+        /* Count indentation of original line */
+        int indent = 0;
+        while (line[indent] == ' ') indent++;
+        
+        /* state transitions based on indent */
+        if (indent == 0) state = 0;
+        else if (indent <= 2 && state == 3) state = 2; /* back from lang to syntax */
+        
+        if (g_str_has_suffix(trimmed, ":")) {
+            trimmed[strlen(trimmed)-1] = '\0'; /* remove colon */
+            if (indent == 0) {
+                if (g_strcmp0(trimmed, "ui") == 0) state = 1;
+                else if (g_strcmp0(trimmed, "syntax") == 0) state = 2;
+                else state = 0;
+            } else if (indent == 2 && state >= 2) {
+                if (g_strcmp0(trimmed, "common") == 0) {
+                    current_lang = LANG_NONE;
+                    state = 2;
+                } else {
+                    state = 3;
+                    strncpy(current_lang_str, trimmed, sizeof(current_lang_str)-1);
+                    /* convert "C/C++" from yaml to "c" etc. if needed */
+                    if (g_ascii_strcasecmp(trimmed, "python") == 0) strcpy(current_lang_str, "python");
+                    else if (g_ascii_strcasecmp(trimmed, "c/c++") == 0 || g_ascii_strcasecmp(trimmed, "c") == 0) strcpy(current_lang_str, "c");
+                    else strcpy(current_lang_str, trimmed);
+
+                    current_lang = detect_language_from_scope(current_lang_str);
+                }
+            }
+            g_free(trimmed);
+            continue;
+        }
+        
+        /* key-value pairs */
+        char **kv = g_strsplit(trimmed, ":", 2);
+        if (kv[0] && kv[1]) {
+            char *key = g_strstrip(kv[0]);
+            char *val = g_strstrip(kv[1]);
+            
+            /* remove quotes from val */
+            if (val[0] == '"' || val[0] == '\'') {
+                val++;
+                if (val[strlen(val)-1] == '"' || val[strlen(val)-1] == '\'') {
+                    val[strlen(val)-1] = '\0';
+                }
+            }
+            
+            if (state == 0) {
+                if (g_strcmp0(key, "name") == 0) {
+                    theme->name = g_strdup(val);
+                } else if (g_strcmp0(key, "is_dark") == 0) {
+                    if (g_strcmp0(val, "true") == 0) {
+                        set_default_dark_theme(theme);
+                        theme->is_dark = TRUE;
+                    } else if (g_strcmp0(val, "false") == 0) {
+                        set_default_light_theme(theme);
+                        theme->is_dark = FALSE;
+                    }
+                }
+            } else if (state == 1) { /* ui */
+                if (g_strcmp0(key, "editor_bg") == 0 || g_strcmp0(key, "background") == 0) parse_hex_color_to_rgba(val, &theme->editor_bg);
+                else if (g_strcmp0(key, "editor_fg") == 0 || g_strcmp0(key, "foreground") == 0) parse_hex_color_to_rgba(val, &theme->editor_fg);
+                else if (g_strcmp0(key, "gutter_bg") == 0) parse_hex_color_to_rgba(val, &theme->gutter_bg);
+                else if (g_strcmp0(key, "gutter_fg") == 0) parse_hex_color_to_rgba(val, &theme->gutter_fg);
+                else if (g_strcmp0(key, "gutter_active_fg") == 0) parse_hex_color_to_rgba(val, &theme->gutter_active_fg);
+                else if (g_strcmp0(key, "line_highlight") == 0) parse_hex_color_to_rgba(val, &theme->line_highlight);
+                else if (g_strcmp0(key, "selection") == 0 || g_strcmp0(key, "accent") == 0) parse_hex_color_to_rgba(val, &theme->selection);
+                else if (g_strcmp0(key, "cursor_color") == 0) parse_hex_color_to_rgba(val, &theme->cursor_color);
+                else if (g_strcmp0(key, "find_match") == 0) parse_hex_color_to_rgba(val, &theme->find_match);
+                else if (g_strcmp0(key, "find_match_highlight") == 0) parse_hex_color_to_rgba(val, &theme->find_match_highlight);
+                
+                else if (g_strcmp0(key, "tab_active_bg") == 0 || g_strcmp0(key, "tab") == 0) parse_hex_color_to_rgba(val, &theme->tab_active_bg);
+                else if (g_strcmp0(key, "tab_active_fg") == 0) parse_hex_color_to_rgba(val, &theme->tab_active_fg);
+                else if (g_strcmp0(key, "tab_inactive_bg") == 0) parse_hex_color_to_rgba(val, &theme->tab_inactive_bg);
+                else if (g_strcmp0(key, "tab_inactive_fg") == 0) parse_hex_color_to_rgba(val, &theme->tab_inactive_fg);
+                else if (g_strcmp0(key, "tab_border") == 0 || g_strcmp0(key, "tab close button") == 0) parse_hex_color_to_rgba(val, &theme->tab_border);
+                
+                else if (g_strcmp0(key, "window") == 0 || g_strcmp0(key, "titlebar_bg") == 0) parse_hex_color_to_rgba(val, &theme->titlebar_bg);
+                else if (g_strcmp0(key, "titlebar_fg") == 0) parse_hex_color_to_rgba(val, &theme->titlebar_fg);
+                else if (g_strcmp0(key, "statusbar_bg") == 0) parse_hex_color_to_rgba(val, &theme->statusbar_bg);
+                else if (g_strcmp0(key, "statusbar_fg") == 0) parse_hex_color_to_rgba(val, &theme->statusbar_fg);
+                else if (g_strcmp0(key, "scrollbar_bg") == 0) parse_hex_color_to_rgba(val, &theme->scrollbar_bg);
+                else if (g_strcmp0(key, "scrollbar_hover") == 0 || g_strcmp0(key, "hover tab") == 0) parse_hex_color_to_rgba(val, &theme->scrollbar_hover);
+                else if (g_strcmp0(key, "scrollbar_active") == 0) parse_hex_color_to_rgba(val, &theme->scrollbar_active);
+            } else if (state >= 2) { /* syntax */
+                PangoColor color;
+                if (parse_hex_color_to_pango(val, &color)) {
+                    if (state == 2 || current_lang == LANG_NONE) { /* common syntax */
+                        apply_rule_to_slots(key, color, theme, slot_scores, slot_scores_lang);
+                    } else if (state == 3 && current_lang != LANG_NONE) {
+                        /* Create a scoped rule equivalent like 'keyword.python' */
+                        char *scoped_key = g_strdup_printf("%s.%s", key, current_lang_str);
+                        apply_rule_to_slots(scoped_key, color, theme, slot_scores, slot_scores_lang);
+                        g_free(scoped_key);
+                    }
+                }
+            }
+        }
+        g_strfreev(kv);
+        g_free(trimmed);
+    }
+    
+    g_strfreev(lines);
+    
+    if (!theme->name) {
+        char *basename = g_path_get_basename(path);
+        char *dotpos = strrchr(basename, '.');
+        if (dotpos) *dotpos = '\0';
+        theme->name = g_strdup(basename);
+        g_free(basename);
+    }
+    
+    theme->gutter_bg = theme->editor_bg; // map gutter bg
+    apply_theme_inheritance_and_fallback(theme, slot_scores);
+    theme->is_dark = detect_is_dark(&theme->editor_bg);
+    
+    return theme;
+}
+
 /* --- Theme Directory Discovery --- */
 
 static void
@@ -725,6 +892,11 @@ scan_theme_directory(const char *dir_path)
             scan_theme_directory(full_path);
         } else if (g_str_has_suffix(filename, ".json")) {
             ViteTheme *theme = load_theme_from_json(full_path);
+            if (theme) {
+                g_ptr_array_add(all_themes, theme);
+            }
+        } else if (g_str_has_suffix(filename, ".yaml") || g_str_has_suffix(filename, ".yml")) {
+            ViteTheme *theme = load_theme_from_yaml(full_path);
             if (theme) {
                 g_ptr_array_add(all_themes, theme);
             }
