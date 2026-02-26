@@ -25,52 +25,53 @@ is_default_theme(const char *name)
 static void
 set_default_dark_theme(ViteTheme *theme)
 {
-    /* One Dark colors */
+    /* One Dark colors (Brightened) */
     gdk_rgba_parse(&theme->editor_bg, "#282C34");
-    gdk_rgba_parse(&theme->editor_fg, "#ABB2BF");
+    gdk_rgba_parse(&theme->editor_fg, "#DCDFE4"); /* Brighter foreground */
     gdk_rgba_parse(&theme->gutter_bg, "#282C34");
-    gdk_rgba_parse(&theme->gutter_fg, "#636D83");
-    gdk_rgba_parse(&theme->gutter_active_fg, "#ABB2BF");
-    gdk_rgba_parse(&theme->line_highlight, "#99BBFF0A");
-    gdk_rgba_parse(&theme->selection, "#3E4451");
+    gdk_rgba_parse(&theme->gutter_fg, "#7B8497"); /* Brighter gutter */
+    gdk_rgba_parse(&theme->gutter_active_fg, "#DCDFE4"); /* Brighter active gutter */
+    gdk_rgba_parse(&theme->line_highlight, "#99BBFF14"); /* Slightly more visible line highlight */
+    gdk_rgba_parse(&theme->selection, "#4E5666"); /* Brighter selection */
     gdk_rgba_parse(&theme->cursor_color, "#528BFF");
-    gdk_rgba_parse(&theme->find_match, "#528BFF3D");
-    gdk_rgba_parse(&theme->find_match_highlight, "#528BFF3D");
+    gdk_rgba_parse(&theme->find_match, "#528BFF4D");
+    gdk_rgba_parse(&theme->find_match_highlight, "#528BFF4D");
 
     gdk_rgba_parse(&theme->tab_active_bg, "#282C34");
-    gdk_rgba_parse(&theme->tab_active_fg, "#D7DAE0");
+    gdk_rgba_parse(&theme->tab_active_fg, "#E6E9EE"); /* Brighter active tab fg */
     gdk_rgba_parse(&theme->tab_inactive_bg, "#21252B");
-    gdk_rgba_parse(&theme->tab_inactive_fg, "#9DA5B4");
+    gdk_rgba_parse(&theme->tab_inactive_fg, "#B2B9C6"); /* Brighter inactive tab fg */
     gdk_rgba_parse(&theme->tab_border, "#181A1F");
 
     gdk_rgba_parse(&theme->titlebar_bg, "#21252B");
-    gdk_rgba_parse(&theme->titlebar_fg, "#9DA5B4");
+    gdk_rgba_parse(&theme->titlebar_fg, "#B2B9C6"); /* Brighter titlebar fg */
     gdk_rgba_parse(&theme->statusbar_bg, "#21252B");
-    gdk_rgba_parse(&theme->statusbar_fg, "#9DA5B4");
+    gdk_rgba_parse(&theme->statusbar_fg, "#B2B9C6"); /* Brighter statusbar fg */
 
     gdk_rgba_parse(&theme->scrollbar_bg, "#4E566680");
     gdk_rgba_parse(&theme->scrollbar_hover, "#5A637580");
     gdk_rgba_parse(&theme->scrollbar_active, "#747D9180");
 
-    pango_color_parse(&theme->syntax[COLOR_KEYWORD], "#c678dd");
-    pango_color_parse(&theme->syntax[COLOR_BUILTIN], "#56b6c2");
-    pango_color_parse(&theme->syntax[COLOR_STRING], "#98c379");
-    pango_color_parse(&theme->syntax[COLOR_COMMENT], "#7f848e");
-    pango_color_parse(&theme->syntax[COLOR_NUMBER], "#d19a66");
-    pango_color_parse(&theme->syntax[COLOR_FUNCTION], "#61afef");
-    pango_color_parse(&theme->syntax[COLOR_TYPE], "#e5c07b");
-    pango_color_parse(&theme->syntax[COLOR_DECORATOR], "#56b6c2");
-    pango_color_parse(&theme->syntax[COLOR_VARIABLE], "#e06c75");
-    pango_color_parse(&theme->syntax[COLOR_VARIABLE_C], "#d1d1d1");
-    pango_color_parse(&theme->syntax[COLOR_CONSTANT], "#e06c75");
-    pango_color_parse(&theme->syntax[COLOR_TAG], "#e06c75");
-    pango_color_parse(&theme->syntax[COLOR_OPERATOR], "#d19a66");
-    pango_color_parse(&theme->syntax[COLOR_PUNCTUATION], "#d19a66");
-    pango_color_parse(&theme->syntax[COLOR_ATTRIBUTE], "#d19a66");
-    pango_color_parse(&theme->syntax[COLOR_PARAM], "#e06c75");
-    pango_color_parse(&theme->syntax[COLOR_PROPERTY], "#56b6c2");
-    pango_color_parse(&theme->syntax[COLOR_PREPROC], "#c678dd");
-    pango_color_parse(&theme->syntax[COLOR_LOGICAL], "#56b6c2");
+    /* Brightened Syntax Colors */
+    pango_color_parse(&theme->syntax[COLOR_KEYWORD], "#D58CFA"); /* was c678dd */
+    pango_color_parse(&theme->syntax[COLOR_BUILTIN], "#73D0DF"); /* was 56b6c2 */
+    pango_color_parse(&theme->syntax[COLOR_STRING], "#A8D98B"); /* was 98c379 */
+    pango_color_parse(&theme->syntax[COLOR_COMMENT], "#9A9FA9"); /* was 7f848e */
+    pango_color_parse(&theme->syntax[COLOR_NUMBER], "#E3AC7A"); /* was d19a66 */
+    pango_color_parse(&theme->syntax[COLOR_FUNCTION], "#79C2FF"); /* was 61afef */
+    pango_color_parse(&theme->syntax[COLOR_TYPE], "#F5D18C"); /* was e5c07b */
+    pango_color_parse(&theme->syntax[COLOR_DECORATOR], "#73D0DF"); /* was 56b6c2 */
+    pango_color_parse(&theme->syntax[COLOR_VARIABLE], "#EF828C"); /* was e06c75 */
+    pango_color_parse(&theme->syntax[COLOR_VARIABLE_C], "#E8E8E8"); /* was d1d1d1 */
+    pango_color_parse(&theme->syntax[COLOR_CONSTANT], "#EF828C"); /* was e06c75 */
+    pango_color_parse(&theme->syntax[COLOR_TAG], "#EF828C"); /* was e06c75 */
+    pango_color_parse(&theme->syntax[COLOR_OPERATOR], "#E3AC7A"); /* was d19a66 */
+    pango_color_parse(&theme->syntax[COLOR_PUNCTUATION], "#E3AC7A"); /* was d19a66 */
+    pango_color_parse(&theme->syntax[COLOR_ATTRIBUTE], "#E3AC7A"); /* was d19a66 */
+    pango_color_parse(&theme->syntax[COLOR_PARAM], "#EF828C"); /* was e06c75 */
+    pango_color_parse(&theme->syntax[COLOR_PROPERTY], "#73D0DF"); /* was 56b6c2 */
+    pango_color_parse(&theme->syntax[COLOR_PREPROC], "#D58CFA"); /* was c678dd */
+    pango_color_parse(&theme->syntax[COLOR_LOGICAL], "#73D0DF"); /* was 56b6c2 */
 
     pango_color_parse(&theme->syntax[COLOR_BRACKET_1], "#FFD700");
     pango_color_parse(&theme->syntax[COLOR_BRACKET_2], "#DA70D6");
@@ -796,7 +797,7 @@ generate_css(const ViteTheme *theme)
 
     /* Dim foreground for secondary text */
     GdkRGBA dim_fg = fg;
-    dim_fg.alpha = 0.8;
+    dim_fg.alpha = 0.9;
 
     char c_chrome[64], c_surface[64], c_bg[64], c_fg[64], c_border[64], c_hover[64], c_dim[64];
     rgba_to_css(&chrome_bg, c_chrome, sizeof(c_chrome));
