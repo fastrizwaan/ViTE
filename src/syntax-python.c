@@ -371,7 +371,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                      }
                      
                      if (owner_is_self) {
-                         add_color_attr(ctx, attrs, start_pos, cur, COLOR_VARIABLE_C); /* self.XXX -> Grey/Variable */
+                         add_color_attr(ctx, attrs, start_pos, cur, COLOR_MEMBER); /* self.XXX -> Grey/Variable */
                      } else {
                          add_color_attr(ctx, attrs, start_pos, cur, COLOR_PROPERTY); /* other.XXX -> Cyan/blue property */
                      }
@@ -394,7 +394,7 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                 }
                 /* 8. Default Variable -> Grey */
                 else {
-                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_VARIABLE_C);
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_MEMBER);
                 }
                 continue;
             }
@@ -410,10 +410,9 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                 continue;
             }
             
-            /* Punctuation */
-            /* Handle '.' specifically as Grey */
+            /* Handle '.' specifically as Punctuation */
             if (text[cur] == '.') {
-                 add_color_attr(ctx, attrs, cur, cur+1, COLOR_VARIABLE_C);
+                 add_color_attr(ctx, attrs, cur, cur+1, COLOR_PUNCTUATION);
                  cur++;
                  continue;
             }

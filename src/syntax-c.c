@@ -400,7 +400,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 if (cur < len && (g_ascii_isalpha(text[cur]) || text[cur] == '_')) {
                     size_t m_start = cur;
                     while (cur < len && (g_ascii_isalnum(text[cur]) || text[cur] == '_')) cur++;
-                    add_color_attr(ctx, attrs, m_start, cur, COLOR_VARIABLE_C);
+                    add_color_attr(ctx, attrs, m_start, cur, COLOR_MEMBER);
                 }
                 continue;
             }
@@ -448,7 +448,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     break;
                 }
                 if (num_end > start_pos) add_color_attr(ctx, attrs, start_pos, num_end, COLOR_NUMBER);
-                if (num_end < cur) add_color_attr(ctx, attrs, num_end, cur, COLOR_VARIABLE_C);
+                if (num_end < cur) add_color_attr(ctx, attrs, num_end, cur, COLOR_MEMBER);
                 continue;
             }
             
@@ -533,7 +533,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                 cur++;
                 continue;
             } else if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_VARIABLE);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_OPERATOR);
                 cur += 2;
                 /* Highlight member after -> */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -548,7 +548,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     if (p + 1 < len && text[p] == '-' && text[p+1] == '>') {
                         add_color_attr(ctx, attrs, m_start, m_end, COLOR_TYPE);
                     } else {
-                        add_color_attr(ctx, attrs, m_start, m_end, COLOR_VARIABLE_C);
+                        add_color_attr(ctx, attrs, m_start, m_end, COLOR_MEMBER);
                     }
                     /* We don't continue here; the loop will continue from cur (m_end) */
                 }
@@ -841,7 +841,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     break;
                 }
                 if (num_end > start_pos) add_color_attr(ctx, attrs, start_pos, num_end, COLOR_NUMBER);
-                if (num_end < cur) add_color_attr(ctx, attrs, num_end, cur, COLOR_VARIABLE_C);
+                if (num_end < cur) add_color_attr(ctx, attrs, num_end, cur, COLOR_MEMBER);
                 continue;
             }
 
@@ -891,6 +891,8 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     add_color_attr(ctx, attrs, start_pos, cur, COLOR_TYPE);
                 } else if (is_std_type || (word_len > 2 && word_start[word_len-1] == 't' && word_start[word_len-2] == '_')) {
                     add_color_attr(ctx, attrs, start_pos, cur, COLOR_STORAGE);
+                } else {
+                    add_color_attr(ctx, attrs, start_pos, cur, COLOR_VARIABLE);
                 }
                 continue;
             }
@@ -910,7 +912,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                  continue;
             }
             if (text[cur] == '-' && cur + 1 < len && text[cur+1] == '>') {
-                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_VARIABLE);
+                add_color_attr(ctx, attrs, cur, cur + 2, COLOR_OPERATOR);
                 cur += 2;
                 /* Highlight member after -> in red */
                 while (cur < len && g_ascii_isspace(text[cur])) cur++;
@@ -925,7 +927,7 @@ syntax_highlight_c(SyntaxContext *ctx, PangoAttrList *attrs, const char *text, s
                     if (p + 1 < len && text[p] == '-' && text[p+1] == '>') {
                         add_color_attr(ctx, attrs, m_start, m_end, COLOR_TYPE);
                     } else {
-                        add_color_attr(ctx, attrs, m_start, m_end, COLOR_VARIABLE_C);
+                        add_color_attr(ctx, attrs, m_start, m_end, COLOR_MEMBER);
                     }
                 }
                 continue;
