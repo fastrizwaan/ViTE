@@ -5709,12 +5709,12 @@ save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const cha
         if (dn && *dn) encoding_name = dn;
         
         char *body = g_strdup_printf(
-            _("This document contains characters that cannot be represented in %s.\n\n"
-              "If you save now, those characters will be permanently replaced with '?'."),
+            _("Some characters cannot be saved in %s.\n"
+              "They will be replaced if you continue."),
             encoding_name);
         
         AdwAlertDialog *dialog = ADW_ALERT_DIALOG(
-            adw_alert_dialog_new(_("Characters Cannot Be Saved"), body));
+            adw_alert_dialog_new(_("Unsupported Encoding"), body));
         g_free(body);
         
         adw_alert_dialog_add_response(dialog, "cancel",     _("Cancel"));

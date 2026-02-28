@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Gnome Nepali Translation Project\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-02-16 20:31+0530\n"
+"POT-Creation-Date: 2026-02-28 23:07+0530\n"
 "PO-Revision-Date: 2024-05-28 20:43+0545\n"
 "Last-Translator: Pawan Chitrakar <chautari@gmail.com>\n"
 "Language-Team: Nepali Team <chautari@gmail.com>\n"
@@ -18,111 +18,14 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "X-Generator: Poedit 3.4.2\n"
 
+#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
+msgid "No matches"
+msgstr ""
+
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
-
-#: src/main.c:4614
-msgid "About Virtual Text Editor"
-msgstr "पाठ सम्पादकका बारेमा"
-
-#: src/preferences.c:183
-msgid "Automatic Indentation"
-msgstr "इन्डेन्टेसन"
-
-#: src/main.c:577 src/main.c:711
-msgid "Cancel"
-msgstr "रद्द"
-
-#: src/find-replace-bar.c:745
-msgid "Case sensitive"
-msgstr ""
-
-#: src/main.c:2983
-msgid "Clear All Recents"
-msgstr ""
-
-#: src/main.c:4555
-msgid "Close View"
-msgstr "खोज बन्द गर्नुहोस्"
-
-#: src/preferences.c:99
-msgid "Custom Font"
-msgstr "अनुकूल फन्ट"
-
-#: src/main.c:4590
-msgid "Desktop Entry"
-msgstr ""
-
-#: src/main.c:578
-msgid "Discard All"
-msgstr "सबै छोड्नुहोस्"
-
-#: src/main.c:712 src/main.c:4528
-msgid "Discard Changes"
-msgstr "परिवर्तनहरू छोड्नुहोस्"
-
-#: src/main.c:708
-msgid "Discard Changes?"
-msgstr "परिवर्तनहरू छोड्नुहोस्"
-
-#: src/preferences.c:145
-msgid "Display"
-msgstr ""
-
-#: src/main.c:4545 src/preferences.c:148
-msgid "Display Line Numbers"
-msgstr "पङ्क्ति सङ्ख्या प्रदर्शन गर्नुहोस्"
-
-#: src/preferences.c:174
-msgid "Display Right Margin"
-msgstr "दायाँ सीमान्त प्रदर्शन गर्नुहोस्"
-
-#: src/main.c:4594
-msgid "Document"
-msgstr "कागजातहरू"
-
-#: src/main.c:4546 src/preferences.c:149
-msgid "Enable Code Folding"
-msgstr ""
-
-#: src/main.c:4568
-msgid "Encoding"
-msgstr "पङ्ति समाप्त:"
-
-#: src/main.c:4591
-msgid "File Type"
-msgstr "फाईल"
-
-#: src/main.c:4534
-msgid "Filter Lines"
-msgstr ""
-
-#: src/find-replace-bar.c:371
-msgid "Filtering..."
-msgstr ""
-
-#: src/find-replace-bar.c:302
-#, c-format
-msgid "Filtering... %d%% (%zu)"
-msgstr ""
-
-#: src/find-replace-bar.c:688
-msgid "Find"
-msgstr ""
-
-#: src/main.c:4535
-msgid "Find/Replace"
-msgstr "फेला पार्नुहोस् र प्रतिस्थापन गर्नुहोस्"
-
-#. UNIFIED APPROACH: Use async search for ALL files.
-#. * Stores matches in mmap'd file (disk-backed).
-#. * Uses binary search for O(log N) viewport lookup.
-#. * Highlights only visible matches to keep UI memory low.
-#: src/find-replace-bar.c:409
-msgid "Finding..."
 msgstr ""
 
 #: src/find-replace-bar.c:199
@@ -130,131 +33,45 @@ msgstr ""
 msgid "Finding... %d%% (%zu)"
 msgstr ""
 
-#: src/preferences.c:105
-msgid "Font Name"
+#: src/find-replace-bar.c:302
+#, c-format
+msgid "Filtering... %d%% (%zu)"
 msgstr ""
 
-#: src/main.c:4607
-msgid "Fullscreen"
+#: src/find-replace-bar.c:371
+msgid "Filtering..."
 msgstr ""
 
-#: src/main.c:3401
-msgid "Go to Line:"
-msgstr "लाइनमा जानुहोस्"
-
-#: src/main.c:4536
-msgid "Go to Line…"
-msgstr "लाइनमा जानुहोस्"
-
-#: src/main.c:4585
-msgid "Header"
+#: src/find-replace-bar.c:409
+msgid "Finding..."
 msgstr ""
 
-#: src/preferences.c:151
-msgid "Highlight Current Line"
-msgstr "हालको लाइन हाइलाइट गर्नुहोस्"
-
-#: src/preferences.c:186
-msgid "Indent Width"
-msgstr "इन्डेन्ट चौडाइ"
-
-#: src/preferences.c:125 src/preferences.c:180
-msgid "Indentation"
-msgstr "इन्डेन्टेसन"
-
-#: src/main.c:4613
-msgid "Keyboard Shortcuts"
-msgstr "कुञ्जीपाटी सर्टकट"
-
-#: src/main.c:4310
-msgid "Leave Fullscreen"
-msgstr "पूरा पर्दा छोड्नुहोस्"
-
-#: src/main.c:4574
-msgid "Legacy Mac (CR)"
+#: src/find-replace-bar.c:688
+msgid "Find"
 msgstr ""
-
-#: src/main.c:4575
-msgid "Line Ending"
-msgstr "पङ्ति समाप्त:"
-
-#: src/preferences.c:171
-msgid "Line Wrap"
-msgstr ""
-
-#: src/main.c:4622
-msgid "Main Menu"
-msgstr "मुख्य मेनु"
-
-#: src/find-replace-bar.c:749
-msgid "Match whole word only"
-msgstr ""
-
-#: src/main.c:4547 src/preferences.c:150
-msgid "Minimap"
-msgstr ""
-
-#: src/main.c:4512
-msgid "New Tab"
-msgstr "नयाँ ट्याब"
-
-#. Group 1: New Window, etc.
-#: src/main.c:4522
-msgid "New Window"
-msgstr "नयाँ सञ्झ्याल"
-
-#: src/find-replace-bar.c:715
-msgid "Next Match"
-msgstr "पछिल्लो फेला पार्नुहोस्"
-
-#: src/find-replace-bar.c:132 src/find-replace-bar.c:152
-msgid "No matches"
-msgstr ""
-
-#: src/main.c:4435
-msgid "Open"
-msgstr "खुला"
-
-#. Styling to look like single button by default
-#. By default AdwSplitButton looks joined. We can add specific classes if needed.
-#: src/main.c:4502
-msgid "Open File"
-msgstr "फाइल खोल्नुहोस्"
-
-#: src/main.c:4641
-msgid "Open Tabs"
-msgstr "नयाँ ट्याब"
-
-#: src/main.c:500
-msgid ""
-"Open documents contain unsaved changes.\n"
-"Changes which are not saved will be permanently lost."
-msgstr ""
-"खुला कागजातले बचत नगरिएको परिवर्तनहरू समाविष्ट गर्दछ । बचत नगरिएका परिवर्तनहरू स्थायी "
-"रूपले नष्ट हुनेछन् ।"
-
-#: src/main.c:4579
-msgid "Plain Text"
-msgstr "सादा पाठ"
-
-#: src/main.c:4615
-msgid "Preferences"
-msgstr "प्राथमिकता"
 
 #: src/find-replace-bar.c:711
 msgid "Previous Match"
 msgstr "अघिल्लो फेला पार्नुहोस्"
 
-#: src/main.c:4602
-msgid "Print"
-msgstr "मुद्रण…"
+#: src/find-replace-bar.c:715
+msgid "Next Match"
+msgstr "पछिल्लो फेला पार्नुहोस्"
+
+#: src/find-replace-bar.c:723
+msgid "Toggle Replace"
+msgstr ""
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
 msgstr ""
 
-#: src/main.c:2977
-msgid "Remove from Recents"
+#: src/find-replace-bar.c:745
+msgid "Case sensitive"
+msgstr ""
+
+#: src/find-replace-bar.c:749
+msgid "Match whole word only"
 msgstr ""
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
@@ -265,89 +82,361 @@ msgstr "बदलनुहोस्"
 msgid "Replace All"
 msgstr "सबै प्रतिस्थापन गर्नुहोस्"
 
-#: src/preferences.c:175
-msgid "Right Margin Position"
-msgstr "दायाँ सीमान्त स्थिति"
+#: src/main.c:23 src/main.c:4619 src/status-bar.c:229 src/status-bar.c:454
+#: src/status-bar.c:534
+msgid "Plain Text"
+msgstr "सादा पाठ"
 
-#. Save Button
-#: src/main.c:579 src/main.c:4526 src/main.c:4626
-msgid "Save"
-msgstr "बचत गर्नुस"
-
-#: src/main.c:4627
-msgid "Save (Ctrl+S)"
+#: src/main.c:29 src/main.c:4625
+msgid "Header"
 msgstr ""
 
-#: src/main.c:5620
-msgid "Save As"
-msgstr "यसमा बचत गर्नुहोस्"
+#: src/main.c:34 src/main.c:4630
+msgid "Desktop Entry"
+msgstr ""
 
-#: src/main.c:4527
-msgid "Save As…"
-msgstr "बचत गर्नुहोस्…"
-
-#: src/main.c:495
+#: src/main.c:496
 msgid "Save Changes?"
 msgstr "परिवर्तनहरू बचत गर्नुहुन्छ?"
 
-#: src/main.c:4462
-msgid "Search documents"
-msgstr "कागजातहरू खोजी गर्नुहोस्"
-
-#: src/preferences.c:107
-msgid "Select..."
+#: src/main.c:501
+msgid ""
+"Open documents contain unsaved changes.\n"
+"Changes which are not saved will be permanently lost."
 msgstr ""
+"खुला कागजातले बचत नगरिएको परिवर्तनहरू समाविष्ट गर्दछ । बचत नगरिएका परिवर्तनहरू स्थायी "
+"रूपले नष्ट हुनेछन् ।"
 
-#: src/main.c:4550 src/preferences.c:155
-msgid "Show Save Button"
-msgstr ""
+#: src/main.c:578 src/main.c:712 src/main.c:5720
+msgid "Cancel"
+msgstr "रद्द"
 
-#: src/main.c:4549
-msgid "Show Status Bar"
-msgstr ""
+#: src/main.c:579
+msgid "Discard All"
+msgstr "सबै छोड्नुहोस्"
 
-#: src/main.c:4554
-msgid "Split down"
-msgstr ""
-
-#: src/main.c:4553
-msgid "Split right"
-msgstr ""
-
-#: src/preferences.c:185
-msgid "Tab Width"
-msgstr "ट्याब चौडाइ"
-
-#: src/preferences.c:176
-msgid "Text Wrapping"
-msgstr "पाठ बेराइ"
+#: src/main.c:580 src/main.c:4555 src/main.c:4666
+msgid "Save"
+msgstr "बचत गर्नुस"
 
 #: src/main.c:709
+msgid "Discard Changes?"
+msgstr "परिवर्तनहरू छोड्नुहोस्"
+
+#: src/main.c:710
 msgid ""
 "This will undo all changes and clear undo/redo history. The document will "
 "return to its last saved (or opened) state."
 msgstr ""
 
-#: src/find-replace-bar.c:723
-msgid "Toggle Replace"
+#: src/main.c:713 src/main.c:4557
+msgid "Discard Changes"
+msgstr "परिवर्तनहरू छोड्नुहोस्"
+
+#: src/main.c:2998
+msgid "Remove from Recents"
 msgstr ""
 
-#: src/preferences.c:164
-msgid "Typography"
+#: src/main.c:3004
+msgid "Clear All Recents"
 msgstr ""
 
-#: src/main.c:4572
-msgid "Unix/Linux (LF)"
-msgstr "युनिक्स्/लिनक्स् (LF)"
+#: src/main.c:3426
+msgid "Go to Line:"
+msgstr "लाइनमा जानुहोस्"
 
-#: src/main.c:4558
+#: src/main.c:4339
+msgid "Leave Fullscreen"
+msgstr "पूरा पर्दा छोड्नुहोस्"
+
+#: src/main.c:4464
+msgid "Open"
+msgstr "खुला"
+
+#: src/main.c:4491
+msgid "Search documents"
+msgstr "कागजातहरू खोजी गर्नुहोस्"
+
+#: src/main.c:4531
+msgid "Open File"
+msgstr "फाइल खोल्नुहोस्"
+
+#: src/main.c:4541
+msgid "New Tab"
+msgstr "नयाँ ट्याब"
+
+#: src/main.c:4551
+msgid "New Window"
+msgstr "नयाँ सञ्झ्याल"
+
+#: src/main.c:4556
+msgid "Save As…"
+msgstr "बचत गर्नुहोस्…"
+
+#: src/main.c:4563
+msgid "Filter Lines"
+msgstr ""
+
+#: src/main.c:4564
+msgid "Find/Replace"
+msgstr "फेला पार्नुहोस् र प्रतिस्थापन गर्नुहोस्"
+
+#: src/main.c:4565
+msgid "Go to Line…"
+msgstr "लाइनमा जानुहोस्"
+
+#: src/main.c:4574 src/preferences.c:196
+msgid "Display Line Numbers"
+msgstr "पङ्क्ति सङ्ख्या प्रदर्शन गर्नुहोस्"
+
+#: src/main.c:4575 src/preferences.c:197
+msgid "Enable Code Folding"
+msgstr ""
+
+#: src/main.c:4576 src/preferences.c:198
+msgid "Show Overview Map"
+msgstr ""
+
+#: src/main.c:4577
+msgid "Word Wrap"
+msgstr ""
+
+#: src/main.c:4578
+msgid "Show Status Bar"
+msgstr ""
+
+#: src/main.c:4579 src/preferences.c:203
+msgid "Show Save Button"
+msgstr ""
+
+#: src/main.c:4584
+msgid "Split Left"
+msgstr ""
+
+#: src/main.c:4585 src/main.c:4588
+msgid "Split Down"
+msgstr ""
+
+#: src/main.c:4587
+msgid "Split Right"
+msgstr ""
+
+#: src/main.c:4590
+msgid "Close View"
+msgstr "खोज बन्द गर्नुहोस्"
+
+#: src/main.c:4593
 msgid "View"
 msgstr "दृश्य"
 
-#: src/main.c:4573
+#: src/main.c:4608 src/status-bar.c:466
+msgid "Encoding"
+msgstr "पङ्ति समाप्त:"
+
+#: src/main.c:4612 src/status-bar.c:133
+msgid "Unix/Linux (LF)"
+msgstr "युनिक्स्/लिनक्स् (LF)"
+
+#: src/main.c:4613 src/status-bar.c:134
 msgid "Windows (CRLF)"
 msgstr "विन्डोहरू (CR+LF)"
 
-#: src/main.c:4548
-msgid "Word Wrap"
+#: src/main.c:4614 src/status-bar.c:135
+msgid "Legacy Mac (CR)"
+msgstr ""
+
+#: src/main.c:4615 src/status-bar.c:473
+msgid "Line Ending"
+msgstr "पङ्ति समाप्त:"
+
+#: src/main.c:4631 src/status-bar.c:454
+msgid "File Type"
+msgstr "फाईल"
+
+#: src/main.c:4634
+msgid "Document"
+msgstr "कागजातहरू"
+
+#: src/main.c:4642
+msgid "Print"
+msgstr "मुद्रण…"
+
+#: src/main.c:4647
+msgid "Fullscreen"
+msgstr ""
+
+#: src/main.c:4653
+msgid "Keyboard Shortcuts"
+msgstr "कुञ्जीपाटी सर्टकट"
+
+#: src/main.c:4654
+msgid "About Virtual Text Editor"
+msgstr "पाठ सम्पादकका बारेमा"
+
+#: src/main.c:4655
+msgid "Preferences"
+msgstr "प्राथमिकता"
+
+#: src/main.c:4662
+msgid "Main Menu"
+msgstr "मुख्य मेनु"
+
+#: src/main.c:4667
+msgid "Save (Ctrl+S)"
+msgstr ""
+
+#: src/main.c:4681
+msgid "Open Tabs"
+msgstr "नयाँ ट्याब"
+
+#: src/main.c:5562 src/main.c:5624
+msgid "Save Failed"
+msgstr ""
+
+#: src/main.c:5563 src/main.c:5594 src/main.c:5626
+msgid "OK"
+msgstr ""
+
+#: src/main.c:5588
+#, c-format
+msgid ""
+"Some characters in this document cannot be represented in %s and were "
+"replaced with ‘?’ in the saved file.\n"
+"\n"
+"Switch to UTF-8 encoding to preserve all characters."
+msgstr ""
+
+#: src/main.c:5593
+msgid "Characters Lost During Save"
+msgstr ""
+
+#: src/main.c:5625
+msgid "Could not start save operation. Check permissions or disk space."
+msgstr ""
+
+#: src/main.c:5712
+#, c-format
+msgid ""
+"Some characters cannot be saved in %s.\n"
+"They will be replaced if you continue."
+msgstr "केही अक्षरहरू %s मा सुरक्षित गर्न सकिँदैन।
+यदि जारी राख्नुभयो भने तिनीहरू प्रतिस्थापित हुनेछन्।"
+
+#: src/main.c:5717
+msgid "Unsupported Encoding"
+msgstr "असमर्थित इन्कोडिङ"
+
+#: src/main.c:5721
+msgid "Save Anyway"
+msgstr "जे होस् सुरक्षित गर्नुस्"
+
+#: src/main.c:5722
+msgid "Save as UTF-8"
+msgstr "UTF-8 को रूपमा सुरक्षित गर्नुस्"
+
+#: src/main.c:5786
+msgid "Save As"
+msgstr "यसमा बचत गर्नुहोस्"
+
+#: src/preferences.c:100
+msgid "Custom Font"
+msgstr "अनुकूल फन्ट"
+
+#: src/preferences.c:106
+msgid "Font Name"
+msgstr ""
+
+#: src/preferences.c:108
+msgid "Select..."
+msgstr ""
+
+#: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
+msgid "Indentation"
+msgstr "इन्डेन्टेसन"
+
+#: src/preferences.c:170
+msgid "Theme"
+msgstr ""
+
+#: src/preferences.c:174
+msgid "Color Theme"
+msgstr ""
+
+#: src/preferences.c:193
+msgid "Display"
+msgstr ""
+
+#: src/preferences.c:199
+msgid "Highlight Current Line"
+msgstr "हालको लाइन हाइलाइट गर्नुहोस्"
+
+#: src/preferences.c:212
+msgid "Typography"
+msgstr ""
+
+#: src/preferences.c:219
+msgid "Line Wrap"
+msgstr ""
+
+#: src/preferences.c:222
+msgid "Display Right Margin"
+msgstr "दायाँ सीमान्त प्रदर्शन गर्नुहोस्"
+
+#: src/preferences.c:223
+msgid "Right Margin Position"
+msgstr "दायाँ सीमान्त स्थिति"
+
+#: src/preferences.c:224
+msgid "Text Wrapping"
+msgstr "पाठ बेराइ"
+
+#: src/preferences.c:231
+msgid "Automatic Indentation"
+msgstr "इन्डेन्टेसन"
+
+#: src/preferences.c:233 src/status-bar.c:379
+msgid "Tab Width"
+msgstr "ट्याब चौडाइ"
+
+#: src/preferences.c:234
+msgid "Indent Width"
+msgstr "इन्डेन्ट चौडाइ"
+
+#: src/status-bar.c:369
+msgid "Tabs"
+msgstr ""
+
+#: src/status-bar.c:370
+msgid "Spaces"
+msgstr ""
+
+#: src/status-bar.c:371
+msgid "Indentation Mode"
+msgstr ""
+
+#: src/status-bar.c:460
+msgid "Tab: 4"
+msgstr ""
+
+#: src/status-bar.c:515
+msgid "<span font_weight='normal'>INS</span>"
+msgstr ""
+
+#: src/status-bar.c:517
+msgid "<span font_weight='bold'>OVR</span>"
+msgstr ""
+
+#: src/status-bar.c:525
+#, c-format
+msgid "Ln %d, Col %d"
+msgstr ""
+
+#: src/status-bar.c:587
+#, c-format
+msgid "Tab: %d"
+msgstr ""
+
+#: src/status-bar.c:589
+#, c-format
+msgid "Spaces: %d"
 msgstr ""
