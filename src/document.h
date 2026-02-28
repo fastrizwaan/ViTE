@@ -60,6 +60,7 @@ typedef void (*DocumentSaveProgressCallback)(double progress, gboolean finished,
 DocumentSaveTask *document_save_async_start(Document *doc, const char *path);
 gboolean document_save_async_step(DocumentSaveTask *task, gint64 budget_us, double *progress_out);
 void document_save_async_finish(DocumentSaveTask *task, GError **error);
+gboolean document_save_async_had_lossy(DocumentSaveTask *task);
 void document_save_async_cancel(DocumentSaveTask *task);
 
 /* Content Observation & Partial Invalidation */

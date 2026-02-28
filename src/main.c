@@ -5370,6 +5370,8 @@ typedef struct {
     /* Progress Reporting */
     GMainContext *context;
     GSource *idle_source;
+    /* Lossy encoding conversion flag: set if any chars were replaced with '?' */
+    gboolean had_lossy_conversion;
 } SaveWorkerData;
 
 /* Helpers for progress */
@@ -5458,6 +5460,8 @@ save_worker_wrapper(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer 
         document_save_async_cancel(save_task);
         g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
     } else {
+        /* Query lossy BEFORE finish() frees the task */
+        data->had_lossy_conversion = document_save_async_had_lossy(save_task);
         document_save_async_finish(save_task, &error);
         if (error) {
             g_task_return_error(task, error);
@@ -5555,9 +5559,43 @@ on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user
              if (error && !g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
                  GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(win->window));
                  if (root) {
-                     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save Failed", error->message));
-                     adw_alert_dialog_add_response(dialog, "ok", "OK");
+                     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(_("Save Failed"), error->message));
+                     adw_alert_dialog_add_response(dialog, "ok", _("OK"));
                      adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
+                 }
+             } else if (!error && data->had_lossy_conversion) {
+                 /* File was saved, but some characters couldn't be represented in
+                    the target encoding and were replaced with '?'. Warn the user. */
+                 GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(win->window));
+                 if (root) {
+                     const char *encoding_name = "the target encoding";
+                     /* Try to get encoding display name from the saved document */
+                     ViteTab *saved_tab_for_enc = g_weak_ref_get(&data->tab_ref);
+                     if (saved_tab_for_enc) {
+                         GtkWidget *page_for_enc = g_object_get_data(G_OBJECT(saved_tab_for_enc), "page");
+                         GtkWidget *ed_for_enc = find_first_editor_recursive(page_for_enc);
+                         if (ed_for_enc && EDITOR_IS_WIDGET(ed_for_enc)) {
+                             Document *d_for_enc = editor_widget_get_document(EDITOR_WIDGET(ed_for_enc));
+                             if (d_for_enc) {
+                                 FileEncoding fe = document_get_encoding(d_for_enc);
+                                 const char *dn = file_encoding_to_display_name(fe);
+                                 if (dn && *dn) encoding_name = dn;
+                             }
+                         }
+                         g_object_unref(saved_tab_for_enc);
+                     }
+                     char *body = g_strdup_printf(
+                         _("Some characters in this document cannot be represented in %s "
+                           "and were replaced with \u2018?\u2019 in the saved file.\n\n"
+                           "Switch to UTF-8 encoding to preserve all characters."),
+                         encoding_name);
+                     AdwAlertDialog *lossy_dialog = ADW_ALERT_DIALOG(
+                         adw_alert_dialog_new(_("Characters Lost During Save"), body));
+                     adw_alert_dialog_add_response(lossy_dialog, "ok", _("OK"));
+                     adw_alert_dialog_set_response_appearance(lossy_dialog, "ok",
+                                                              ADW_RESPONSE_SUGGESTED);
+                     adw_alert_dialog_choose(lossy_dialog, GTK_WIDGET(root), NULL, NULL, NULL);
+                     g_free(body);
                  }
              }
          }

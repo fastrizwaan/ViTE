@@ -3527,7 +3527,10 @@ struct _PieceTableSaveTask {
     size_t pending_len;
     
     /* State for newline normalization */
-    gboolean saved_cr; 
+    gboolean saved_cr;
+
+    /* Set when encoding conversion replaced chars with '?' (lossy save) */
+    gboolean had_lossy_conversion;
 };
 
 PieceTableSaveTask *
@@ -3719,11 +3722,13 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
         
         /* 2. Encoding Conversion */
         if (need_conversion && data_len > 0) {
-            /* Sanitize: replace invalid UTF-8 bytes with U+FFFD before converting */
+            /* Sanitize: replace invalid UTF-8 bytes with U+FFFD before converting.
+               Any sanitization is itself lossy, so flag it. */
             gchar *sanitized = NULL;
             const char *src_utf8 = data_to_encode;
             gsize src_len = data_len;
             if (!g_utf8_validate(data_to_encode, (gssize)data_len, NULL)) {
+                task->had_lossy_conversion = TRUE; /* Bad bytes in input = lossy */
                 GString *safe = g_string_sized_new(data_len);
                 const char *p = data_to_encode;
                 const char *end_p = data_to_encode + data_len;
@@ -3744,12 +3749,22 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
                 src_utf8 = sanitized;
             }
 
+            /* First try strict conversion (no substitution). */
             gsize bytes_conv_written;
             GError *conv_error = NULL;
-            char *utf16_data = g_convert_with_fallback(src_utf8, (gssize)src_len,
-                                                        target_charset, "UTF-8",
-                                                        "?",
-                                                        NULL, &bytes_conv_written, &conv_error);
+            char *utf16_data = g_convert(src_utf8, (gssize)src_len,
+                                          target_charset, "UTF-8",
+                                          NULL, &bytes_conv_written, &conv_error);
+            if (!utf16_data) {
+                /* Strict conversion failed - some chars can't be represented.
+                   Fall back to lossy conversion with '?' replacement. */
+                g_clear_error(&conv_error);
+                task->had_lossy_conversion = TRUE;
+                utf16_data = g_convert_with_fallback(src_utf8, (gssize)src_len,
+                                                      target_charset, "UTF-8",
+                                                      "?",
+                                                      NULL, &bytes_conv_written, &conv_error);
+            }
             g_free(sanitized);
             
             if (!utf16_data) {
@@ -3829,6 +3844,12 @@ piece_table_save_async_get_error(PieceTableSaveTask *task)
         return g_error_copy(task->error);
     }
     return NULL;
+}
+
+gboolean
+piece_table_save_async_had_lossy(PieceTableSaveTask *task)
+{
+    return task ? task->had_lossy_conversion : FALSE;
 }
 
 void

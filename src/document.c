@@ -3491,6 +3491,13 @@ document_save_async_cancel(DocumentSaveTask *task)
     }
 }
 
+gboolean
+document_save_async_had_lossy(DocumentSaveTask *task)
+{
+    if (!task || !task->pt_task) return FALSE;
+    return piece_table_save_async_had_lossy(task->pt_task);
+}
+
 size_t
 document_get_line_into(Document *doc, size_t line_index, char *buf, size_t buf_len)
 {
