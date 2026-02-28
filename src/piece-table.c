@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <uchardet.h>
 
 /* -- DiskBuffer: Zero-RAM disk-backed buffer using mmap -- */
 
@@ -368,6 +369,67 @@ file_encoding_is_stream_safe(FileEncoding enc)
     return info ? info->stream_safe : TRUE;
 }
 
+/* Map a charset name reported by uchardet to our internal FileEncoding enum.
+   uchardet returns IANA/MIME charset names (case-insensitive). */
+static FileEncoding
+uchardet_charset_to_encoding(const char *charset)
+{
+    if (!charset || *charset == '\0')
+        return ENCODING_UTF8;
+
+    /* UTF variants */
+    if (g_ascii_strcasecmp(charset, "UTF-8") == 0)         return ENCODING_UTF8;
+    if (g_ascii_strcasecmp(charset, "UTF-16") == 0)        return ENCODING_UTF16LE; /* default LE */
+    if (g_ascii_strcasecmp(charset, "UTF-16LE") == 0)      return ENCODING_UTF16LE;
+    if (g_ascii_strcasecmp(charset, "UTF-16BE") == 0)      return ENCODING_UTF16BE;
+    if (g_ascii_strcasecmp(charset, "UTF-32") == 0)        return ENCODING_UTF32LE;
+    if (g_ascii_strcasecmp(charset, "UTF-32LE") == 0)      return ENCODING_UTF32LE;
+    if (g_ascii_strcasecmp(charset, "UTF-32BE") == 0)      return ENCODING_UTF32BE;
+
+    /* Windows code pages */
+    if (g_ascii_strcasecmp(charset, "windows-1250") == 0)  return ENCODING_WINDOWS_1250;
+    if (g_ascii_strcasecmp(charset, "windows-1251") == 0)  return ENCODING_WINDOWS_1251;
+    if (g_ascii_strcasecmp(charset, "windows-1252") == 0)  return ENCODING_WINDOWS_1252;
+    if (g_ascii_strcasecmp(charset, "windows-1253") == 0)  return ENCODING_WINDOWS_1253;
+    if (g_ascii_strcasecmp(charset, "windows-1254") == 0)  return ENCODING_WINDOWS_1254;
+    if (g_ascii_strcasecmp(charset, "windows-1255") == 0)  return ENCODING_WINDOWS_1255;
+    if (g_ascii_strcasecmp(charset, "windows-1256") == 0)  return ENCODING_WINDOWS_1256;
+    if (g_ascii_strcasecmp(charset, "windows-1257") == 0)  return ENCODING_WINDOWS_1257;
+    if (g_ascii_strcasecmp(charset, "windows-1258") == 0)  return ENCODING_WINDOWS_1258;
+
+    /* ISO 8859 */
+    if (g_ascii_strcasecmp(charset, "ISO-8859-1") == 0)    return ENCODING_ISO_8859_1;
+    if (g_ascii_strcasecmp(charset, "ISO-8859-2") == 0)    return ENCODING_ISO_8859_2;
+    if (g_ascii_strcasecmp(charset, "ISO-8859-5") == 0)    return ENCODING_ISO_8859_5;
+    if (g_ascii_strcasecmp(charset, "ISO-8859-6") == 0)    return ENCODING_ISO_8859_6;
+    if (g_ascii_strcasecmp(charset, "ISO-8859-7") == 0)    return ENCODING_ISO_8859_7;
+    if (g_ascii_strcasecmp(charset, "ISO-8859-8") == 0)    return ENCODING_ISO_8859_8;
+    if (g_ascii_strcasecmp(charset, "ISO-8859-9") == 0)    return ENCODING_ISO_8859_9;
+    if (g_ascii_strcasecmp(charset, "ISO-8859-13") == 0)   return ENCODING_ISO_8859_13;
+    if (g_ascii_strcasecmp(charset, "ISO-8859-15") == 0)   return ENCODING_ISO_8859_15;
+
+    /* CJK */
+    if (g_ascii_strcasecmp(charset, "GB18030") == 0)       return ENCODING_GB18030;
+    if (g_ascii_strcasecmp(charset, "GBK") == 0)           return ENCODING_GB18030;
+    if (g_ascii_strcasecmp(charset, "GB2312") == 0)        return ENCODING_GB18030;
+    if (g_ascii_strcasecmp(charset, "Big5") == 0)          return ENCODING_BIG5;
+    if (g_ascii_strcasecmp(charset, "EUC-JP") == 0)        return ENCODING_EUC_JP;
+    if (g_ascii_strcasecmp(charset, "EUC-KR") == 0)        return ENCODING_EUC_KR;
+    if (g_ascii_strcasecmp(charset, "Shift_JIS") == 0 ||
+        g_ascii_strcasecmp(charset, "SHIFT-JIS") == 0 ||
+        g_ascii_strcasecmp(charset, "SJIS") == 0)          return ENCODING_SHIFT_JIS;
+    if (g_ascii_strcasecmp(charset, "ISO-2022-JP") == 0)   return ENCODING_ISO_2022_JP;
+    if (g_ascii_strcasecmp(charset, "CP949") == 0 ||
+        g_ascii_strcasecmp(charset, "UHC") == 0)           return ENCODING_CP949;
+
+    /* KOI8 */
+    if (g_ascii_strcasecmp(charset, "KOI8-R") == 0)        return ENCODING_KOI8_R;
+    if (g_ascii_strcasecmp(charset, "KOI8-U") == 0)        return ENCODING_KOI8_U;
+
+    /* Try as a raw charset id in our table */
+    return file_encoding_from_id(charset);
+}
+
 static void
 detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_bom, size_t *bom_len)
 {
@@ -375,6 +437,7 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
     *has_bom = FALSE;
     *bom_len = 0;
 
+    /* --- BOM detection (highest confidence) --- */
     if (size >= 4 &&
         (unsigned char)data[0] == 0xFF && (unsigned char)data[1] == 0xFE &&
         (unsigned char)data[2] == 0x00 && (unsigned char)data[3] == 0x00) {
@@ -389,98 +452,73 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
         *has_bom = TRUE;
         *bom_len = 4;
         return;
-    } else if (size >= 3 && (unsigned char)data[0] == 0xEF && (unsigned char)data[1] == 0xBB && (unsigned char)data[2] == 0xBF) {
+    } else if (size >= 3 &&
+               (unsigned char)data[0] == 0xEF &&
+               (unsigned char)data[1] == 0xBB &&
+               (unsigned char)data[2] == 0xBF) {
         *enc = ENCODING_UTF8;
         *has_bom = TRUE;
         *bom_len = 3;
         return;
-    } else if (size >= 2 && (unsigned char)data[0] == 0xFF && (unsigned char)data[1] == 0xFE) {
+    } else if (size >= 2 &&
+               (unsigned char)data[0] == 0xFF &&
+               (unsigned char)data[1] == 0xFE) {
         *enc = ENCODING_UTF16LE;
         *has_bom = TRUE;
         *bom_len = 2;
         return;
-    } else if (size >= 2 && (unsigned char)data[0] == 0xFE && (unsigned char)data[1] == 0xFF) {
+    } else if (size >= 2 &&
+               (unsigned char)data[0] == 0xFE &&
+               (unsigned char)data[1] == 0xFF) {
         *enc = ENCODING_UTF16BE;
         *has_bom = TRUE;
         *bom_len = 2;
         return;
     }
 
-    /* Heuristic: Check for UTF-16 without BOM */
-    size_t check_len = (size > 65536) ? 65536 : size;
-    
-    if (size >= 4) {
-        /* Check if it's valid UTF-8 first (optimization: check only first 64KB). */
-        const char *invalid_pos = NULL;
-        if (!g_utf8_validate(data, check_len, &invalid_pos)) {
-            /* If failure happens at the sampled boundary, it can be a valid file
-               truncated mid-codepoint by check_len. Validate full input then. */
-            if (size > check_len &&
-                invalid_pos &&
-                invalid_pos >= data + ((check_len > 4) ? (check_len - 4) : 0) &&
-                g_utf8_validate(data, size, NULL)) {
-                *enc = ENCODING_UTF8;
-                return;
-            }
+    if (size == 0) return;
 
-            size_t le_count = 0;
-            size_t be_count = 0;
-            
-            for (size_t i = 0; i < check_len - 1; i += 2) {
-                if (data[i+1] == 0 && data[i] != 0) le_count++;
-                if (data[i] == 0 && data[i+1] != 0) be_count++;
-            }
-
-            size_t u32_le_count = 0;
-            size_t u32_be_count = 0;
-            for (size_t i = 0; i + 3 < check_len; i += 4) {
-                if (data[i] != 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 0) u32_le_count++;
-                if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] != 0) u32_be_count++;
-            }
-
-            if (u32_le_count > check_len / 16) {
-                *enc = ENCODING_UTF32LE;
-            } else if (u32_be_count > check_len / 16) {
-                *enc = ENCODING_UTF32BE;
-            } else if (le_count > check_len / 4) {
-                *enc = ENCODING_UTF16LE;
-            } else if (be_count > check_len / 4) {
-                *enc = ENCODING_UTF16BE;
-            } else {
-                /* Not valid UTF-8 and doesn't look like UTF-16. */
-                gboolean has_escape_sequence = FALSE;
-                for (size_t i = 0; i < check_len; i++) {
-                    if ((unsigned char)data[i] == 0x1B) {
-                        has_escape_sequence = TRUE;
-                        break;
-                    }
-                    if (i + 1 < check_len && data[i] == '~' && data[i+1] == '{') {
-                        has_escape_sequence = TRUE;
-                        break;
-                    }
-                }
-                if (has_escape_sequence) {
-                    *enc = ENCODING_ISO_2022_JP;
+    /* --- uchardet-based detection (no BOM found) --- */
+    {
+        size_t probe_len = (size > 65536) ? 65536 : size;
+        uchardet_t ud = uchardet_new();
+        if (ud) {
+            int rc = uchardet_handle_data(ud, data, probe_len);
+            if (rc == 0) {
+                uchardet_data_end(ud);
+                const char *charset = uchardet_get_charset(ud);
+                if (charset && *charset != '\0') {
+                    FileEncoding detected = uchardet_charset_to_encoding(charset);
+                    uchardet_delete(ud);
+                    *enc = detected;
                     return;
                 }
-
-                /* Check for Windows-1252 characters (0x80-0x9F) */
-                gboolean has_win1252 = FALSE;
-                for (size_t i = 0; i < check_len; i++) {
-                    unsigned char c = (unsigned char)data[i];
-                    if (c >= 0x80 && c <= 0x9F) {
-                        has_win1252 = TRUE;
-                        break;
-                    }
-                }
-                
-                if (has_win1252) {
-                    *enc = ENCODING_WINDOWS_1252;
-                } else {
-                    *enc = ENCODING_ISO_8859_1;
-                }
             }
+            uchardet_delete(ud);
         }
+    }
+
+    /* --- Fallback: simple null-byte heuristic for UTF-16 without BOM --- */
+    {
+        size_t check_len = (size > 65536) ? 65536 : size;
+        if (size >= 4) {
+            size_t le_count = 0, be_count = 0;
+            for (size_t i = 0; i + 1 < check_len; i += 2) {
+                if (data[i+1] == 0 && data[i] != 0) le_count++;
+                if (data[i]   == 0 && data[i+1] != 0) be_count++;
+            }
+            size_t u32_le = 0, u32_be = 0;
+            for (size_t i = 0; i + 3 < check_len; i += 4) {
+                if (data[i] != 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 0) u32_le++;
+                if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] != 0) u32_be++;
+            }
+            if      (u32_le > check_len / 16) { *enc = ENCODING_UTF32LE; return; }
+            else if (u32_be > check_len / 16) { *enc = ENCODING_UTF32BE; return; }
+            else if (le_count > check_len / 4) { *enc = ENCODING_UTF16LE; return; }
+            else if (be_count > check_len / 4) { *enc = ENCODING_UTF16BE; return; }
+        }
+        /* Default: treat as UTF-8 */
+        *enc = ENCODING_UTF8;
     }
 }
 

@@ -10,6 +10,7 @@ gtk_dep = dependency('gtk4', version: '>= 4.0.0')
 adw_dep = dependency('libadwaita-1', version: '>= 1.0.0')
 m_dep = cc.find_library('m', required : false)
 json_glib_dep = dependency('json-glib-1.0', version: '>= 1.0.0')
+uchardet_dep = dependency('uchardet', required: true)
 
 i18n = import('i18n')
 
@@ -60,7 +61,7 @@ subdir('po')
 
 executable('vite',
   sources,
-  dependencies : [gtk_dep, adw_dep, m_dep, json_glib_dep],
+  dependencies : [gtk_dep, adw_dep, m_dep, json_glib_dep, uchardet_dep],
   install : true)
 
 # Install desktop file
