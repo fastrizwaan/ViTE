@@ -3432,31 +3432,59 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
                 ptr++;
             }
             
+            data_len = converted->len;
             crlf_data = g_string_free(converted, FALSE);
             data_to_encode = crlf_data;
-            data_len = strlen(crlf_data);
         }
         
         /* Step 2: Handle encoding conversion */
         if (need_conversion && data_len > 0) {
+            /* Sanitize: ensure input is valid UTF-8 before conversion;
+               invalid byte sequences are replaced with the UTF-8 replacement char. */
+            gchar *sanitized = NULL;
+            const char *src_utf8 = data_to_encode;
+            gsize src_len = data_len;
+            if (!g_utf8_validate(data_to_encode, (gssize)data_len, NULL)) {
+                GString *safe = g_string_sized_new(data_len);
+                const char *p = data_to_encode;
+                const char *end_p = data_to_encode + data_len;
+                while (p < end_p) {
+                    gunichar ch = g_utf8_get_char_validated(p, end_p - p);
+                    if (ch == (gunichar)-1 || ch == (gunichar)-2) {
+                        g_string_append(safe, "\xEF\xBF\xBD"); /* U+FFFD */
+                        p++;
+                    } else {
+                        gchar buf[6];
+                        gint n = g_unichar_to_utf8(ch, buf);
+                        g_string_append_len(safe, buf, n);
+                        p = g_utf8_next_char(p);
+                    }
+                }
+                src_len = safe->len;
+                sanitized = g_string_free(safe, FALSE);
+                src_utf8 = sanitized;
+            }
+
             gsize bytes_written;
             GError *conv_error = NULL;
-            char *utf16_data = g_convert(data_to_encode, data_len,
-                                          target_charset, "UTF-8",
-                                          NULL, &bytes_written, &conv_error);
+            char *converted_data = g_convert_with_fallback(src_utf8, (gssize)src_len,
+                                                            target_charset, "UTF-8",
+                                                            "?",
+                                                            NULL, &bytes_written, &conv_error);
+            g_free(sanitized);
             g_free(crlf_data);
             g_free(combined);
             
-            if (!utf16_data) {
+            if (!converted_data) {
                 g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                            "Encoding conversion failed: %s", 
+                            "Encoding conversion failed: %s",
                             conv_error ? conv_error->message : "Unknown error");
                 g_clear_error(&conv_error);
                 return FALSE;
             }
             
-            WRITE_ALL(fd, utf16_data, bytes_written);
-            g_free(utf16_data);
+            WRITE_ALL(fd, converted_data, bytes_written);
+            g_free(converted_data);
         } else if (data_len > 0) {
             /* UTF-8: Direct write */
             WRITE_ALL(fd, data_to_encode, data_len);
@@ -3686,16 +3714,43 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
             
             normalized_data = g_string_free(converted, FALSE);
             data_to_encode = normalized_data;
-            data_len = strlen(normalized_data);
+            data_len = normalized_data ? strlen(normalized_data) : 0; /* ASCII-safe for UTF-8 */
         }
         
         /* 2. Encoding Conversion */
         if (need_conversion && data_len > 0) {
+            /* Sanitize: replace invalid UTF-8 bytes with U+FFFD before converting */
+            gchar *sanitized = NULL;
+            const char *src_utf8 = data_to_encode;
+            gsize src_len = data_len;
+            if (!g_utf8_validate(data_to_encode, (gssize)data_len, NULL)) {
+                GString *safe = g_string_sized_new(data_len);
+                const char *p = data_to_encode;
+                const char *end_p = data_to_encode + data_len;
+                while (p < end_p) {
+                    gunichar ch = g_utf8_get_char_validated(p, end_p - p);
+                    if (ch == (gunichar)-1 || ch == (gunichar)-2) {
+                        g_string_append(safe, "\xEF\xBF\xBD"); /* U+FFFD */
+                        p++;
+                    } else {
+                        gchar buf[6];
+                        gint n = g_unichar_to_utf8(ch, buf);
+                        g_string_append_len(safe, buf, n);
+                        p = g_utf8_next_char(p);
+                    }
+                }
+                src_len = safe->len;
+                sanitized = g_string_free(safe, FALSE);
+                src_utf8 = sanitized;
+            }
+
             gsize bytes_conv_written;
             GError *conv_error = NULL;
-            char *utf16_data = g_convert(data_to_encode, data_len,
-                                          target_charset, "UTF-8",
-                                          NULL, &bytes_conv_written, &conv_error);
+            char *utf16_data = g_convert_with_fallback(src_utf8, (gssize)src_len,
+                                                        target_charset, "UTF-8",
+                                                        "?",
+                                                        NULL, &bytes_conv_written, &conv_error);
+            g_free(sanitized);
             
             if (!utf16_data) {
                 if (task->error) g_error_free(task->error);
