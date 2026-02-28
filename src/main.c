@@ -5612,22 +5612,23 @@ on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user
     g_free(data);
 }
 
+/* Internal: immediately start the async save (encoding already decided) */
 static void
-save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const char *path)
+do_save_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const char *path)
 {
     if (!doc || !path) return;
     
-    /* Start Task Helper */
     DocumentSaveTask *stask = document_save_async_start(doc, path);
     if (!stask) {
-        AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Save Failed", 
-            "Could not start save operation. Check permissions or disk space."));
-        adw_alert_dialog_add_response(dialog, "ok", "OK");
+        AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
+            _("Save Failed"),
+            _("Could not start save operation. Check permissions or disk space.")));
+        adw_alert_dialog_add_response(dialog, "ok", _("OK"));
         adw_alert_dialog_choose(dialog, GTK_WIDGET(win->window), NULL, NULL, NULL);
         return;
     }
     
-    /* Setup UI */
+    /* Setup progress UI */
     if (tab) {
         vite_tab_set_loading(tab, TRUE);
         vite_tab_set_operation_type(tab, VITE_OP_SAVING);
@@ -5654,14 +5655,92 @@ save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const cha
     GCancellable *cancellable = NULL;
     if (tab) {
         cancellable = vite_tab_get_cancellable(tab);
-        g_cancellable_reset(cancellable); /* Reset in case it was cancelled before */
+        g_cancellable_reset(cancellable);
     }
     
     GTask *task = g_task_new(NULL, cancellable, on_save_complete, data);
-    g_task_set_task_data(task, data, NULL); 
-    
+    g_task_set_task_data(task, data, NULL);
     g_task_run_in_thread(task, save_worker_wrapper);
     g_object_unref(task);
+}
+
+/* Context for the pre-save lossy encoding dialog response */
+typedef struct {
+    ViteWindow *win;
+    ViteTab    *tab;
+    Document   *doc;
+    char       *path;
+} PreSaveLossyCtx;
+
+static void
+on_presave_lossy_response(GObject    *source,
+                          GAsyncResult *res,
+                          gpointer      user_data)
+{
+    PreSaveLossyCtx *ctx = user_data;
+    const char *response = adw_alert_dialog_choose_finish(ADW_ALERT_DIALOG(source), res);
+    
+    if (g_strcmp0(response, "save-utf8") == 0) {
+        /* Switch document encoding to UTF-8 then save cleanly */
+        document_set_encoding(ctx->doc, ENCODING_UTF8);
+        do_save_with_progress(ctx->win, ctx->tab, ctx->doc, ctx->path);
+    } else if (g_strcmp0(response, "save-anyway") == 0) {
+        /* User accepts character loss — save with '?' substitution */
+        do_save_with_progress(ctx->win, ctx->tab, ctx->doc, ctx->path);
+    }
+    /* else "cancel" — do nothing */
+    
+    g_object_unref(ctx->doc);
+    g_free(ctx->path);
+    g_free(ctx);
+}
+
+/* Public entry point – check for encoding loss first, then save (or prompt) */
+static void
+save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const char *path)
+{
+    if (!doc || !path) return;
+    
+    /* Quick pre-save probe: will any characters be lost? */
+    if (document_check_encoding_lossy(doc)) {
+        const char *encoding_name = "the target encoding";
+        FileEncoding fe = document_get_encoding(doc);
+        const char *dn = file_encoding_to_display_name(fe);
+        if (dn && *dn) encoding_name = dn;
+        
+        char *body = g_strdup_printf(
+            _("This document contains characters that cannot be represented in %s.\n\n"
+              "If you save now, those characters will be permanently replaced with '?'."),
+            encoding_name);
+        
+        AdwAlertDialog *dialog = ADW_ALERT_DIALOG(
+            adw_alert_dialog_new(_("Characters Cannot Be Saved"), body));
+        g_free(body);
+        
+        adw_alert_dialog_add_response(dialog, "cancel",     _("Cancel"));
+        adw_alert_dialog_add_response(dialog, "save-anyway", _("Save Anyway"));
+        adw_alert_dialog_add_response(dialog, "save-utf8",   _("Save as UTF-8"));
+        
+        adw_alert_dialog_set_response_appearance(dialog, "cancel",     ADW_RESPONSE_DEFAULT);
+        adw_alert_dialog_set_response_appearance(dialog, "save-anyway", ADW_RESPONSE_DESTRUCTIVE);
+        adw_alert_dialog_set_response_appearance(dialog, "save-utf8",   ADW_RESPONSE_SUGGESTED);
+        
+        adw_alert_dialog_set_default_response(dialog, "save-utf8");
+        adw_alert_dialog_set_close_response(dialog, "cancel");
+        
+        PreSaveLossyCtx *ctx = g_new0(PreSaveLossyCtx, 1);
+        ctx->win  = win;
+        ctx->tab  = tab;
+        ctx->doc  = document_ref(doc);
+        ctx->path = g_strdup(path);
+        
+        adw_alert_dialog_choose(dialog, GTK_WIDGET(win->window),
+                                NULL, on_presave_lossy_response, ctx);
+        return; /* Save deferred to dialog response */
+    }
+    
+    /* No lossy characters — save immediately */
+    do_save_with_progress(win, tab, doc, path);
 }
 
 /* ============================================================================

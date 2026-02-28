@@ -3278,6 +3278,66 @@ piece_table_get_encoding(PieceTable *pt)
 }
 
 /* ============================================================================
+ * Encoding Loss Pre-Check - Zero-write probe of encoding compatibility
+ * ============================================================================ */
+
+/**
+ * piece_table_check_encoding_lossy:
+ * @pt: the piece table
+ *
+ * Checks whether saving the document to its current target encoding would
+ * lose any characters (i.e., require '?' substitutions).  This is a read-only
+ * probe — nothing is written to disk.
+ *
+ * Returns: TRUE if saving would be lossy (some chars can't be represented),
+ *          FALSE if the content can be losslessly converted.
+ */
+gboolean
+piece_table_check_encoding_lossy(PieceTable *pt)
+{
+    if (!pt) return FALSE;
+    if (pt->encoding == ENCODING_UTF8) return FALSE; /* UTF-8 is always lossless */
+
+    const char *target_charset = file_encoding_to_charset(pt->encoding);
+    if (!target_charset) return FALSE;
+
+    PieceTableIter iter;
+    piece_table_iter_init(pt, &iter);
+
+    size_t chunk_len;
+    const char *chunk;
+
+    while ((chunk = piece_table_iter_get_chunk(&iter, &chunk_len)) != NULL) {
+        if (chunk_len == 0) {
+            piece_table_iter_advance(&iter, 1);
+            continue;
+        }
+
+        /* Ensure the chunk is valid UTF-8 first */
+        if (!g_utf8_validate(chunk, (gssize)chunk_len, NULL)) {
+            piece_table_iter_advance(&iter, chunk_len);
+            return TRUE; /* Invalid UTF-8 bytes = will need substitution */
+        }
+
+        /* Try strict conversion with no fallback */
+        GError *conv_error = NULL;
+        gsize bytes_read, bytes_written;
+        char *converted = g_convert(chunk, (gssize)chunk_len,
+                                    target_charset, "UTF-8",
+                                    &bytes_read, &bytes_written, &conv_error);
+        if (!converted) {
+            g_clear_error(&conv_error);
+            piece_table_iter_advance(&iter, chunk_len);
+            return TRUE; /* This chunk has unencodable characters */
+        }
+        g_free(converted);
+        piece_table_iter_advance(&iter, chunk_len);
+    }
+
+    return FALSE; /* All content can be losslessly converted */
+}
+
+/* ============================================================================
  * Streaming Save Implementation - Zero-RAM file saving
  * ============================================================================ */
 

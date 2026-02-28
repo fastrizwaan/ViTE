@@ -3260,6 +3260,13 @@ document_change_case_streaming_cancel(StreamingChangeCaseTask *task)
  * ============================================================================ */
 
 gboolean
+document_check_encoding_lossy(Document *doc)
+{
+    if (!doc) return FALSE;
+    return piece_table_check_encoding_lossy(doc->pt);
+}
+
+gboolean
 document_save_as(Document *doc, const char *path, GError **error)
 {
     if (!doc) {

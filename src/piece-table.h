@@ -180,6 +180,9 @@ void piece_table_replace_async_cancel(PieceTableReplaceTask *task);
 /* Synchronous streaming save - writes piece table content to fd without RAM allocation */
 gboolean piece_table_save_to_fd(PieceTable *pt, int fd, GError **error);
 
+/* Pre-save encoding compatibility probe (read-only, no disk writes) */
+gboolean piece_table_check_encoding_lossy(PieceTable *pt);
+
 /* Async save task for huge files with progress reporting */
 typedef struct _PieceTableSaveTask PieceTableSaveTask;
 

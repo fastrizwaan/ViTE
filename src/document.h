@@ -53,6 +53,10 @@ gboolean document_save(Document *doc, GError **error);
 /* Save document to a new path (Save As) - Updates document's file_path on success */
 gboolean document_save_as(Document *doc, const char *path, GError **error);
 
+/* Pre-save encoding compatibility probe (sync, read-only, no disk writes).
+   Returns TRUE if saving to the current encoding would lose characters. */
+gboolean document_check_encoding_lossy(Document *doc);
+
 /* Async save with progress for huge files (>100MB) */
 typedef struct _DocumentSaveTask DocumentSaveTask;
 typedef void (*DocumentSaveProgressCallback)(double progress, gboolean finished, gpointer user_data);
