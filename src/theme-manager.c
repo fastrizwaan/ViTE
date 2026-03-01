@@ -25,61 +25,61 @@ is_default_theme(const char *name)
 static void
 set_default_dark_theme(ViteTheme *theme)
 {
-    /* One Dark colors (Brightened) */
-    gdk_rgba_parse(&theme->editor_bg, "#282C34");
-    gdk_rgba_parse(&theme->editor_fg, "#DCDFE4"); /* Brighter foreground */
-    gdk_rgba_parse(&theme->gutter_bg, "#282C34");
-    gdk_rgba_parse(&theme->gutter_fg, "#7B8497"); /* Brighter gutter */
-    gdk_rgba_parse(&theme->gutter_active_fg, "#DCDFE4"); /* Brighter active gutter */
-    gdk_rgba_parse(&theme->line_highlight, "#99BBFF14"); /* Slightly more visible line highlight */
-    gdk_rgba_parse(&theme->selection, "#4E5666"); /* Brighter selection */
-    gdk_rgba_parse(&theme->cursor_color, "#528BFF");
-    gdk_rgba_parse(&theme->find_match, "#528BFF4D");
-    gdk_rgba_parse(&theme->find_match_highlight, "#528BFF4D");
+    /* One Dark Pro Night Flat colors */
+    gdk_rgba_parse(&theme->editor_bg, "#16191d");
+    gdk_rgba_parse(&theme->editor_fg, "#abb2bf");
+    gdk_rgba_parse(&theme->gutter_bg, "#16191d");
+    gdk_rgba_parse(&theme->gutter_fg, "#667187");
+    gdk_rgba_parse(&theme->gutter_active_fg, "#abb2bf");
+    gdk_rgba_parse(&theme->line_highlight, "#2c313c50"); /* Use some alpha for highlight */
+    gdk_rgba_parse(&theme->selection, "#67769660");
+    gdk_rgba_parse(&theme->cursor_color, "#528bff");
+    gdk_rgba_parse(&theme->find_match, "#528bff4d");
+    gdk_rgba_parse(&theme->find_match_highlight, "#528bff4d");
 
-    gdk_rgba_parse(&theme->tab_active_bg, "#282C34");
-    gdk_rgba_parse(&theme->tab_active_fg, "#E6E9EE"); /* Brighter active tab fg */
-    gdk_rgba_parse(&theme->tab_inactive_bg, "#21252B");
-    gdk_rgba_parse(&theme->tab_inactive_fg, "#B2B9C6"); /* Brighter inactive tab fg */
-    gdk_rgba_parse(&theme->tab_border, "#181A1F");
+    gdk_rgba_parse(&theme->tab_active_bg, "#23272e");
+    gdk_rgba_parse(&theme->tab_active_fg, "#abb2bf");
+    gdk_rgba_parse(&theme->tab_inactive_bg, "#16191d");
+    gdk_rgba_parse(&theme->tab_inactive_fg, "#667187");
+    gdk_rgba_parse(&theme->tab_border, "#101216");
 
-    gdk_rgba_parse(&theme->titlebar_bg, "#21252B");
-    gdk_rgba_parse(&theme->titlebar_fg, "#B2B9C6"); /* Brighter titlebar fg */
-    gdk_rgba_parse(&theme->statusbar_bg, "#21252B");
-    gdk_rgba_parse(&theme->statusbar_fg, "#B2B9C6"); /* Brighter statusbar fg */
+    gdk_rgba_parse(&theme->titlebar_bg, "#16191d");
+    gdk_rgba_parse(&theme->titlebar_fg, "#abb2bf");
+    gdk_rgba_parse(&theme->statusbar_bg, "#16191d");
+    gdk_rgba_parse(&theme->statusbar_fg, "#abb2bf");
 
-    gdk_rgba_parse(&theme->scrollbar_bg, "#4E566680");
-    gdk_rgba_parse(&theme->scrollbar_hover, "#5A637580");
-    gdk_rgba_parse(&theme->scrollbar_active, "#747D9180");
+    gdk_rgba_parse(&theme->scrollbar_bg, "#4e566680");
+    gdk_rgba_parse(&theme->scrollbar_hover, "#5a637580");
+    gdk_rgba_parse(&theme->scrollbar_active, "#747d9180");
 
-    /* Brightened Syntax Colors */
-    pango_color_parse(&theme->syntax[COLOR_KEYWORD], "#D58CFA"); /* was c678dd */
-    pango_color_parse(&theme->syntax[COLOR_BUILTIN], "#73D0DF"); /* was 56b6c2 */
-    pango_color_parse(&theme->syntax[COLOR_STRING], "#A8D98B"); /* was 98c379 */
-    pango_color_parse(&theme->syntax[COLOR_COMMENT], "#9A9FA9"); /* was 7f848e */
-    pango_color_parse(&theme->syntax[COLOR_NUMBER], "#E3AC7A"); /* was d19a66 */
-    pango_color_parse(&theme->syntax[COLOR_FUNCTION], "#79C2FF"); /* was 61afef */
-    pango_color_parse(&theme->syntax[COLOR_TYPE], "#F5D18C"); /* was e5c07b */
-    pango_color_parse(&theme->syntax[COLOR_DECORATOR], "#73D0DF"); /* was 56b6c2 */
-    pango_color_parse(&theme->syntax[COLOR_VARIABLE], "#EF828C"); /* was e06c75 */
-    pango_color_parse(&theme->syntax[COLOR_MEMBER], "#E8E8E8"); /* was d1d1d1 */
-    pango_color_parse(&theme->syntax[COLOR_CONSTANT], "#EF828C"); /* was e06c75 */
-    pango_color_parse(&theme->syntax[COLOR_TAG], "#EF828C"); /* was e06c75 */
-    pango_color_parse(&theme->syntax[COLOR_OPERATOR], "#E3AC7A"); /* was d19a66 */
-    pango_color_parse(&theme->syntax[COLOR_PUNCTUATION], "#E3AC7A"); /* was d19a66 */
-    pango_color_parse(&theme->syntax[COLOR_ATTRIBUTE], "#E3AC7A"); /* was d19a66 */
-    pango_color_parse(&theme->syntax[COLOR_PARAM], "#EF828C"); /* was e06c75 */
-    pango_color_parse(&theme->syntax[COLOR_PROPERTY], "#73D0DF"); /* was 56b6c2 */
-    pango_color_parse(&theme->syntax[COLOR_PREPROC], "#D58CFA"); /* was c678dd */
-    pango_color_parse(&theme->syntax[COLOR_LOGICAL], "#73D0DF"); /* was 56b6c2 */
+    /* Syntax Colors */
+    pango_color_parse(&theme->syntax[COLOR_KEYWORD], "#c678dd");
+    pango_color_parse(&theme->syntax[COLOR_BUILTIN], "#56b6c2");
+    pango_color_parse(&theme->syntax[COLOR_STRING], "#98c379");
+    pango_color_parse(&theme->syntax[COLOR_COMMENT], "#5c6370");
+    pango_color_parse(&theme->syntax[COLOR_NUMBER], "#d19a66");
+    pango_color_parse(&theme->syntax[COLOR_FUNCTION], "#61afef");
+    pango_color_parse(&theme->syntax[COLOR_TYPE], "#e5c07b");
+    pango_color_parse(&theme->syntax[COLOR_DECORATOR], "#56b6c2");
+    pango_color_parse(&theme->syntax[COLOR_VARIABLE], "#e06c75");
+    pango_color_parse(&theme->syntax[COLOR_MEMBER], "#abb2bf");
+    pango_color_parse(&theme->syntax[COLOR_CONSTANT], "#d19a66");
+    pango_color_parse(&theme->syntax[COLOR_TAG], "#e06c75");
+    pango_color_parse(&theme->syntax[COLOR_OPERATOR], "#56b6c2");
+    pango_color_parse(&theme->syntax[COLOR_PUNCTUATION], "#abb2bf");
+    pango_color_parse(&theme->syntax[COLOR_ATTRIBUTE], "#d19a66");
+    pango_color_parse(&theme->syntax[COLOR_PARAM], "#d19a66");
+    pango_color_parse(&theme->syntax[COLOR_PROPERTY], "#e06c75");
+    pango_color_parse(&theme->syntax[COLOR_PREPROC], "#c678dd");
+    pango_color_parse(&theme->syntax[COLOR_LOGICAL], "#56b6c2");
 
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_1], "#FFD700");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_2], "#DA70D6");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_3], "#87CEFA");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_4], "#FFD700");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_5], "#DA70D6");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#87CEFA");
-    pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], "#FF1111");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_1], "#ffd700");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_2], "#da70d6");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_3], "#87cefa");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_4], "#ffd700");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_5], "#da70d6");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#87cefa");
+    pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], "#ff1111");
 
     theme->is_dark = TRUE;
 }
@@ -1213,7 +1213,7 @@ theme_manager_init(void)
     g_ptr_array_add(all_themes, fallback_auto);
 
     ViteTheme *fallback_dark = g_new0(ViteTheme, 1);
-    fallback_dark->name = g_strdup("One Dark (Built-in)");
+    fallback_dark->name = g_strdup("One Dark Night (Built-in)");
     fallback_dark->file_path = NULL;
     set_default_dark_theme(fallback_dark);
     apply_theme_inheritance_and_fallback(fallback_dark, NULL);
