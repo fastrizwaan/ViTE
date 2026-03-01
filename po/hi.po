@@ -319,8 +319,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "कुछ वर्ण %s में सहेजे नहीं जा सकते।
-यदि आप जारी रखते हैं तो उन्हें बदल दिया जाएगा।"
+msgstr "कुछ वर्ण %s में सहेजे नहीं जा सकते।\\nयदि आप जारी रखते हैं तो उन्हें बदल दिया जाएगा।"
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"

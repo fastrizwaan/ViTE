@@ -319,8 +319,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "Кейбір таңбалар %s жүйесінде сақтала алмайды.
-Жалғастырсаңыз орын басылады."
+msgstr "Кейбір таңбалар %s жүйесінде сақтала алмайды.\\nЖалғастырсаңыз орын басылады."
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"

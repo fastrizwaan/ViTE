@@ -319,8 +319,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "Noen tegn kan ikke lagres i %s.
-De vil bli erstattet om du fortsetter."
+msgstr "Noen tegn kan ikke lagres i %s.\\nDe vil bli erstattet om du fortsetter."
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"

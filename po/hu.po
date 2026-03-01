@@ -320,8 +320,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "Néhány karakter nem menthető %s kódolásban.
-Ezek lecserélődnek, ha folytatja."
+msgstr "Néhány karakter nem menthető %s kódolásban.\\nEzek lecserélődnek, ha folytatja."
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"

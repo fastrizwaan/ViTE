@@ -323,8 +323,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "%s に保存できない文字があります。
-続行すると置き换えられます。"
+msgstr "%s に保存できない文字があります。\\n続行すると置き换えられます。"
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"

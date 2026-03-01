@@ -319,8 +319,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "ზოგი სიმბოლო ვერ ინახება %s-ში.
-გაგრძელების შემთხვევაში ჩანაცვლდება."
+msgstr "ზოგი სიმბოლო ვერ ინახება %s-ში.\\nგაგრძელების შემთხვევაში ჩანაცვლდება."
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"

@@ -321,8 +321,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "Unele caractere nu pot fi salvate în %s.
-Vor fi înlocuite dacă continuați."
+msgstr "Unele caractere nu pot fi salvate în %s.\\nVor fi înlocuite dacă continuați."
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"

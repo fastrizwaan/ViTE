@@ -287,7 +287,8 @@ file_encoding_from_id(const char *id)
     }
 
     /* Legacy aliases */
-    if (g_ascii_strcasecmp(id, "ascii") == 0) return ENCODING_WINDOWS_1252;
+    if (g_ascii_strcasecmp(id, "ascii") == 0) return ENCODING_UTF8;    /* ASCII ⊂ UTF-8 */
+    if (g_ascii_strcasecmp(id, "us-ascii") == 0) return ENCODING_UTF8; /* ASCII ⊂ UTF-8 */
     if (g_ascii_strcasecmp(id, "iso8859-1") == 0) return ENCODING_ISO_8859_1;
     if (g_ascii_strcasecmp(id, "iso8859-2") == 0) return ENCODING_ISO_8859_2;
     if (g_ascii_strcasecmp(id, "iso8859-5") == 0) return ENCODING_ISO_8859_5;
@@ -376,6 +377,11 @@ uchardet_charset_to_encoding(const char *charset)
 {
     if (!charset || *charset == '\0')
         return ENCODING_UTF8;
+
+    /* ASCII is a strict subset of UTF-8 — treat it as UTF-8 to avoid
+       needless conversion that may fail on bytes undefined in CP1252 */
+    if (g_ascii_strcasecmp(charset, "ASCII") == 0)         return ENCODING_UTF8;
+    if (g_ascii_strcasecmp(charset, "US-ASCII") == 0)      return ENCODING_UTF8;
 
     /* UTF variants */
     if (g_ascii_strcasecmp(charset, "UTF-8") == 0)         return ENCODING_UTF8;

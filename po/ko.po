@@ -320,8 +320,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "%s에서 저장할 수 없는 문자가 있습니다.
-계속하면 교체됩니다."
+msgstr "%s에서 저장할 수 없는 문자가 있습니다.\\n계속하면 교체됩니다."
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"

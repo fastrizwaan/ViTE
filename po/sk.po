@@ -322,8 +322,7 @@ msgstr ""
 msgid ""
 "Some characters cannot be saved in %s.\n"
 "They will be replaced if you continue."
-msgstr "Niektoré znaky sa nedá uložiť v kódovaní %s.
-Budú nahraденé, ak budete pokračovať."
+msgstr "Niektoré znaky sa nedá uložiť v kódovaní %s.\\nBudú nahraденé, ak budete pokračovať."
 
 #: src/main.c:5717
 msgid "Unsupported Encoding"
