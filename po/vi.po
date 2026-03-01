@@ -20,23 +20,23 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Không có kết quả"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu kết quả"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Đang tìm... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Đang lọc... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
@@ -89,11 +89,11 @@ msgstr "Văn bản Thường"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "Tiêu đề đầu"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "Mục nhập máy tính"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -135,7 +135,7 @@ msgstr "Hủ_y thay đổi…"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Xóa khỏi mục gần đây"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -175,7 +175,7 @@ msgstr "Lư_u thành…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Lọc dòng"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -195,31 +195,31 @@ msgstr "Cho phép _ngắt dòng dài"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "Hiện bản đồ tổng quan"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Ngắt dòng"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "Hiện thanh trạng thái"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Hiện nút lưu"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Chia sang trái"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Chia xuống"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Chia sang phải"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -243,7 +243,7 @@ msgstr "Windows (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Mac cũ (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -291,11 +291,11 @@ msgstr "Thẻ Mới"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Lưu thất bại"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "OK"
 
 #: src/main.c:5588
 #, c-format
@@ -308,11 +308,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Mất ký tự khi lưu"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "Không thể bắt đầu thao tác lưu. Kiểm tra quyền hoặc không gian đĩa."
 
 #: src/main.c:5712
 #, c-format
@@ -355,15 +355,15 @@ msgstr "Thụt lề"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Chủ đề"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Chủ đề màu sắc"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Hiển thị"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -371,7 +371,7 @@ msgstr "Tô sáng dòng hiện tại"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Kiểu chữ"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -415,15 +415,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Tab: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>CHÊ</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>GHI</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -433,7 +433,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Tab: %d"
 
 #: src/status-bar.c:589
 #, c-format

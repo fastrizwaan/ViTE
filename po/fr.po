@@ -30,31 +30,31 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Aucune correspondance"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu correspondances"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Recherche... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Filtrage... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "Filtrage en cours..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "Recherche en cours..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -70,19 +70,19 @@ msgstr "Correspondance suivante"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "Basculer le remplacement"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "Expression régulière"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "Respecter la casse"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "Mots entiers seulement"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
@@ -99,11 +99,11 @@ msgstr "Texte brut"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "En-tête"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "Entrée de bureau"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -145,7 +145,7 @@ msgstr "Abandonner les modifications…"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Supprimer des documents récents"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -185,7 +185,7 @@ msgstr "Enregistrer _sous…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Filtrer les lignes"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -201,35 +201,35 @@ msgstr "Afficher les numéros de ligne"
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "Activer le pliage de code"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "Afficher la carte de vue d'ensemble"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Retour à la ligne"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "Afficher la barre d'état"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Afficher le bouton Enregistrer"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Diviser vers la gauche"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Diviser vers le bas"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Diviser vers la droite"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -253,7 +253,7 @@ msgstr "Windows (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Mac classique (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -293,7 +293,7 @@ msgstr "Menu principal"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "Enregistrer (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -301,11 +301,11 @@ msgstr "Nouvel onglet"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Échec de l'enregistrement"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "OK"
 
 #: src/main.c:5588
 #, c-format
@@ -318,11 +318,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Caractères perdus lors de l'enregistrement"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "Impossible de démarrer l'opération d'enregistrement. Vérifiez les permissions ou l'espace disque."
 
 #: src/main.c:5712
 #, c-format
@@ -353,11 +353,11 @@ msgstr "Police personnalisée"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "Nom de la police"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "Sélectionner..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
@@ -365,15 +365,15 @@ msgstr "Indentation"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Thème"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Thème de couleur"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Affichage"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -381,7 +381,7 @@ msgstr "Surligner la ligne actuelle"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Typographie"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -425,15 +425,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Tab : 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>INS</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>ECR</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -443,7 +443,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Tab : %d"
 
 #: src/status-bar.c:589
 #, c-format

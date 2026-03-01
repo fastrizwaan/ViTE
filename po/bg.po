@@ -22,31 +22,31 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Няма съвпадения"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu съвпадения"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Търсене... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Филтриране... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "Филтриране..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "Търсене..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -62,19 +62,19 @@ msgstr "Следваща появa"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "Превключване на замяната"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "Регулярен израз"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "Регистърът е важен"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "Само цели думи"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
@@ -91,11 +91,11 @@ msgstr "Обикновен текст"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "Заглавна част"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "Запис на работния плот"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -137,7 +137,7 @@ msgstr "Отхвърляне на промените…"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Премахване от скорошните"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -177,7 +177,7 @@ msgstr "Запазване _като…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Филтриране на редове"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -193,7 +193,7 @@ msgstr "Показване на номера̀ на редовете"
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "Разрешаване на сгъване на код"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
@@ -201,7 +201,7 @@ msgstr "Ориентировъчна карта"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Пренасяне на думите"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
@@ -209,19 +209,19 @@ msgstr "Лентата за състоянието е видима"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Показване на бутона за записване"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Разделяне наляво"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Разделяне надолу"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Разделяне надясно"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -245,7 +245,7 @@ msgstr "Windows (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Остарял Mac (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -285,7 +285,7 @@ msgstr "Основно меню"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "Записване (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -293,11 +293,11 @@ msgstr "Нов подпрозорец"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Записването е неуспешно"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "Добре"
 
 #: src/main.c:5588
 #, c-format
@@ -310,11 +310,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Загубени знаци при записване"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "Операцията по записване не може да започне. Проверете правата или мястото на диска."
 
 #: src/main.c:5712
 #, c-format
@@ -345,11 +345,11 @@ msgstr "Друг шрифт"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "Име на шрифта"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "Избор..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
@@ -357,15 +357,15 @@ msgstr "Отстъп"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Тема"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Цветова тема"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Показване"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -373,7 +373,7 @@ msgstr "Оцветяване на текущия ред"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Типография"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -417,15 +417,15 @@ msgstr "Отстъп"
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Таб: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>ВМЪ</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>ЗАМ</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -435,7 +435,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Таб: %d"
 
 #: src/status-bar.c:589
 #, c-format

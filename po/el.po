@@ -19,76 +19,76 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Δεν βρέθηκαν αποτελέσματα"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu αποτελέσματα"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Εύρεση... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Φιλτράρισμα... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "Φιλτράρισμα..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "Εύρεση..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
-msgstr ""
+msgstr "Εύρεση"
 
 #: src/find-replace-bar.c:711
 msgid "Previous Match"
-msgstr ""
+msgstr "Προηγούμενο ταίριασμα"
 
 #: src/find-replace-bar.c:715
 msgid "Next Match"
-msgstr ""
+msgstr "Επόμενο ταίριασμα"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "Εναλλαγή αντικατάστασης"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "Κανονική έκφραση"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "Διάκριση πεζών-κεφαλαίων"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "Ταίριασμα μόνο ολόκληρης λέξης"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
-msgstr ""
+msgstr "Αντικατάσταση"
 
 #: src/find-replace-bar.c:798
 msgid "Replace All"
-msgstr ""
+msgstr "Αντικατάσταση όλων"
 
 #: src/main.c:23 src/main.c:4619 src/status-bar.c:229 src/status-bar.c:454
 #: src/status-bar.c:534
 msgid "Plain Text"
-msgstr ""
+msgstr "Απλό κείμενο"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "Κεφαλίδα"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
@@ -96,7 +96,7 @@ msgstr ""
 
 #: src/main.c:496
 msgid "Save Changes?"
-msgstr ""
+msgstr "Αποθήκευση αλλαγών;"
 
 #: src/main.c:501
 msgid ""
@@ -106,19 +106,19 @@ msgstr ""
 
 #: src/main.c:578 src/main.c:712 src/main.c:5720
 msgid "Cancel"
-msgstr ""
+msgstr "Ακύρωση"
 
 #: src/main.c:579
 msgid "Discard All"
-msgstr ""
+msgstr "Απόρριψη όλων"
 
 #: src/main.c:580 src/main.c:4555 src/main.c:4666
 msgid "Save"
-msgstr ""
+msgstr "Αποθήκευση"
 
 #: src/main.c:709
 msgid "Discard Changes?"
-msgstr ""
+msgstr "Απόρριψη αλλαγών;"
 
 #: src/main.c:710
 msgid ""
@@ -128,171 +128,171 @@ msgstr ""
 
 #: src/main.c:713 src/main.c:4557
 msgid "Discard Changes"
-msgstr ""
+msgstr "Απόρριψη αλλαγών"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Κατάργηση από τα πρόσφατα"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
-msgstr ""
+msgstr "Εκκαθάριση όλων των πρόσφατων"
 
 #: src/main.c:3426
 msgid "Go to Line:"
-msgstr ""
+msgstr "Μετάβαση στη γραμμή:"
 
 #: src/main.c:4339
 msgid "Leave Fullscreen"
-msgstr ""
+msgstr "Έξοδος από πλήρη οθόνη"
 
 #: src/main.c:4464
 msgid "Open"
-msgstr ""
+msgstr "Άνοιγμα"
 
 #: src/main.c:4491
 msgid "Search documents"
-msgstr ""
+msgstr "Αναζήτηση εγγράφων"
 
 #: src/main.c:4531
 msgid "Open File"
-msgstr ""
+msgstr "Άνοιγμα αρχείου"
 
 #: src/main.c:4541
 msgid "New Tab"
-msgstr ""
+msgstr "Νέα καρτέλα"
 
 #: src/main.c:4551
 msgid "New Window"
-msgstr ""
+msgstr "Νέο παράθυρο"
 
 #: src/main.c:4556
 msgid "Save As…"
-msgstr ""
+msgstr "Αποθήκευση ως…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Φιλτράρισμα γραμμών"
 
 #: src/main.c:4564
 msgid "Find/Replace"
-msgstr ""
+msgstr "Εύρεση/Αντικατάσταση"
 
 #: src/main.c:4565
 msgid "Go to Line…"
-msgstr ""
+msgstr "Μετάβαση στη γραμμή…"
 
 #: src/main.c:4574 src/preferences.c:196
 msgid "Display Line Numbers"
-msgstr ""
+msgstr "Εμφάνιση αριθμών γραμμών"
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "Ενεργοποίηση αναδίπλωσης κώδικα"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "Εμφάνιση χάρτη επισκόπησης"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Αναδίπλωση λέξεων"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "Εμφάνιση γραμμής κατάστασης"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Εμφάνιση κουμπιού αποθήκευσης"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Διαχωρισμός αριστερά"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Διαχωρισμός κάτω"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Διαχωρισμός δεξιά"
 
 #: src/main.c:4590
 msgid "Close View"
-msgstr ""
+msgstr "Κλείσιμο προβολής"
 
 #: src/main.c:4593
 msgid "View"
-msgstr ""
+msgstr "Προβολή"
 
 #: src/main.c:4608 src/status-bar.c:466
 msgid "Encoding"
-msgstr ""
+msgstr "Κωδικοποίηση"
 
 #: src/main.c:4612 src/status-bar.c:133
 msgid "Unix/Linux (LF)"
-msgstr ""
+msgstr "Unix/Linux (LF)"
 
 #: src/main.c:4613 src/status-bar.c:134
 msgid "Windows (CRLF)"
-msgstr ""
+msgstr "Windows (CRLF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Παλαιό Mac (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
-msgstr ""
+msgstr "Τέλος γραμμής"
 
 #: src/main.c:4631 src/status-bar.c:454
 msgid "File Type"
-msgstr ""
+msgstr "Τύπος αρχείου"
 
 #: src/main.c:4634
 msgid "Document"
-msgstr ""
+msgstr "Έγγραφο"
 
 #: src/main.c:4642
 msgid "Print"
-msgstr ""
+msgstr "Εκτύπωση"
 
 #: src/main.c:4647
 msgid "Fullscreen"
-msgstr ""
+msgstr "Πλήρης οθόνη"
 
 #: src/main.c:4653
 msgid "Keyboard Shortcuts"
-msgstr ""
+msgstr "Συντομεύσεις πληκτρολογίου"
 
 #: src/main.c:4654
 msgid "About Virtual Text Editor"
-msgstr ""
+msgstr "Σχετικά με τον εικονικό επεξεργαστή κειμένου"
 
 #: src/main.c:4655
 msgid "Preferences"
-msgstr ""
+msgstr "Προτιμήσεις"
 
 #: src/main.c:4662
 msgid "Main Menu"
-msgstr ""
+msgstr "Κύριο μενού"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "Αποθήκευση (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
-msgstr ""
+msgstr "Άνοιγμα καρτελών"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Η αποθήκευση απέτυχε"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "OK"
 
 #: src/main.c:5588
 #, c-format
@@ -305,11 +305,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Χάθηκαν χαρακτήρες κατά την αποθήκευση"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "Δεν ήταν δυνατή η έναρξη της λειτουργίας αποθήκευσης. Ελέγξτε τα δικαιώματα ή τον χώρο στο δίσκο."
 
 #: src/main.c:5712
 #, c-format
@@ -332,107 +332,107 @@ msgstr "Αποθήκευση ως UTF-8"
 
 #: src/main.c:5786
 msgid "Save As"
-msgstr ""
+msgstr "Αποθήκευση ως"
 
 #: src/preferences.c:100
 msgid "Custom Font"
-msgstr ""
+msgstr "Προσαρμοσμένη γραμματοσειρά"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "Όνομα γραμματοσειράς"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "Επιλογή..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
-msgstr ""
+msgstr "Εσοχή"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Θέμα"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Θέμα χρώματος"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Εμφάνιση"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
-msgstr ""
+msgstr "Επισήμανση τρέχουσας γραμμής"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Τυπογραφία"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
-msgstr ""
+msgstr "Αναδίπλωση γραμμής"
 
 #: src/preferences.c:222
 msgid "Display Right Margin"
-msgstr ""
+msgstr "Εμφάνιση δεξιού περιθωρίου"
 
 #: src/preferences.c:223
 msgid "Right Margin Position"
-msgstr ""
+msgstr "Θέση δεξιού περιθωρίου"
 
 #: src/preferences.c:224
 msgid "Text Wrapping"
-msgstr ""
+msgstr "Αναδίπλωση κειμένου"
 
 #: src/preferences.c:231
 msgid "Automatic Indentation"
-msgstr ""
+msgstr "Αυτόματη εσοχή"
 
 #: src/preferences.c:233 src/status-bar.c:379
 msgid "Tab Width"
-msgstr ""
+msgstr "Πλάτος καρτέλας"
 
 #: src/preferences.c:234
 msgid "Indent Width"
-msgstr ""
+msgstr "Πλάτος εσοχής"
 
 #: src/status-bar.c:369
 msgid "Tabs"
-msgstr ""
+msgstr "Καρτέλες"
 
 #: src/status-bar.c:370
 msgid "Spaces"
-msgstr ""
+msgstr "Διαστήματα"
 
 #: src/status-bar.c:371
 msgid "Indentation Mode"
-msgstr ""
+msgstr "Λειτουργία εσοχής"
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Καρτέλα: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>EIS</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>ANT</span>"
 
 #: src/status-bar.c:525
 #, c-format
 msgid "Ln %d, Col %d"
-msgstr ""
+msgstr "Γρ %d, Στ %d"
 
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Καρτέλα: %d"
 
 #: src/status-bar.c:589
 #, c-format
 msgid "Spaces: %d"
-msgstr ""
+msgstr "Διαστήματα: %d"

@@ -20,31 +20,31 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Ingen treff"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu treff"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Finner... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Filtrerer... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "Filtrerer..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "Finner..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -60,19 +60,19 @@ msgstr "Neste treff"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "Veksle erstatting"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "Regulært uttrykk"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "Skill mellom store og små bokstaver"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "Søk kun etter hele ord"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
@@ -89,11 +89,11 @@ msgstr "Ren tekst"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "Topptekst"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "Skrivebordselement"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -135,7 +135,7 @@ msgstr "Forkast endringer…"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Fjern fra nylige"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -175,7 +175,7 @@ msgstr "Lagre _som…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Filtrer linjer"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -191,35 +191,35 @@ msgstr "Vis linjenummer"
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "Aktiver kodefolding"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "Vis oversiktskart"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Tekstbryting"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "Vis statuslinje"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Vis lagre-knapp"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Del til venstre"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Del nedover"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Del til høyre"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -243,7 +243,7 @@ msgstr "Windows (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Gammel Mac (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -283,7 +283,7 @@ msgstr "Hovedmeny"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "Lagre (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -291,11 +291,11 @@ msgstr "Ny fane"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Lagring mislyktes"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "OK"
 
 #: src/main.c:5588
 #, c-format
@@ -308,11 +308,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Tegn gikk tapt under lagring"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "Kunne ikke starte lagringsoperasjonen. Kontroller tillatelser eller diskplass."
 
 #: src/main.c:5712
 #, c-format
@@ -343,11 +343,11 @@ msgstr "Egen skrifttype"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "Fontnavn"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "Velg..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
@@ -355,15 +355,15 @@ msgstr "Innrykk"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Tema"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Fargetema"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Visning"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -371,7 +371,7 @@ msgstr "Uthev gjeldende linje"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Typografi"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -415,15 +415,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Fane: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>INS</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>OVR</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -433,7 +433,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Fane: %d"
 
 #: src/status-bar.c:589
 #, c-format

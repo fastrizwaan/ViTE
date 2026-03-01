@@ -21,23 +21,23 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Inga matchningar"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu matchningar"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Söker... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Filtrerar... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
@@ -45,7 +45,7 @@ msgstr "Filter"
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "Söker..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -90,11 +90,11 @@ msgstr "Vanlig text"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "Sidhuvud"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "Skrivbordspost"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -136,7 +136,7 @@ msgstr "Förkasta ändringar…"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Ta bort från senaste"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -176,7 +176,7 @@ msgstr "Spara s_om…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Filtrera rader"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -196,31 +196,31 @@ msgstr "Aktivera text_radbrytning"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "Visa översiktskarta"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Radbrytning"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "Visa statusrad"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Visa spara-knapp"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Dela åt vänster"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Dela nedåt"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Dela åt höger"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -244,7 +244,7 @@ msgstr "Windows (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Gammal Mac (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -284,7 +284,7 @@ msgstr "Huvudmeny"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "Spara (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -292,11 +292,11 @@ msgstr "Ny flik"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Sparning misslyckades"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "OK"
 
 #: src/main.c:5588
 #, c-format
@@ -309,11 +309,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Tecken förlorades vid sparning"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "Kunde inte starta sparning. Kontrollera behörigheter eller diskutrymme."
 
 #: src/main.c:5712
 #, c-format
@@ -356,15 +356,15 @@ msgstr "Indrag"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Tema"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Färgschema"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Visning"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -372,7 +372,7 @@ msgstr "Färgmarkera aktuell rad"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Typografi"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -416,15 +416,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Tabb: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>INF</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>ERS</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -434,7 +434,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Tabb: %d"
 
 #: src/status-bar.c:589
 #, c-format

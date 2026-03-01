@@ -24,31 +24,31 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Ni zadetkov"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu zadetkov"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Iskanje... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Filtriranje... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "Filtriranje..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "Iskanje..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -64,19 +64,19 @@ msgstr "Naslednji zadetek"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "Preklopi zamenjavo"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "Regularni izraz"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "Razlikovanje velikih in malih črk"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "Iskanje samo celih besed"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
@@ -93,11 +93,11 @@ msgstr "Običajno besedilo"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "Glava"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "Vnos namizja"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -139,7 +139,7 @@ msgstr "Zavrzi spremembe …"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Odstrani iz nedavnih"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -179,7 +179,7 @@ msgstr "Shrani _kot …"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Filtriraj vrstice"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -195,35 +195,35 @@ msgstr "Pokaži številke vrstic"
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "Omogoči zlaganje kode"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "Pokaži pregledni zemljevid"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Prelom besed"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "Pokaži vrstico stanja"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Pokaži gumb za shranjevanje"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Razdeli levo"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Razdeli navzdol"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Razdeli desno"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -247,7 +247,7 @@ msgstr "Okna (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Zastarel Mac (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -287,7 +287,7 @@ msgstr "Glavni meni"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "Shrani (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -295,11 +295,11 @@ msgstr "Nov zavihek"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Shranjevanje ni uspelo"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "V redu"
 
 #: src/main.c:5588
 #, c-format
@@ -312,11 +312,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Izgubljeni znaki ob shranjevanju"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "Operacije shranjevanja ni bilo mogoče začeti. Preverite dovoljenja ali prostor na disku."
 
 #: src/main.c:5712
 #, c-format
@@ -347,11 +347,11 @@ msgstr "Pisava po meri"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "Ime pisave"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "Izberi..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
@@ -359,15 +359,15 @@ msgstr "Zamikanje"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Tema"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Barvna tema"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Prikaz"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -375,7 +375,7 @@ msgstr "Poudari trenutno vrstico"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Tipografija"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -419,15 +419,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Zavihki: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>VSTA</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>PRE</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -437,7 +437,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Zavihki: %d"
 
 #: src/status-bar.c:589
 #, c-format

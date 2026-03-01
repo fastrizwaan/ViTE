@@ -20,31 +20,31 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "कोई मिलान नहीं"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu मिलान"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "ढूँढा जा रहा है... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "फ़िल्टर किया जा रहा है... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "फ़िल्टर किया जा रहा है..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "ढूँढा जा रहा है..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -60,19 +60,19 @@ msgstr "अगला मेल"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "बदलना चालू/बंद करें"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "रेगुलर एक्सप्रेशन"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "छोटा-बड़ा अक्षर संवेदनशील"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "केवल पूरा शब्द मिलान"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
@@ -89,11 +89,11 @@ msgstr "सादे पाठ"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "हेडर"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "डेस्कटॉप एंट्री"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -135,7 +135,7 @@ msgstr "परिवर्तनों को त्यागें (_D)"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "हाल के आइटम से निकालें"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -175,7 +175,7 @@ msgstr "ऐसे सहेजें (_A)…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "पंक्तियों को फ़िल्टर करें"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -191,35 +191,35 @@ msgstr "पंक्ति क्रमांक प्रदर्शित क
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "कोड फोल्डिंग सक्षम करें"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "ओवरव्यू मैप दिखाएं"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "वर्ड रैप"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "स्टेटस बार दिखाएं"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "सहेजें बटन दिखाएं"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "बाएं विभाजित करें"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "नीचे विभाजित करें"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "दाएं विभाजित करें"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -243,7 +243,7 @@ msgstr "Windows (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "लीगेसी मैक (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -283,7 +283,7 @@ msgstr "मुख्य मेनू"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "सहेजें (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -291,11 +291,11 @@ msgstr "नया टैब"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "सहेजना विफल रहा"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "ठीक है"
 
 #: src/main.c:5588
 #, c-format
@@ -308,11 +308,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "सहेजते समय अक्षर खो गए"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "सहेजना शुरू नहीं किया जा सका। अनुमतियां या डिस्क स्थान जांचें।"
 
 #: src/main.c:5712
 #, c-format
@@ -343,11 +343,11 @@ msgstr "तदनुकूल फॉन्ट"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "फ़ॉन्ट नाम"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "चुनें..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
@@ -355,15 +355,15 @@ msgstr "इंडेंटेशन"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "थीम"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "रंग थीम"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "प्रदर्शन"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -371,7 +371,7 @@ msgstr "मौजूदा पंक्ति आलोकित करें"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "टाइपोग्राफी"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -415,15 +415,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "टैब: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>INS</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>OVR</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -433,7 +433,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "टैब: %d"
 
 #: src/status-bar.c:589
 #, c-format

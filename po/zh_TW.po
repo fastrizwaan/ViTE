@@ -22,23 +22,23 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "無相符"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu 個相符"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "尋找中... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "篩選中... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
@@ -46,7 +46,7 @@ msgstr "過濾條件(_F)"
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "尋找中..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -91,11 +91,11 @@ msgstr "純文字"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "標頭"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "桌面項目"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -135,7 +135,7 @@ msgstr "捨棄變更(_D)…"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "從最近項目中移除"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -175,7 +175,7 @@ msgstr "另存為(_A)…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "篩選行"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -195,31 +195,31 @@ msgstr "啟用換列功能(_W)"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "顯示概覽圖"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "自動換行"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "顯示狀態列"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "顯示儲存按鈕"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "向左分割"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "向下分割"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "向右分割"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -243,7 +243,7 @@ msgstr "Windows (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "舊版 Mac (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -291,11 +291,11 @@ msgstr "新分頁"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "儲存失敗"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "確定"
 
 #: src/main.c:5588
 #, c-format
@@ -308,11 +308,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "保存期間遺失字元"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "無法開始儲存操作。請檢查權限或磁碟空間。"
 
 #: src/main.c:5712
 #, c-format
@@ -355,15 +355,15 @@ msgstr "縮排"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "主題"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "顏色主題"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "顯示"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -371,7 +371,7 @@ msgstr "標明目前的列"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "排版"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -415,15 +415,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "分頁: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>插入</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>覆蓋</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -433,7 +433,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "分頁: %d"
 
 #: src/status-bar.c:589
 #, c-format

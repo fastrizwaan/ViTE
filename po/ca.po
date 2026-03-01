@@ -19,31 +19,31 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Cap coincidència"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu coincidències"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Cercant... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Filtrant... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "Filtrant..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "Cercant..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -59,19 +59,19 @@ msgstr "Coincidència posterior"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "Commuta la reemplaçament"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "Expressió regular"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "Sensible a majúscules"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "Només paraules sencerer"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
@@ -88,11 +88,11 @@ msgstr "Text net"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "Capçalera"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "Entrada d'escriptori"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -132,7 +132,7 @@ msgstr ""
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Suprimeix dels recents"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -172,7 +172,7 @@ msgstr ""
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Filtra les línies"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -188,7 +188,7 @@ msgstr "Mostra els números de línia"
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "Habilita el plegat de codi"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
@@ -196,7 +196,7 @@ msgstr "Mostra el mapa general"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Ajust de línia"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
@@ -204,19 +204,19 @@ msgstr "La barra d'estat és visible"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Mostra el botó de desa"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Divideix a l'esquerra"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Divideix avall"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Divideix a la dreta"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -240,7 +240,7 @@ msgstr ""
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Mac antic (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -280,7 +280,7 @@ msgstr "Menú principal"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "Desa (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -288,11 +288,11 @@ msgstr ""
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Error en desar"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "D'acord"
 
 #: src/main.c:5588
 #, c-format
@@ -305,11 +305,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Caràcters perduts en desar"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "No s'ha pogut iniciar l'operació de desat. Comproveu els permisos o l'espai al disc."
 
 #: src/main.c:5712
 #, c-format
@@ -340,11 +340,11 @@ msgstr "Tipus de lletra personalitzada"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "Nom del tipus de lletra"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "Selecciona..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
@@ -352,15 +352,15 @@ msgstr "Sagnat"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Tema"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Tema de color"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Pantalla"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -368,7 +368,7 @@ msgstr "Ressalta la línia actual"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Tipografia"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -412,15 +412,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Pestanya: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>INS</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>SOB</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -430,7 +430,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Pestanya: %d"
 
 #: src/status-bar.c:589
 #, c-format

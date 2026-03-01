@@ -21,31 +21,31 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "Nincs találat"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu találat"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "Keresés... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "Szűrés... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "Szűrés..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "Keresés..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -61,19 +61,19 @@ msgstr "Következő találat"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "Csere ki- és bekapcsolása"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "Reguláris kifejezés"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "Kis- és nagybetűk megkülönböztetése"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "Csak teljes szavak"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
@@ -90,11 +90,11 @@ msgstr "Egyszerű szöveg"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "Fejléc"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "Asztali elem"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -136,7 +136,7 @@ msgstr "Változtatások _elvetése…"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "Eltávolítás a legutóbbiak közül"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -176,7 +176,7 @@ msgstr "Me_ntés másként…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "Sorok szűrése"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -192,35 +192,35 @@ msgstr "Sorok számának megjelenítése"
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "Kódösszecsukás engedélyezése"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "Áttekintő térkép megjelenítése"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "Sortörés"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "Állapotsor megjelenítése"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "Mentés gomb megjelenítése"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "Felosztás balra"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "Felosztás lefelé"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "Felosztás jobbra"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -244,7 +244,7 @@ msgstr "Windows (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Régi Mac (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -284,7 +284,7 @@ msgstr "Főmenü"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "Mentés (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -292,11 +292,11 @@ msgstr "Új lap"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "Mentés sikertelen"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "OK"
 
 #: src/main.c:5588
 #, c-format
@@ -309,11 +309,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "Karakterek elvesztek a mentés során"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "A mentési művelet nem indítható el. Ellenőrizze a jogosultságokat vagy a lemezterületet."
 
 #: src/main.c:5712
 #, c-format
@@ -344,11 +344,11 @@ msgstr "Egyéni betűkészlet"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "Betűkészlet neve"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "Kijelölés..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
@@ -356,15 +356,15 @@ msgstr "Behúzás"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "Téma"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "Színmotívum"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "Megjelenítés"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -372,7 +372,7 @@ msgstr "Aktuális sor kiemelése"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "Tipográfia"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -416,15 +416,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "Lap: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>BESZ</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>ÁTÍ</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -434,7 +434,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "Lap: %d"
 
 #: src/status-bar.c:589
 #, c-format

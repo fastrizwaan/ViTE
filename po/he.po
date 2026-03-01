@@ -21,31 +21,31 @@ msgstr ""
 
 #: src/find-replace-bar.c:132 src/find-replace-bar.c:152
 msgid "No matches"
-msgstr ""
+msgstr "אין התאמות"
 
 #: src/find-replace-bar.c:135 src/find-replace-bar.c:157
 #: src/find-replace-bar.c:204
 #, c-format
 msgid "%zu matches"
-msgstr ""
+msgstr "%zu התאמות"
 
 #: src/find-replace-bar.c:199
 #, c-format
 msgid "Finding... %d%% (%zu)"
-msgstr ""
+msgstr "מוצא... %d%% (%zu)"
 
 #: src/find-replace-bar.c:302
 #, c-format
 msgid "Filtering... %d%% (%zu)"
-msgstr ""
+msgstr "מסנן... %d%% (%zu)"
 
 #: src/find-replace-bar.c:371
 msgid "Filtering..."
-msgstr ""
+msgstr "מסנן..."
 
 #: src/find-replace-bar.c:409
 msgid "Finding..."
-msgstr ""
+msgstr "מוצא..."
 
 #: src/find-replace-bar.c:688
 msgid "Find"
@@ -61,19 +61,19 @@ msgstr "תוצאה הבאה"
 
 #: src/find-replace-bar.c:723
 msgid "Toggle Replace"
-msgstr ""
+msgstr "החלף מצב החלפה"
 
 #: src/find-replace-bar.c:741
 msgid "Regular expression"
-msgstr ""
+msgstr "ביטוי רגולרי"
 
 #: src/find-replace-bar.c:745
 msgid "Case sensitive"
-msgstr ""
+msgstr "תלוי רישיות"
 
 #: src/find-replace-bar.c:749
 msgid "Match whole word only"
-msgstr ""
+msgstr "התאם מילה שלמה בלבד"
 
 #: src/find-replace-bar.c:782 src/find-replace-bar.c:794
 msgid "Replace"
@@ -90,11 +90,11 @@ msgstr "טקסט פשוט"
 
 #: src/main.c:29 src/main.c:4625
 msgid "Header"
-msgstr ""
+msgstr "כותרת עליונה"
 
 #: src/main.c:34 src/main.c:4630
 msgid "Desktop Entry"
-msgstr ""
+msgstr "ערך שולחן עבודה"
 
 #: src/main.c:496
 msgid "Save Changes?"
@@ -134,7 +134,7 @@ msgstr "הת_עלמות מהשינויים…"
 
 #: src/main.c:2998
 msgid "Remove from Recents"
-msgstr ""
+msgstr "הסר מהאחרונים"
 
 #: src/main.c:3004
 msgid "Clear All Recents"
@@ -174,7 +174,7 @@ msgstr "שמירה _בשם…"
 
 #: src/main.c:4563
 msgid "Filter Lines"
-msgstr ""
+msgstr "סנן שורות"
 
 #: src/main.c:4564
 msgid "Find/Replace"
@@ -190,35 +190,35 @@ msgstr "Display Line Numbers"
 
 #: src/main.c:4575 src/preferences.c:197
 msgid "Enable Code Folding"
-msgstr ""
+msgstr "אפשר קיפול קוד"
 
 #: src/main.c:4576 src/preferences.c:198
 msgid "Show Overview Map"
-msgstr ""
+msgstr "הצג מפת סקירה"
 
 #: src/main.c:4577
 msgid "Word Wrap"
-msgstr ""
+msgstr "גלישת מילים"
 
 #: src/main.c:4578
 msgid "Show Status Bar"
-msgstr ""
+msgstr "הצג שורת מצב"
 
 #: src/main.c:4579 src/preferences.c:203
 msgid "Show Save Button"
-msgstr ""
+msgstr "הצג כפתור שמירה"
 
 #: src/main.c:4584
 msgid "Split Left"
-msgstr ""
+msgstr "פצל שמאלה"
 
 #: src/main.c:4585 src/main.c:4588
 msgid "Split Down"
-msgstr ""
+msgstr "פצל למטה"
 
 #: src/main.c:4587
 msgid "Split Right"
-msgstr ""
+msgstr "פצל ימינה"
 
 #: src/main.c:4590
 msgid "Close View"
@@ -242,7 +242,7 @@ msgstr "חלונות (CR+LF)"
 
 #: src/main.c:4614 src/status-bar.c:135
 msgid "Legacy Mac (CR)"
-msgstr ""
+msgstr "Mac ישן (CR)"
 
 #: src/main.c:4615 src/status-bar.c:473
 msgid "Line Ending"
@@ -282,7 +282,7 @@ msgstr "תפריט ראשי"
 
 #: src/main.c:4667
 msgid "Save (Ctrl+S)"
-msgstr ""
+msgstr "שמירה (Ctrl+S)"
 
 #: src/main.c:4681
 msgid "Open Tabs"
@@ -290,11 +290,11 @@ msgstr "לשונית חדשה"
 
 #: src/main.c:5562 src/main.c:5624
 msgid "Save Failed"
-msgstr ""
+msgstr "השמירה נכשלה"
 
 #: src/main.c:5563 src/main.c:5594 src/main.c:5626
 msgid "OK"
-msgstr ""
+msgstr "אישור"
 
 #: src/main.c:5588
 #, c-format
@@ -307,11 +307,11 @@ msgstr ""
 
 #: src/main.c:5593
 msgid "Characters Lost During Save"
-msgstr ""
+msgstr "תווים אבדו במהלך השמירה"
 
 #: src/main.c:5625
 msgid "Could not start save operation. Check permissions or disk space."
-msgstr ""
+msgstr "לא ניתן היה להתחיל בפעולת השמירה. בדוק הרשאות או שטח דיסק."
 
 #: src/main.c:5712
 #, c-format
@@ -342,11 +342,11 @@ msgstr "גופן מותאם אישית"
 
 #: src/preferences.c:106
 msgid "Font Name"
-msgstr ""
+msgstr "שם הגופן"
 
 #: src/preferences.c:108
 msgid "Select..."
-msgstr ""
+msgstr "בחר..."
 
 #: src/preferences.c:126 src/preferences.c:228 src/status-bar.c:460
 msgid "Indentation"
@@ -354,15 +354,15 @@ msgstr "הזחה"
 
 #: src/preferences.c:170
 msgid "Theme"
-msgstr ""
+msgstr "ערכת נושא"
 
 #: src/preferences.c:174
 msgid "Color Theme"
-msgstr ""
+msgstr "ערכת נושא של צבעים"
 
 #: src/preferences.c:193
 msgid "Display"
-msgstr ""
+msgstr "תצוגה"
 
 #: src/preferences.c:199
 msgid "Highlight Current Line"
@@ -370,7 +370,7 @@ msgstr "Highlight Current Line"
 
 #: src/preferences.c:212
 msgid "Typography"
-msgstr ""
+msgstr "טיפוגרפיה"
 
 #: src/preferences.c:219
 msgid "Line Wrap"
@@ -414,15 +414,15 @@ msgstr ""
 
 #: src/status-bar.c:460
 msgid "Tab: 4"
-msgstr ""
+msgstr "כרטיסייה: 4"
 
 #: src/status-bar.c:515
 msgid "<span font_weight='normal'>INS</span>"
-msgstr ""
+msgstr "<span font_weight='normal'>INS</span>"
 
 #: src/status-bar.c:517
 msgid "<span font_weight='bold'>OVR</span>"
-msgstr ""
+msgstr "<span font_weight='bold'>OVR</span>"
 
 #: src/status-bar.c:525
 #, c-format
@@ -432,7 +432,7 @@ msgstr ""
 #: src/status-bar.c:587
 #, c-format
 msgid "Tab: %d"
-msgstr ""
+msgstr "כרטיסייה: %d"
 
 #: src/status-bar.c:589
 #, c-format
