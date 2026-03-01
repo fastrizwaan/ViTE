@@ -11,7 +11,7 @@ traverse_node_for_lines(PieceTable *pt, PieceNode *node, void (*func)(size_t len
     traverse_node_for_lines(pt, node->left, func, user_data, acc_len);
     
     /* Process current piece */
-    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->data;
+    const char *data = (node->piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->mmap_base;
     const char *ptr = data + node->piece.start;
     const char *end = ptr + node->piece.length;
     
