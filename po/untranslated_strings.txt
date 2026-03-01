@@ -1,0 +1,41 @@
+
+No matches
+%zu matches
+Finding... %d%% (%zu)
+Filtering... %d%% (%zu)
+Filtering...
+Finding...
+Toggle Replace
+Regular expression
+Case sensitive
+Match whole word only
+Header
+Desktop Entry
+This will undo all changes and clear undo/redo history. The document will return to its last saved (or opened) state.
+Remove from Recents
+Filter Lines
+Enable Code Folding
+Show Overview Map
+Word Wrap
+Show Status Bar
+Show Save Button
+Split Left
+Split Down
+Split Right
+Legacy Mac (CR)
+Save (Ctrl+S)
+Save Failed
+OK
+
+Characters Lost During Save
+Could not start save operation. Check permissions or disk space.
+Font Name
+Select...
+Theme
+Color Theme
+Display
+Typography
+Tab: 4
+<span font_weight='normal'>INS</span>
+<span font_weight='bold'>OVR</span>
+Tab: %d

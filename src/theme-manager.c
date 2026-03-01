@@ -1213,7 +1213,7 @@ theme_manager_init(void)
     g_ptr_array_add(all_themes, fallback_auto);
 
     ViteTheme *fallback_dark = g_new0(ViteTheme, 1);
-    fallback_dark->name = g_strdup("One Dark Night (Built-in)");
+    fallback_dark->name = g_strdup("One Dark (Built-in)");
     fallback_dark->file_path = NULL;
     set_default_dark_theme(fallback_dark);
     apply_theme_inheritance_and_fallback(fallback_dark, NULL);

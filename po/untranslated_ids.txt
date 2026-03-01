@@ -1,0 +1,101 @@
+
+No matches
+%zu matches
+Finding... %d%% (%zu)
+Filtering... %d%% (%zu)
+Filtering...
+Finding...
+Find
+Previous Match
+Next Match
+Toggle Replace
+Regular expression
+Case sensitive
+Match whole word only
+Replace
+Replace All
+Plain Text
+Header
+Desktop Entry
+Save Changes?
+
+Cancel
+Discard All
+Save
+Discard Changes?
+This will undo all changes and clear undo/redo history. The document will return to its last saved (or opened) state.
+Discard Changes
+Remove from Recents
+Clear All Recents
+Go to Line:
+Leave Fullscreen
+Open
+Search documents
+Open File
+New Tab
+New Window
+Save As…
+Filter Lines
+Find/Replace
+Go to Line…
+Display Line Numbers
+Enable Code Folding
+Show Overview Map
+Word Wrap
+Show Status Bar
+Show Save Button
+Split Left
+Split Down
+Split Right
+Close View
+View
+Encoding
+Unix/Linux (LF)
+Windows (CRLF)
+Legacy Mac (CR)
+Line Ending
+File Type
+Document
+Print
+Fullscreen
+Keyboard Shortcuts
+About Virtual Text Editor
+Preferences
+Main Menu
+Save (Ctrl+S)
+Open Tabs
+Save Failed
+OK
+
+Characters Lost During Save
+Could not start save operation. Check permissions or disk space.
+
+Unsupported Encoding
+Save Anyway
+Save as UTF-8
+Save As
+Custom Font
+Font Name
+Select...
+Indentation
+Theme
+Color Theme
+Display
+Highlight Current Line
+Typography
+Line Wrap
+Display Right Margin
+Right Margin Position
+Text Wrapping
+Automatic Indentation
+Tab Width
+Indent Width
+Tabs
+Spaces
+Indentation Mode
+Tab: 4
+<span font_weight='normal'>INS</span>
+<span font_weight='bold'>OVR</span>
+Ln %d, Col %d
+Tab: %d
+Spaces: %d
