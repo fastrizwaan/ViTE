@@ -1031,6 +1031,12 @@ generate_css(const ViteTheme *theme)
     rgba_to_css(&hover_bg, c_hover, sizeof(c_hover));
     rgba_to_css(&dim_fg, c_dim, sizeof(c_dim));
 
+    /* Accent Color: Use theme's selection color but fully opaque */
+    GdkRGBA accent_bg = theme->selection;
+    accent_bg.alpha = 1.0;
+    char c_accent[64];
+    rgba_to_css(&accent_bg, c_accent, sizeof(c_accent));
+
     /* --- Override GTK named colors so tab/tabbar CSS picks them up --- */
     g_string_append_printf(css,
         "@define-color headerbar_bg_color %s;\n"
@@ -1041,9 +1047,12 @@ generate_css(const ViteTheme *theme)
         "@define-color dialog_bg_color %s;\n"
         "@define-color dialog_fg_color %s;\n"
         "@define-color popover_bg_color %s;\n"
-        "@define-color popover_fg_color %s;\n",
+        "@define-color popover_fg_color %s;\n"
+        "@define-color accent_color %s;\n"
+        "@define-color accent_bg_color %s;\n",
         c_chrome, c_fg, c_bg, c_fg, c_bg,
-        c_surface, c_fg, c_surface, c_fg);
+        c_surface, c_fg, c_surface, c_fg,
+        c_accent, c_accent);
 
     /* --- Window / Root --- */
     g_string_append_printf(css,
