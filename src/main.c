@@ -229,6 +229,7 @@ static void on_recent_item_activated(GtkListBox *list, GtkListBoxRow *row, gpoin
 static void on_recent_popover_unmap(GtkWidget *popover, gpointer user_data);
 static void on_tab_close_clicked(ViteTab *tab, gpointer user_data G_GNUC_UNUSED);
 static void on_tab_move_to_new_window(ViteTab *tab, gpointer user_data G_GNUC_UNUSED);
+static void on_open_tab_close_btn_clicked(GtkButton *btn, gpointer user_data);
 static void load_css(void);
 static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
@@ -2694,6 +2695,24 @@ on_popover_tab_row_activated (GtkListBox *list, GtkListBoxRow *row, gpointer use
 }
 
 static void
+on_open_tab_close_btn_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
+{
+    GtkListBoxRow *row = GTK_LIST_BOX_ROW(user_data);
+    if (!row) return;
+
+    ViteTab *tab = g_object_get_data(G_OBJECT(row), "tab");
+    if (!tab) return;
+
+    on_tab_close_clicked(tab, NULL);
+
+    GtkWidget *list = gtk_widget_get_parent(GTK_WIDGET(row));
+    GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(row), GTK_TYPE_POPOVER);
+    if (popover) {
+        update_open_tabs_list(popover, list);
+    }
+}
+
+static void
 update_open_tabs_list (GtkWidget *popover, gpointer user_data G_GNUC_UNUSED)
 {
     GtkListBox *list = GTK_LIST_BOX(user_data);
@@ -2703,7 +2722,11 @@ update_open_tabs_list (GtkWidget *popover, gpointer user_data G_GNUC_UNUSED)
     /* Clear */
     GtkWidget *child;
     while ((child = gtk_widget_get_first_child(GTK_WIDGET(list)))) {
-        gtk_list_box_remove(list, child);
+        if (GTK_IS_LIST_BOX_ROW(child)) {
+            gtk_list_box_remove(list, child);
+        } else {
+            gtk_widget_unparent(child);
+        }
     }
     
     ViteWindow *win = NULL;
@@ -2731,36 +2754,48 @@ update_open_tabs_list (GtkWidget *popover, gpointer user_data G_GNUC_UNUSED)
     if (!win || !win->tab_bar) return;
     
     GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+    int count = 0;
     for (GList *l = tabs; l != NULL; l = l->next) {
         ViteTab *tab = VITE_TAB(l->data);
         const char *title = vite_tab_get_title(tab);
+        const char *display_name = (title && *title) ? title : _("Untitled");
         
         GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-        gtk_widget_set_margin_start(row_box, 12);
-        gtk_widget_set_margin_end(row_box, 12);
-        gtk_widget_set_margin_top(row_box, 8);
-        gtk_widget_set_margin_bottom(row_box, 8);
+        gtk_widget_set_margin_start(row_box, 6);
+        gtk_widget_set_margin_end(row_box, 0);
+        gtk_widget_set_margin_top(row_box, 6);
+        gtk_widget_set_margin_bottom(row_box, 6);
         
-        GtkWidget *label = gtk_label_new(title);
+        GtkWidget *label = gtk_label_new(display_name);
         gtk_widget_set_halign(label, GTK_ALIGN_START);
+        gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+        gtk_label_set_max_width_chars(GTK_LABEL(label), 260);
         gtk_box_append(GTK_BOX(row_box), label);
+
+        GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+        gtk_widget_set_hexpand(spacer, TRUE);
+        gtk_box_append(GTK_BOX(row_box), spacer);
+
+        GtkWidget *close_btn = gtk_button_new_from_icon_name("window-close-symbolic");
+        gtk_widget_add_css_class(close_btn, "flat");
+        gtk_widget_add_css_class(close_btn, "remove-btn");
+        gtk_widget_set_valign(close_btn, GTK_ALIGN_CENTER);
+        gtk_box_append(GTK_BOX(row_box), close_btn);
         
-        if (vite_tab_is_active(tab)) {
-            GtkWidget *icon = gtk_image_new_from_icon_name("object-select-symbolic");
-            gtk_box_append(GTK_BOX(row_box), icon);
-        }
+        gtk_list_box_append(list, row_box);
         
-        gtk_list_box_insert(list, row_box, -1);
-        
-        /* Store tab pointer */
-        GtkListBoxRow *row = gtk_list_box_get_row_at_index(list, gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(gtk_widget_get_parent(row_box))));
-        g_object_set_data(G_OBJECT(row), "tab", tab);
+        GtkListBoxRow *row = gtk_list_box_get_row_at_index(list, count);
+        g_signal_connect(close_btn, "clicked", G_CALLBACK(on_open_tab_close_btn_clicked), row);
+        g_object_set_data_full(G_OBJECT(row), "tab", g_object_ref(tab), g_object_unref);
+        g_object_set_data_full(G_OBJECT(row), "display-name", g_strdup(display_name), g_free);
+        count++;
     }
     g_list_free(tabs);
-    
-    /* Connect activation */
-    g_signal_handlers_disconnect_by_data(list, list);
-    g_signal_connect(list, "row-activated", G_CALLBACK(on_popover_tab_row_activated), list);
+
+    GtkWidget *search_entry = g_object_get_data(G_OBJECT(popover), "search-entry");
+    if (GTK_IS_SEARCH_ENTRY(search_entry)) {
+        on_search_changed(GTK_SEARCH_ENTRY(search_entry), list);
+    }
 }
 
 static void
@@ -4497,7 +4532,7 @@ setup_window(AdwApplicationWindow *window)
 
     /* Scrolled Window */
     GtkWidget *scrolled = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 400);
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 360);
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scrolled), 400);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scrolled), TRUE);
     gtk_widget_add_css_class(scrolled, "recent-list");
@@ -4684,21 +4719,46 @@ setup_window(AdwApplicationWindow *window)
 
     /* Popover for tabs */
     GtkWidget *tabs_popover = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(tabs_popover), FALSE);
+    gtk_popover_set_position(GTK_POPOVER(tabs_popover), GTK_POS_BOTTOM);
+    GtkWidget *tabs_pop_vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_margin_top(tabs_pop_vbox, 6);
+    gtk_widget_set_margin_bottom(tabs_pop_vbox, 6);
+    gtk_popover_set_child(GTK_POPOVER(tabs_popover), tabs_pop_vbox);
+
+    GtkWidget *tabs_search_entry = gtk_search_entry_new();
+    gtk_widget_set_margin_start(tabs_search_entry, 6);
+    gtk_widget_set_margin_end(tabs_search_entry, 6);
+    gtk_widget_set_margin_bottom(tabs_search_entry, 6);
+    g_object_set(tabs_search_entry, "placeholder-text", _("Search documents"), NULL);
+    gtk_box_append(GTK_BOX(tabs_pop_vbox), tabs_search_entry);
+    GtkEventController *tabs_key_ctrl = gtk_event_controller_key_new();
+    g_signal_connect(tabs_key_ctrl, "key-pressed", G_CALLBACK(on_search_key_pressed), tabs_popover);
+    gtk_widget_add_controller(tabs_search_entry, tabs_key_ctrl);
+
     GtkWidget *tabs_list = gtk_list_box_new();
     GtkWidget *tabs_scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(tabs_scrolled), 300);
+    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(tabs_scrolled), 400);
+    gtk_widget_add_css_class(tabs_scrolled, "recent-list");
+    gtk_widget_add_css_class(tabs_list, "recent-list");
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(tabs_scrolled), tabs_list);
-    gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(tabs_scrolled), 300);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(tabs_scrolled), TRUE);
-    gtk_popover_set_child(GTK_POPOVER(tabs_popover), tabs_scrolled);
+    gtk_box_append(GTK_BOX(tabs_pop_vbox), tabs_scrolled);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(btn_tabs), tabs_popover);
     
     /* Check for overflow logic helper */
     g_object_set_data(G_OBJECT(win->tab_bar), "tabs-btn", btn_tabs);
     g_object_set_data(G_OBJECT(tabs_popover), "list", tabs_list);
+    g_object_set_data(G_OBJECT(tabs_popover), "search-entry", tabs_search_entry);
     
     g_signal_connect(win->tab_bar, "overflow-changed", G_CALLBACK(on_overflow_changed), btn_tabs);
     g_signal_connect(win->tab_bar, "tab-dropped", G_CALLBACK(on_tab_dropped), win);
+    g_signal_connect(tabs_list, "row-activated", G_CALLBACK(on_popover_tab_row_activated), tabs_list);
+    g_signal_connect(tabs_search_entry, "search-changed", G_CALLBACK(on_search_changed), tabs_list);
     g_signal_connect(tabs_popover, "map", G_CALLBACK(update_open_tabs_list), tabs_list);
+    g_signal_connect_swapped(tabs_popover, "map", G_CALLBACK(gtk_list_box_unselect_all), tabs_list);
+    g_signal_connect(tabs_popover, "unmap", G_CALLBACK(on_recent_popover_unmap), tabs_search_entry);
     
     /* Monitor tab bar visibility to update header spinner */
     g_signal_connect(win->tab_bar, "notify::visible", G_CALLBACK(on_tab_bar_visible_changed), win);
