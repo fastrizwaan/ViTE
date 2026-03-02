@@ -161,6 +161,7 @@ on_theme_changed(GObject *combo, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_
 void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
 {
     AdwDialog *dialog = adw_preferences_dialog_new();
+    gtk_widget_add_css_class(GTK_WIDGET(dialog), "vite-preferences-dialog");
     
     GtkWidget *page = adw_preferences_page_new();
     adw_preferences_dialog_add(ADW_PREFERENCES_DIALOG(dialog), ADW_PREFERENCES_PAGE(page));

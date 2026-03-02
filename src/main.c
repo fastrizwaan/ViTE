@@ -1013,6 +1013,7 @@ on_about_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_
     ViteWindow *win = (ViteWindow *)user_data;
     
     AdwAboutDialog *about = ADW_ABOUT_DIALOG(adw_about_dialog_new());
+    gtk_widget_add_css_class(GTK_WIDGET(about), "vite-about-dialog");
     adw_about_dialog_set_application_name(about, "ViTE");
     adw_about_dialog_set_version(about, "0.1");
     adw_about_dialog_set_developer_name(about, "Mohammed Asif Ali Rizvan");
@@ -2332,6 +2333,9 @@ load_css(void)
     "    border-radius: 10px;"
     "    margin-right: 16px;"
     "}"
+    ".recent-list .open-tabs-title, .recent-list .file-list-title {"
+    "    color: @window_fg_color;"
+    "}"
     ".recent-list .remove-btn {"
     "    opacity: 0;"
     "    transition: opacity 0.1s;"   
@@ -2378,6 +2382,31 @@ load_css(void)
     "}"
     ".header-button:active {"
     "    background: alpha(@window_fg_color, 0.18);"
+    "}"
+    ".vite-preferences-dialog row label, "
+    ".vite-preferences-dialog preferencesgroup > label {"
+    "    color: @window_fg_color;"
+    "}"
+    ".vite-preferences-dialog row .subtitle, "
+    ".vite-preferences-dialog row label.dim-label {"
+    "    color: alpha(@window_fg_color, 0.8);"
+    "}"
+    ".vite-about-dialog label, "
+    ".vite-about-dialog row label {"
+    "    color: @window_fg_color;"
+    "}"
+    ".vite-about-dialog .dim-label, "
+    ".vite-about-dialog row .subtitle, "
+    ".vite-about-dialog .caption {"
+    "    color: alpha(@window_fg_color, 0.8);"
+    "}"
+    "preferenceswindow row .title, "
+    "preferencesdialog row .title {"
+    "    color: @window_fg_color;"
+    "}"
+    "preferenceswindow row .subtitle, "
+    "preferencesdialog row .subtitle {"
+    "    color: alpha(@window_fg_color, 0.8);"
     "}"
     "list row:hover, "
     "listview row:hover, "
@@ -2767,6 +2796,7 @@ update_open_tabs_list (GtkWidget *popover, gpointer user_data G_GNUC_UNUSED)
         gtk_widget_set_margin_bottom(row_box, 6);
         
         GtkWidget *label = gtk_label_new(display_name);
+        gtk_widget_add_css_class(label, "open-tabs-title");
         gtk_widget_set_halign(label, GTK_ALIGN_START);
         gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
         gtk_label_set_max_width_chars(GTK_LABEL(label), 260);
@@ -2850,6 +2880,7 @@ update_recent_files_list(GtkListBox *list_box, GtkApplication *app G_GNUC_UNUSED
         gtk_box_append(GTK_BOX(row), vbox);
 
         GtkWidget *title_label = gtk_label_new(display_name);
+        gtk_widget_add_css_class(title_label, "file-list-title");
         gtk_widget_set_halign(title_label, GTK_ALIGN_START);
         gtk_label_set_ellipsize(GTK_LABEL(title_label), PANGO_ELLIPSIZE_END);
         gtk_label_set_max_width_chars(GTK_LABEL(title_label), 260);
