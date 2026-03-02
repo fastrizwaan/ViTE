@@ -3208,6 +3208,14 @@ on_window_drop(GtkDropTarget *target G_GNUC_UNUSED, const GValue *value, double 
            We might need to ensure the source tab bar knows it's done?
            move_tab_to_window removes it from source, so source updates. */
         return TRUE;
+    } else if (value && G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST)) {
+        GSList *files = gdk_file_list_get_files(g_value_get_boxed(value));
+        GtkApplication *app = gtk_window_get_application(GTK_WINDOW(win->window));
+        for (GSList *l = files; l != NULL; l = l->next) {
+            GFile *file = G_FILE(l->data);
+            open_file(app, win, file, TRUE);
+        }
+        return TRUE;
     }
     return FALSE;
 }
@@ -4384,13 +4392,16 @@ setup_window(AdwApplicationWindow *window)
     /* NOTE: AdwApplicationWindow does not support gtk_window_set_titlebar().
      * The titlebar is integrated into the main content area below. */
     
-    /* Add drop target to window to accept tabs */
-    GtkDropTarget *window_drop = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
+    /* Add drop target to window to accept tabs and files */
+    GtkDropTarget *window_drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    GType drop_types[] = { VITE_TYPE_TAB, GDK_TYPE_FILE_LIST };
+    gtk_drop_target_set_gtypes(window_drop, drop_types, G_N_ELEMENTS(drop_types));
     g_signal_connect(window_drop, "drop", G_CALLBACK(on_window_drop), win);
     gtk_widget_add_controller(GTK_WIDGET(window), GTK_EVENT_CONTROLLER(window_drop));
 
     /* Seperate drop target for toolbar_view area */
-    GtkDropTarget *toolbar_drop = gtk_drop_target_new(VITE_TYPE_TAB, GDK_ACTION_MOVE);
+    GtkDropTarget *toolbar_drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY | GDK_ACTION_MOVE);
+    gtk_drop_target_set_gtypes(toolbar_drop, drop_types, G_N_ELEMENTS(drop_types));
     g_signal_connect(toolbar_drop, "drop", G_CALLBACK(on_window_drop), win);
     gtk_widget_add_controller(GTK_WIDGET(toolbar_view), GTK_EVENT_CONTROLLER(toolbar_drop));
     
