@@ -5116,7 +5116,9 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
         if (selected_lang_id) lang_set = TRUE;
     }
 
-    if (!lang_set) {
+    /* Keep unknown extensions as Plain Text; only try content heuristics
+     * for files without an extension (e.g. shebang scripts). */
+    if (!lang_set && !dot) {
         /* Fallback: Content Detection (First 1KB) */
         char sample[1024];
         GFileInputStream *in_stream = g_file_read(file, NULL, NULL);
