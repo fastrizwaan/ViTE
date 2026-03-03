@@ -11,6 +11,13 @@ adw_dep = dependency('libadwaita-1', version: '>= 1.0.0')
 m_dep = cc.find_library('m', required : false)
 json_glib_dep = dependency('json-glib-1.0', version: '>= 1.0.0')
 uchardet_dep = dependency('uchardet', required: true)
+vte_dep = dependency('vte-2.91-gtk4', required: false)
+if not vte_dep.found()
+  vte_dep = dependency('vte-2.91', required: false)
+endif
+if vte_dep.found()
+  add_project_arguments('-DHAVE_VTE=1', language: 'c')
+endif
 
 i18n = import('i18n')
 
@@ -59,9 +66,14 @@ sources = files(
 
 subdir('po')
 
+app_deps = [gtk_dep, adw_dep, m_dep, json_glib_dep, uchardet_dep]
+if vte_dep.found()
+  app_deps += [vte_dep]
+endif
+
 executable('vite',
   sources,
-  dependencies : [gtk_dep, adw_dep, m_dep, json_glib_dep, uchardet_dep],
+  dependencies : app_deps,
   install : true)
 
 # Install desktop file

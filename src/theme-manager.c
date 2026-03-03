@@ -12,6 +12,38 @@ static ViteTheme *current_theme = NULL;
 static GtkCssProvider *current_css_provider = NULL;
 static guint64 theme_revision = 0;
 
+typedef struct {
+    gulong id;
+    ThemeManagerChangedCallback callback;
+    gpointer user_data;
+    GDestroyNotify destroy;
+} ThemeChangedListener;
+
+static GPtrArray *theme_changed_listeners = NULL; /* ThemeChangedListener* */
+static gulong next_theme_listener_id = 1;
+
+static void
+theme_changed_listener_free(gpointer data)
+{
+    ThemeChangedListener *listener = data;
+    if (!listener) return;
+    if (listener->destroy) listener->destroy(listener->user_data);
+    g_free(listener);
+}
+
+static void
+notify_theme_changed_listeners(void)
+{
+    if (!theme_changed_listeners) return;
+
+    for (guint i = 0; i < theme_changed_listeners->len; i++) {
+        ThemeChangedListener *listener = g_ptr_array_index(theme_changed_listeners, i);
+        if (listener && listener->callback) {
+            listener->callback(current_theme, listener->user_data);
+        }
+    }
+}
+
 /* Check if a theme is a built-in default that should use native Adwaita colors */
 static gboolean
 is_default_theme(const char *name)
@@ -1309,6 +1341,12 @@ theme_manager_cleanup(void)
         g_ptr_array_unref(all_themes);
         all_themes = NULL;
     }
+
+    if (theme_changed_listeners) {
+        g_ptr_array_unref(theme_changed_listeners);
+        theme_changed_listeners = NULL;
+    }
+
     current_theme = NULL;
 }
 
@@ -1408,6 +1446,8 @@ theme_manager_apply_theme(const char *theme_name)
             adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_LIGHT);
         }
     }
+
+    notify_theme_changed_listeners();
 }
 
 const ViteTheme *
@@ -1420,6 +1460,39 @@ guint64
 theme_manager_get_revision(void)
 {
     return theme_revision;
+}
+
+gulong
+theme_manager_add_changed_callback(ThemeManagerChangedCallback callback, gpointer user_data, GDestroyNotify destroy)
+{
+    if (!callback) return 0;
+
+    if (!theme_changed_listeners) {
+        theme_changed_listeners = g_ptr_array_new_with_free_func(theme_changed_listener_free);
+    }
+
+    ThemeChangedListener *listener = g_new0(ThemeChangedListener, 1);
+    listener->id = next_theme_listener_id++;
+    listener->callback = callback;
+    listener->user_data = user_data;
+    listener->destroy = destroy;
+    g_ptr_array_add(theme_changed_listeners, listener);
+
+    return listener->id;
+}
+
+void
+theme_manager_remove_changed_callback(gulong callback_id)
+{
+    if (!theme_changed_listeners || callback_id == 0) return;
+
+    for (guint i = 0; i < theme_changed_listeners->len; i++) {
+        ThemeChangedListener *listener = g_ptr_array_index(theme_changed_listeners, i);
+        if (listener && listener->id == callback_id) {
+            g_ptr_array_remove_index(theme_changed_listeners, i);
+            return;
+        }
+    }
 }
 
 /* --- Persistence --- */

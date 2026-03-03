@@ -117,6 +117,11 @@ const ViteTheme *theme_manager_get_current(void);
 /* Monotonic revision incremented each time a theme is applied */
 guint64 theme_manager_get_revision(void);
 
+/* Theme change listeners */
+typedef void (*ThemeManagerChangedCallback)(const ViteTheme *theme, gpointer user_data);
+gulong theme_manager_add_changed_callback(ThemeManagerChangedCallback callback, gpointer user_data, GDestroyNotify destroy);
+void theme_manager_remove_changed_callback(gulong callback_id);
+
 /* Persist / load selection */
 void theme_manager_save_selection(const char *theme_name);
 char *theme_manager_load_selection(void);

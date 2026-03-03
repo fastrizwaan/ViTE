@@ -13,6 +13,10 @@
 #include "status-bar.h"
 #include "theme-manager.h"
 
+#ifdef HAVE_VTE
+#include <vte/vte.h>
+#endif
+
 /* Define file type entries for the menu */
 typedef struct {
     const char *name;
@@ -214,6 +218,9 @@ static void on_shortcuts_action(GSimpleAction *action, GVariant *parameter, gpoi
 static void on_about_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_right(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_split_down(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+#ifdef HAVE_VTE
+static void on_terminal_toggle(GSimpleAction *action, GVariant *parameter, gpointer user_data);
+#endif
 static void on_zoom_in_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_zoom_out_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
 static void on_zoom_reset_action(GSimpleAction *action, GVariant *parameter, gpointer user_data);
@@ -1187,21 +1194,9 @@ static void close_split_view(GtkWidget *overlay);
 static void update_window_title_for_tab(ViteTab *tab);
 
 static void
-on_close_split_clicked(GtkWidget *overlay, gpointer user_data G_GNUC_UNUSED)
-{
-    /* Overlay is the inner overlay. Helper finds the ViewContainer */
-    GtkWidget *view_container = gtk_widget_get_parent(overlay);
-    if (view_container && gtk_widget_has_css_class(view_container, "view-split")) {
-        close_split_view(view_container);
-    }
-}
-
-static void
 on_overlay_focus_leave(GtkEventControllerFocus *controller G_GNUC_UNUSED, gpointer user_data)
 {
-    GtkWidget *overlay = GTK_WIDGET(user_data);
-    GtkWidget *btn = g_object_get_data(G_OBJECT(overlay), "close-btn");
-    if (btn) gtk_widget_set_visible(btn, FALSE);
+    (void)user_data;
 }
 
 static void
@@ -1226,20 +1221,6 @@ on_overlay_focus_enter(GtkEventControllerFocus *controller G_GNUC_UNUSED, gpoint
         if (root) {
             ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
             if (win) win->last_active_editor = editor;
-        }
-    }
-    
-    /* Update Close Button Visibility */
-    GtkWidget *btn = g_object_get_data(G_OBJECT(overlay), "close-btn");
-    if (btn) {
-        GtkWidget *parent = gtk_widget_get_parent(overlay); /* ViewContainer */
-        GtkWidget *grandparent = parent ? gtk_widget_get_parent(parent) : NULL;
-        
-        /* Only show if ViewContainer is in a split (parent is Paned) */
-        if (grandparent && GTK_IS_PANED(grandparent)) {
-            gtk_widget_set_visible(btn, TRUE);
-        } else {
-            gtk_widget_set_visible(btn, FALSE);
         }
     }
     
@@ -1388,21 +1369,6 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
     g_signal_connect(controller, "enter", G_CALLBACK(on_overlay_focus_enter), overlay);
     g_signal_connect(controller, "leave", G_CALLBACK(on_overlay_focus_leave), overlay);
     gtk_widget_add_controller(overlay, controller);
-    
-    /* Close Button */
-    GtkWidget *btn_close = gtk_button_new_from_icon_name("window-close-symbolic");
-    gtk_widget_add_css_class(btn_close, "flat");
-    gtk_widget_set_valign(btn_close, GTK_ALIGN_START);
-    gtk_widget_set_halign(btn_close, GTK_ALIGN_END);
-    gtk_widget_set_margin_top(btn_close, 4);
-    gtk_widget_set_margin_end(btn_close, 4);
-    gtk_widget_set_visible(btn_close, FALSE); /* Hidden initially */
-    g_object_set_data(G_OBJECT(overlay), "close-btn", btn_close);
-    
-    /* We need to pass the overlay to the callback, not the button */
-    g_signal_connect_swapped(btn_close, "clicked", G_CALLBACK(on_close_split_clicked), overlay);
-    
-    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), btn_close);
     
     /* Unwrap editor if needed for FindBar access */
     GtkWidget *real_editor = editor;
@@ -1960,17 +1926,76 @@ close_split_view(GtkWidget *view_container)
         GtkWidget *new_focus = find_first_editor_recursive(sibling);
         if (new_focus) {
             defer_focus(new_focus);
-             GtkWidget *overlay = gtk_widget_get_ancestor(new_focus, GTK_TYPE_OVERLAY);
-             if (overlay) {
-                 GtkWidget *s_btn = g_object_get_data(G_OBJECT(overlay), "close-btn");
-                 if (s_btn) {
-                     /* Show close button if we are in a split (parent of sibling is now grandparent) */
-                     GtkWidget *s_parent = gtk_widget_get_parent(sibling); /* This is the grandparent now */
-                     gtk_widget_set_visible(s_btn, GTK_IS_PANED(s_parent));
-                 }
-            }
         }
     }
+}
+
+static gboolean
+replace_view_with_paned(GtkWidget *view_container, GtkWidget *paned)
+{
+    GtkWidget *parent = gtk_widget_get_parent(view_container);
+    if (!parent) return FALSE;
+
+    g_object_ref(view_container);
+
+    if (GTK_IS_BOX(parent)) {
+        gtk_box_remove(GTK_BOX(parent), view_container);
+        gtk_box_append(GTK_BOX(parent), paned);
+    } else if (GTK_IS_PANED(parent)) {
+        if (gtk_paned_get_start_child(GTK_PANED(parent)) == view_container) {
+            gtk_paned_set_start_child(GTK_PANED(parent), NULL);
+            gtk_paned_set_start_child(GTK_PANED(parent), paned);
+        } else {
+            gtk_paned_set_end_child(GTK_PANED(parent), NULL);
+            gtk_paned_set_end_child(GTK_PANED(parent), paned);
+        }
+    } else {
+        g_object_unref(view_container);
+        return FALSE;
+    }
+
+    gtk_paned_set_start_child(GTK_PANED(paned), view_container);
+    g_object_unref(view_container);
+    return TRUE;
+}
+
+static GtkWidget *
+promote_to_view_container(GtkWidget *widget, GtkWidget *page)
+{
+    GtkWidget *view_container = widget;
+    while (view_container && !gtk_widget_has_css_class(view_container, "view-split") && view_container != page) {
+        view_container = gtk_widget_get_parent(view_container);
+    }
+    if (!view_container || !gtk_widget_has_css_class(view_container, "view-split")) return NULL;
+    return view_container;
+}
+
+static GtkWidget *
+resolve_split_target_view(ViteWindow *win, ViteTab *tab, GtkWidget *page, gboolean require_editor)
+{
+    GtkWidget *target_overlay = vite_tab_get_last_focused_child(tab);
+
+    if (!target_overlay && win->window) {
+        GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(win->window));
+        if (focus && gtk_widget_is_ancestor(focus, page)) {
+            target_overlay = gtk_widget_get_ancestor(focus, GTK_TYPE_OVERLAY);
+        }
+    }
+
+    GtkWidget *view_container = promote_to_view_container(target_overlay, page);
+    if (view_container && require_editor) {
+        GtkWidget *editor = find_first_editor_recursive(view_container);
+        if (!EDITOR_IS_WIDGET(editor)) view_container = NULL;
+    }
+
+    if (!view_container) {
+        GtkWidget *fallback_editor = find_first_editor_recursive(page);
+        if (fallback_editor) {
+            view_container = promote_to_view_container(fallback_editor, page);
+        }
+    }
+
+    return view_container;
 }
 
 static void
@@ -1981,63 +2006,17 @@ do_split(ViteWindow *win, GtkOrientation orientation)
     
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     if (!page) return;
-    
-    GtkWidget *target_overlay = vite_tab_get_last_focused_child(tab);
-    
-    /* Fallback to window focus */
-    if (!target_overlay) {
-        GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(win->window));
-        if (focus && gtk_widget_is_ancestor(focus, page)) {
-             target_overlay = gtk_widget_get_ancestor(focus, GTK_TYPE_OVERLAY);
-        }
-    }
-    
-    /* Fallback to first editor */
-    if (!target_overlay) {
-        GtkWidget *ed = find_first_editor_recursive(page);
-        if (ed) target_overlay = gtk_widget_get_ancestor(ed, GTK_TYPE_OVERLAY);
-    }
 
-    if (!target_overlay) return;
-
-    /* Promote target_overlay to ViewContainer (the 'view-split' box) */
-    GtkWidget *view_container = target_overlay;
-    while (view_container && !gtk_widget_has_css_class(view_container, "view-split") && view_container != page) {
-         view_container = gtk_widget_get_parent(view_container);
-    }
+    GtkWidget *view_container = resolve_split_target_view(win, tab, page, TRUE);
+    if (!view_container) return;
     
-    if (!view_container || !gtk_widget_has_css_class(view_container, "view-split")) return;
-    
-    /* Perform split on view_container */
-    GtkWidget *parent = gtk_widget_get_parent(view_container);
-    if (!parent) return;
+    GtkWidget *old_editor = find_first_editor_recursive(view_container);
+    if (!EDITOR_IS_WIDGET(old_editor)) return;
 
     GtkWidget *paned = gtk_paned_new(orientation);
-    
-    g_object_ref(view_container);
-    
-    if (GTK_IS_BOX(parent)) {
-        gtk_box_remove(GTK_BOX(parent), view_container);
-        gtk_box_append(GTK_BOX(parent), paned);
-    } else if (GTK_IS_PANED(parent)) {
-        if (gtk_paned_get_start_child(GTK_PANED(parent)) == view_container) {
-             gtk_paned_set_start_child(GTK_PANED(parent), NULL);
-             gtk_paned_set_start_child(GTK_PANED(parent), paned);
-        } else {
-             gtk_paned_set_end_child(GTK_PANED(parent), NULL);
-             gtk_paned_set_end_child(GTK_PANED(parent), paned);
-        }
-    } else {
-        g_object_unref(view_container);
-        return;
-    }
-    
-    /* Start child is old view */
-    gtk_paned_set_start_child(GTK_PANED(paned), view_container);
-    g_object_unref(view_container);
+    if (!replace_view_with_paned(view_container, paned)) return;
     
     /* End child is NEW view */
-    GtkWidget *old_editor = find_first_editor_recursive(view_container);
     Document *doc = editor_widget_get_document(EDITOR_WIDGET(old_editor));
     
     GtkWidget *new_scrolled = gtk_scrolled_window_new();
@@ -2075,6 +2054,349 @@ do_split(ViteWindow *win, GtkOrientation orientation)
     defer_focus(new_editor);
 }
 
+#ifdef HAVE_VTE
+typedef struct {
+    GWeakRef terminal_ref;
+} TerminalTracker;
+
+static GPtrArray *terminal_trackers = NULL; /* TerminalTracker* */
+static gulong terminal_theme_changed_id = 0;
+
+static char *
+terminal_split_cwd(ViteWindow *win)
+{
+    GtkWidget *active = get_active_editor(win);
+    if (active && EDITOR_IS_WIDGET(active)) {
+        Document *doc = editor_widget_get_document(EDITOR_WIDGET(active));
+        const char *path = doc ? document_get_file_path(doc) : NULL;
+        if (path && *path) return g_path_get_dirname(path);
+    }
+
+    const char *home = g_get_home_dir();
+    if (home && *home) return g_strdup(home);
+    return g_get_current_dir();
+}
+
+static void
+on_terminal_spawned(VteTerminal *term G_GNUC_UNUSED, GPid pid, GError *error, gpointer user_data G_GNUC_UNUSED)
+{
+    if (error) {
+        g_warning("Failed to spawn embedded terminal: %s", error->message);
+        g_error_free(error);
+        return;
+    }
+
+    if (pid > 0) g_spawn_close_pid(pid);
+}
+
+static void
+terminal_tracker_free(gpointer data)
+{
+    TerminalTracker *tracker = data;
+    if (!tracker) return;
+    g_weak_ref_clear(&tracker->terminal_ref);
+    g_free(tracker);
+}
+
+static double
+clamp01(double v)
+{
+    if (v < 0.0) return 0.0;
+    if (v > 1.0) return 1.0;
+    return v;
+}
+
+static double
+terminal_darken_factor(gboolean dark_theme)
+{
+    return dark_theme ? 0.08 : 0.12;
+}
+
+static void
+apply_terminal_theme_colors(VteTerminal *term)
+{
+    const ViteTheme *theme = theme_manager_get_current();
+    if (!theme) return;
+
+    GdkRGBA fg = theme->editor_fg;
+    GdkRGBA bg = theme->editor_bg;
+
+    /* Keep terminal slightly darker than the editor surface. */
+    double darken = terminal_darken_factor(theme->is_dark);
+    bg.red = clamp01(bg.red * (1.0 - darken));
+    bg.green = clamp01(bg.green * (1.0 - darken));
+    bg.blue = clamp01(bg.blue * (1.0 - darken));
+    bg.alpha = 1.0;
+    fg.alpha = 1.0;
+
+    vte_terminal_set_colors(term, &fg, &bg, NULL, 0);
+}
+
+static void
+sync_all_terminal_theme_colors(const ViteTheme *theme G_GNUC_UNUSED, gpointer user_data G_GNUC_UNUSED)
+{
+    if (!terminal_trackers) return;
+
+    for (guint i = 0; i < terminal_trackers->len; ) {
+        TerminalTracker *tracker = g_ptr_array_index(terminal_trackers, i);
+        VteTerminal *term = tracker ? VTE_TERMINAL(g_weak_ref_get(&tracker->terminal_ref)) : NULL;
+        if (!term) {
+            g_ptr_array_remove_index(terminal_trackers, i);
+            continue;
+        }
+
+        apply_terminal_theme_colors(term);
+        g_object_unref(term);
+        i++;
+    }
+
+    if (terminal_trackers->len == 0 && terminal_theme_changed_id != 0) {
+        theme_manager_remove_changed_callback(terminal_theme_changed_id);
+        terminal_theme_changed_id = 0;
+    }
+}
+
+static void
+on_tracked_terminal_destroy(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data)
+{
+    TerminalTracker *target = user_data;
+    if (!terminal_trackers || !target) return;
+
+    for (guint i = 0; i < terminal_trackers->len; i++) {
+        if (g_ptr_array_index(terminal_trackers, i) == target) {
+            g_ptr_array_remove_index(terminal_trackers, i);
+            break;
+        }
+    }
+
+    if (terminal_trackers->len == 0 && terminal_theme_changed_id != 0) {
+        theme_manager_remove_changed_callback(terminal_theme_changed_id);
+        terminal_theme_changed_id = 0;
+    }
+}
+
+static void
+track_terminal(VteTerminal *term)
+{
+    if (!terminal_trackers) {
+        terminal_trackers = g_ptr_array_new_with_free_func(terminal_tracker_free);
+    }
+
+    if (terminal_theme_changed_id == 0) {
+        terminal_theme_changed_id = theme_manager_add_changed_callback(sync_all_terminal_theme_colors, NULL, NULL);
+    }
+
+    TerminalTracker *tracker = g_new0(TerminalTracker, 1);
+    g_weak_ref_init(&tracker->terminal_ref, G_OBJECT(term));
+    g_ptr_array_add(terminal_trackers, tracker);
+    g_signal_connect(term, "destroy", G_CALLBACK(on_tracked_terminal_destroy), tracker);
+}
+
+static void
+on_terminal_menu_copy_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
+{
+    GtkPopover *popover = GTK_POPOVER(user_data);
+    VteTerminal *term = VTE_TERMINAL(g_object_get_data(G_OBJECT(popover), "terminal"));
+    if (term) {
+#if VTE_CHECK_VERSION(0, 50, 0)
+        vte_terminal_copy_clipboard_format(term, VTE_FORMAT_TEXT);
+#else
+        vte_terminal_copy_clipboard(term);
+#endif
+    }
+    gtk_popover_popdown(popover);
+}
+
+static void
+on_terminal_menu_paste_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
+{
+    GtkPopover *popover = GTK_POPOVER(user_data);
+    VteTerminal *term = VTE_TERMINAL(g_object_get_data(G_OBJECT(popover), "terminal"));
+    if (term) {
+        vte_terminal_paste_clipboard(term);
+    }
+    gtk_popover_popdown(popover);
+}
+
+static void
+on_terminal_menu_close_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
+{
+    GtkPopover *popover = GTK_POPOVER(user_data);
+    VteTerminal *term = VTE_TERMINAL(g_object_get_data(G_OBJECT(popover), "terminal"));
+    if (!term) {
+        gtk_popover_popdown(popover);
+        return;
+    }
+
+    GtkWidget *view = GTK_WIDGET(term);
+    while (view) {
+        if (gtk_widget_has_css_class(view, "view-split") &&
+            GPOINTER_TO_INT(g_object_get_data(G_OBJECT(view), "is-terminal-view")) != 0) {
+            close_split_view(view);
+            break;
+        }
+        view = gtk_widget_get_parent(view);
+    }
+
+    gtk_popover_popdown(popover);
+}
+
+static void
+on_terminal_menu_closed(GtkPopover *popover, gpointer user_data)
+{
+    VteTerminal *term = VTE_TERMINAL(user_data);
+    if (term) {
+        g_object_set_data(G_OBJECT(term), "context-menu-popover", NULL);
+    }
+    if (gtk_widget_get_parent(GTK_WIDGET(popover))) {
+        gtk_widget_unparent(GTK_WIDGET(popover));
+    }
+}
+
+static void
+on_terminal_secondary_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data)
+{
+    if (n_press != 1) return;
+
+    VteTerminal *term = VTE_TERMINAL(user_data);
+    GtkWidget *old_pop = g_object_get_data(G_OBJECT(term), "context-menu-popover");
+    if (old_pop) {
+        gtk_popover_popdown(GTK_POPOVER(old_pop));
+        if (gtk_widget_get_parent(old_pop)) {
+            gtk_widget_unparent(old_pop);
+        }
+        g_object_set_data(G_OBJECT(term), "context-menu-popover", NULL);
+    }
+
+    GtkWidget *popover = gtk_popover_new();
+    gtk_popover_set_has_arrow(GTK_POPOVER(popover), TRUE);
+    gtk_widget_set_parent(popover, GTK_WIDGET(term));
+
+    GdkRectangle rect = { (int)x, (int)y, 1, 1 };
+    gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_margin_start(box, 4);
+    gtk_widget_set_margin_end(box, 4);
+    gtk_widget_set_margin_top(box, 4);
+    gtk_widget_set_margin_bottom(box, 4);
+
+    GtkWidget *copy_btn = gtk_button_new_with_label(_("Copy"));
+    GtkWidget *paste_btn = gtk_button_new_with_label(_("Paste"));
+    GtkWidget *close_btn = gtk_button_new_with_label(_("Close"));
+    gtk_widget_add_css_class(copy_btn, "flat");
+    gtk_widget_add_css_class(paste_btn, "flat");
+    gtk_widget_add_css_class(close_btn, "flat");
+    gtk_widget_set_halign(copy_btn, GTK_ALIGN_FILL);
+    gtk_widget_set_halign(paste_btn, GTK_ALIGN_FILL);
+    gtk_widget_set_halign(close_btn, GTK_ALIGN_FILL);
+    gtk_widget_set_sensitive(copy_btn, vte_terminal_get_has_selection(term));
+
+    g_signal_connect(copy_btn, "clicked", G_CALLBACK(on_terminal_menu_copy_clicked), popover);
+    g_signal_connect(paste_btn, "clicked", G_CALLBACK(on_terminal_menu_paste_clicked), popover);
+    g_signal_connect(close_btn, "clicked", G_CALLBACK(on_terminal_menu_close_clicked), popover);
+    gtk_box_append(GTK_BOX(box), copy_btn);
+    gtk_box_append(GTK_BOX(box), paste_btn);
+    gtk_box_append(GTK_BOX(box), close_btn);
+
+    g_object_set_data(G_OBJECT(popover), "terminal", term);
+    g_object_set_data(G_OBJECT(term), "context-menu-popover", popover);
+    g_signal_connect(popover, "closed", G_CALLBACK(on_terminal_menu_closed), term);
+
+    gtk_popover_set_child(GTK_POPOVER(popover), box);
+    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    gtk_popover_popup(GTK_POPOVER(popover));
+}
+
+static GtkWidget *
+create_embedded_terminal(ViteWindow *win)
+{
+    VteTerminal *term = VTE_TERMINAL(vte_terminal_new());
+    GtkWidget *terminal = GTK_WIDGET(term);
+    gtk_widget_set_hexpand(terminal, TRUE);
+    gtk_widget_set_vexpand(terminal, TRUE);
+    gtk_widget_add_css_class(terminal, "monospace");
+
+    vte_terminal_set_scrollback_lines(term, 10000);
+    apply_terminal_theme_colors(term);
+    track_terminal(term);
+
+    GtkGestureClick *secondary = GTK_GESTURE_CLICK(gtk_gesture_click_new());
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(secondary), GDK_BUTTON_SECONDARY);
+    g_signal_connect(secondary, "pressed", G_CALLBACK(on_terminal_secondary_pressed), term);
+    gtk_widget_add_controller(terminal, GTK_EVENT_CONTROLLER(secondary));
+
+    const char *shell = g_getenv("SHELL");
+    if (!shell || !*shell) shell = "/bin/sh";
+
+    char *argv[] = { (char *)shell, (char *)"-i", NULL };
+    char *cwd = terminal_split_cwd(win);
+
+    vte_terminal_spawn_async(term,
+                             VTE_PTY_DEFAULT,
+                             cwd,
+                             argv,
+                             NULL,
+                             G_SPAWN_SEARCH_PATH,
+                             NULL,
+                             NULL,
+                             NULL,
+                             -1,
+                             NULL,
+                             on_terminal_spawned,
+                             NULL);
+    g_free(cwd);
+
+    return terminal;
+}
+
+static GtkWidget *
+find_terminal_view_recursive(GtkWidget *widget)
+{
+    if (!widget) return NULL;
+
+    if (gtk_widget_has_css_class(widget, "view-split") &&
+        GPOINTER_TO_INT(g_object_get_data(G_OBJECT(widget), "is-terminal-view")) != 0) {
+        return widget;
+    }
+
+    GtkWidget *child = gtk_widget_get_first_child(widget);
+    while (child) {
+        GtkWidget *res = find_terminal_view_recursive(child);
+        if (res) return res;
+        child = gtk_widget_get_next_sibling(child);
+    }
+
+    return NULL;
+}
+
+static void
+do_terminal_split(ViteWindow *win, GtkOrientation orientation)
+{
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!tab) return;
+
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    if (!page) return;
+
+    GtkWidget *view_container = resolve_split_target_view(win, tab, page, FALSE);
+    if (!view_container) return;
+
+    GtkWidget *paned = gtk_paned_new(orientation);
+    if (!replace_view_with_paned(view_container, paned)) return;
+
+    GtkWidget *terminal = create_embedded_terminal(win);
+    GtkWidget *terminal_view = create_view_container(win, terminal);
+    g_object_set_data(G_OBJECT(terminal_view), "is-terminal-view", GINT_TO_POINTER(1));
+    gtk_paned_set_end_child(GTK_PANED(paned), terminal_view);
+
+    int size = (orientation == GTK_ORIENTATION_HORIZONTAL) ? gtk_widget_get_width(view_container) : gtk_widget_get_height(view_container);
+    if (size > 0) gtk_paned_set_position(GTK_PANED(paned), size / 2);
+
+    defer_focus(terminal);
+}
+#endif
+
 static void
 on_split_right(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
@@ -2088,6 +2410,29 @@ on_split_down(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UN
     ViteWindow *win = (ViteWindow *)user_data;
     if (win) do_split(win, GTK_ORIENTATION_VERTICAL);
 }
+
+#ifdef HAVE_VTE
+static void
+on_terminal_toggle(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
+{
+    ViteWindow *win = (ViteWindow *)user_data;
+    if (!win || !win->tab_bar) return;
+
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!tab) return;
+
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    if (!page) return;
+
+    GtkWidget *terminal_view = find_terminal_view_recursive(page);
+    if (terminal_view) {
+        close_split_view(terminal_view);
+        return;
+    }
+
+    do_terminal_split(win, GTK_ORIENTATION_VERTICAL);
+}
+#endif
 
 static void
 on_close_split_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
@@ -3727,11 +4072,13 @@ get_active_editor(ViteWindow *win)
     if (tab) {
         GtkWidget *overlay = vite_tab_get_last_focused_child(tab);
         if (overlay && GTK_IS_OVERLAY(overlay)) {
-             GtkWidget *child = gtk_overlay_get_child(GTK_OVERLAY(overlay));
-             if (GTK_IS_SCROLLED_WINDOW(child)) {
-                 return gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(child));
-             }
-             return child;
+            GtkWidget *child = gtk_overlay_get_child(GTK_OVERLAY(overlay));
+            if (GTK_IS_SCROLLED_WINDOW(child)) {
+                child = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(child));
+            }
+            if (EDITOR_IS_WIDGET(child)) {
+                return child;
+            }
         }
     }
     
@@ -4514,6 +4861,9 @@ setup_window(AdwApplicationWindow *window)
         { "new-tab", on_new_tab_action, NULL, NULL, NULL, { 0 } },
         { "split-right", on_split_right, NULL, NULL, NULL, { 0 } },
         { "split-down", on_split_down, NULL, NULL, NULL, { 0 } },
+#ifdef HAVE_VTE
+        { "terminal", on_terminal_toggle, NULL, NULL, NULL, { 0 } },
+#endif
         { "close-view", on_close_split_action, NULL, NULL, NULL, { 0 } },
         { "close-tab", on_close_tab_action, NULL, NULL, NULL, { 0 } },
         { "reopen-closed-tab", on_reopen_closed_tab_action, NULL, NULL, NULL, { 0 } },
@@ -4576,7 +4926,10 @@ setup_window(AdwApplicationWindow *window)
         { GDK_KEY_minus, GDK_CONTROL_MASK, "win.zoom-out" },
         { GDK_KEY_KP_Subtract, GDK_CONTROL_MASK, "win.zoom-out" },
         { GDK_KEY_0, GDK_CONTROL_MASK, "win.zoom-reset" },
-        { GDK_KEY_KP_0, GDK_CONTROL_MASK, "win.zoom-reset" }
+        { GDK_KEY_KP_0, GDK_CONTROL_MASK, "win.zoom-reset" },
+#ifdef HAVE_VTE
+        { GDK_KEY_grave, GDK_CONTROL_MASK, "win.terminal" },
+#endif
     };
 
     for (int i = 0; i < (int)G_N_ELEMENTS(keys); i++) {
@@ -4713,6 +5066,9 @@ setup_window(AdwApplicationWindow *window)
     g_menu_append(view_menu, _("Word Wrap"), "win.enable-word-wrap");
     g_menu_append(view_menu, _("Show Status Bar"), "win.show-status-bar");
     g_menu_append(view_menu, _("Show Save Button"), "win.show-save-button");
+#ifdef HAVE_VTE
+    g_menu_append(view_menu, _("Terminal"), "win.terminal");
+#endif
     
     GMenu *split_menu = g_menu_new();
     
@@ -5421,6 +5777,16 @@ main(int argc, char **argv)
     g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
     g_signal_connect(app, "open", G_CALLBACK(on_open), NULL);
     status = g_application_run(G_APPLICATION(app), argc, argv);
+#ifdef HAVE_VTE
+    if (terminal_theme_changed_id != 0) {
+        theme_manager_remove_changed_callback(terminal_theme_changed_id);
+        terminal_theme_changed_id = 0;
+    }
+    if (terminal_trackers) {
+        g_ptr_array_unref(terminal_trackers);
+        terminal_trackers = NULL;
+    }
+#endif
     theme_manager_cleanup();
     g_object_unref(app);
     return status;

@@ -38,6 +38,56 @@ modules:
       - type: archive
         url: https://www.freedesktop.org/software/uchardet/releases/uchardet-0.0.8.tar.xz
         sha256: e97a60cfc00a1c147a674b097bb1422abd9fa78a2d9ce3f3fdcc2e78a34ac5f0
+
+  - name: fast_float
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_SHARED_LIBS=ON
+      - -DFASTFLOAT_TEST=OFF
+    cleanup:
+      - /lib/cmake
+    sources:
+      - type: git
+        url: https://github.com/fastfloat/fast_float.git
+        # SHA256 for verification (Optional but recommended)
+        tag: v8.2.3
+        
+  - name: simdutf
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_SHARED_LIBS=ON
+      - -DSIMDUTF_BENCHMARKS=OFF
+      - -DSIMDUTF_TESTS=OFF
+      - -DSIMDUTF_TOOLS=OFF
+    cleanup:
+      - /lib/cmake
+    sources:
+      - type: git
+        url: https://github.com/simdutf/simdutf.git
+        # SHA256 for verification (Optional but recommended)
+        tag: v8.0.0
+        
+  - name: vte
+    buildsystem: meson
+    config-opts:
+      - -Dgtk3=false        # Disable GTK3 build to save time/space
+      - -Dgtk4=true         # Enable GTK4 build (Critical for your request)
+      - -Dgir=true          # Build GObject Introspection (needed for Python/JS bindings)
+      - -Dvapi=true         # Build Vala bindings
+      - -Ddocs=false
+      - -Dgnutls=true       # Enable GnuTLS support
+      - -D_systemd=false    # Disable systemd integration for Flatpak portability
+    sources:
+      - type: git
+        url: https://gitlab.gnome.org/GNOME/vte.git
+        tag: 0.83.91         # Check for the latest stable tag suitable for your needs
+        commit: d7a9ed902b9d97e657ec095e0bbc0127de9e7746 # Always pin the commit for reproducibility
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/gir-1.0
+      - /share/vala
+                                
   - name: vite
     buildsystem: meson
     config-opts:
