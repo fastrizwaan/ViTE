@@ -2276,14 +2276,17 @@ on_terminal_secondary_pressed(GtkGestureClick *gesture, int n_press, double x, d
     gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
 
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_margin_start(box, 4);
-    gtk_widget_set_margin_end(box, 4);
-    gtk_widget_set_margin_top(box, 4);
-    gtk_widget_set_margin_bottom(box, 4);
+    gtk_widget_set_margin_start(box, 0);
+    gtk_widget_set_margin_end(box, 0);
+    gtk_widget_set_margin_top(box, 0);
+    gtk_widget_set_margin_bottom(box, 0);
 
     GtkWidget *copy_btn = gtk_button_new_with_label(_("Copy"));
     GtkWidget *paste_btn = gtk_button_new_with_label(_("Paste"));
     GtkWidget *close_btn = gtk_button_new_with_label(_("Close"));
+    gtk_widget_add_css_class(copy_btn, "menuitem");
+    gtk_widget_add_css_class(paste_btn, "menuitem");
+    gtk_widget_add_css_class(close_btn, "menuitem");
     gtk_widget_add_css_class(copy_btn, "flat");
     gtk_widget_add_css_class(paste_btn, "flat");
     gtk_widget_add_css_class(close_btn, "flat");
@@ -2300,6 +2303,7 @@ on_terminal_secondary_pressed(GtkGestureClick *gesture, int n_press, double x, d
     gtk_box_append(GTK_BOX(box), close_btn);
 
     g_object_set_data(G_OBJECT(popover), "terminal", term);
+    gtk_widget_add_css_class(popover, "terminal-menu");
     g_object_set_data(G_OBJECT(term), "context-menu-popover", popover);
     g_signal_connect(popover, "closed", G_CALLBACK(on_terminal_menu_closed), term);
 
@@ -2386,7 +2390,11 @@ do_terminal_split(ViteWindow *win, GtkOrientation orientation)
     if (!replace_view_with_paned(view_container, paned)) return;
 
     GtkWidget *terminal = create_embedded_terminal(win);
-    GtkWidget *terminal_view = create_view_container(win, terminal);
+    
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), terminal);
+
+    GtkWidget *terminal_view = create_view_container(win, scrolled);
     g_object_set_data(G_OBJECT(terminal_view), "is-terminal-view", GINT_TO_POINTER(1));
     gtk_paned_set_end_child(GTK_PANED(paned), terminal_view);
 
@@ -2550,6 +2558,14 @@ load_css(void)
     "    min-width: 220px;"
     "    min-height: 295px;"
     "    padding: 0px;"
+    "}"
+    "popover.terminal-menu > contents {"
+    "    padding: 4px;"
+    "}"
+    "popover.terminal-menu button {"
+    "    font-weight: normal;"
+    "    padding: 2px 12px;"
+    "    min-height: 24px;"
     "}"
     "statusbar label {"
     "    opacity: 0.8;"
