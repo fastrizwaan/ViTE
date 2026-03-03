@@ -2717,6 +2717,11 @@ on_popover_tab_row_activated (GtkListBox *list, GtkListBoxRow *row, gpointer use
     ViteTab *tab = g_object_get_data(G_OBJECT(row), "tab");
     if (tab) {
         g_signal_emit_by_name(tab, "clicked");
+
+        GtkRoot *tab_root = gtk_widget_get_root(GTK_WIDGET(tab));
+        if (tab_root && GTK_IS_WINDOW(tab_root)) {
+            gtk_window_present(GTK_WINDOW(tab_root));
+        }
         
         GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(list), GTK_TYPE_POPOVER);
         if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
@@ -2739,6 +2744,76 @@ on_open_tab_close_btn_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
     if (popover) {
         update_open_tabs_list(popover, list);
     }
+}
+
+static void
+append_open_tabs_splitter(GtkListBox *list)
+{
+    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_set_margin_start(sep, 8);
+    gtk_widget_set_margin_end(sep, 24);
+    gtk_widget_set_margin_top(sep, 4);
+    gtk_widget_set_margin_bottom(sep, 4);
+
+    GtkWidget *row = gtk_list_box_row_new();
+    gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_row_set_selectable(GTK_LIST_BOX_ROW(row), FALSE);
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), sep);
+    gtk_list_box_append(list, row);
+}
+
+static void
+append_open_tab_row(GtkListBox *list, ViteTab *tab)
+{
+    const char *title = vite_tab_get_title(tab);
+    const char *display_name = (title && *title) ? title : _("Untitled");
+
+    GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_set_margin_start(row_box, 6);
+    gtk_widget_set_margin_end(row_box, 0);
+    gtk_widget_set_margin_top(row_box, 6);
+    gtk_widget_set_margin_bottom(row_box, 6);
+
+    GtkWidget *label = gtk_label_new(display_name);
+    gtk_widget_add_css_class(label, "open-tabs-title");
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 260);
+    gtk_box_append(GTK_BOX(row_box), label);
+
+    GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_append(GTK_BOX(row_box), spacer);
+
+    GtkWidget *close_btn = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_add_css_class(close_btn, "flat");
+    gtk_widget_add_css_class(close_btn, "remove-btn");
+    gtk_widget_set_valign(close_btn, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(row_box), close_btn);
+
+    GtkWidget *row = gtk_list_box_row_new();
+    gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), row_box);
+    gtk_list_box_append(list, row);
+
+    g_signal_connect(close_btn, "clicked", G_CALLBACK(on_open_tab_close_btn_clicked), row);
+    g_object_set_data_full(G_OBJECT(row), "tab", g_object_ref(tab), g_object_unref);
+    g_object_set_data_full(G_OBJECT(row), "display-name", g_strdup(display_name), g_free);
+}
+
+static int
+append_window_open_tabs(GtkListBox *list, ViteWindow *win)
+{
+    if (!win || !win->tab_bar) return 0;
+
+    int count = 0;
+    GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
+    for (GList *l = tabs; l != NULL; l = l->next) {
+        append_open_tab_row(list, VITE_TAB(l->data));
+        count++;
+    }
+    g_list_free(tabs);
+
+    return count;
 }
 
 static void
@@ -2781,46 +2856,30 @@ update_open_tabs_list (GtkWidget *popover, gpointer user_data G_GNUC_UNUSED)
     }
     
     if (!win || !win->tab_bar) return;
-    
-    GList *tabs = vite_tab_bar_get_tabs(win->tab_bar);
-    int count = 0;
-    for (GList *l = tabs; l != NULL; l = l->next) {
-        ViteTab *tab = VITE_TAB(l->data);
-        const char *title = vite_tab_get_title(tab);
-        const char *display_name = (title && *title) ? title : _("Untitled");
-        
-        GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-        gtk_widget_set_margin_start(row_box, 6);
-        gtk_widget_set_margin_end(row_box, 0);
-        gtk_widget_set_margin_top(row_box, 6);
-        gtk_widget_set_margin_bottom(row_box, 6);
-        
-        GtkWidget *label = gtk_label_new(display_name);
-        gtk_widget_add_css_class(label, "open-tabs-title");
-        gtk_widget_set_halign(label, GTK_ALIGN_START);
-        gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-        gtk_label_set_max_width_chars(GTK_LABEL(label), 260);
-        gtk_box_append(GTK_BOX(row_box), label);
 
-        GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-        gtk_widget_set_hexpand(spacer, TRUE);
-        gtk_box_append(GTK_BOX(row_box), spacer);
+    int current_window_tabs = append_window_open_tabs(list, win);
 
-        GtkWidget *close_btn = gtk_button_new_from_icon_name("window-close-symbolic");
-        gtk_widget_add_css_class(close_btn, "flat");
-        gtk_widget_add_css_class(close_btn, "remove-btn");
-        gtk_widget_set_valign(close_btn, GTK_ALIGN_CENTER);
-        gtk_box_append(GTK_BOX(row_box), close_btn);
-        
-        gtk_list_box_append(list, row_box);
-        
-        GtkListBoxRow *row = gtk_list_box_get_row_at_index(list, count);
-        g_signal_connect(close_btn, "clicked", G_CALLBACK(on_open_tab_close_btn_clicked), row);
-        g_object_set_data_full(G_OBJECT(row), "tab", g_object_ref(tab), g_object_unref);
-        g_object_set_data_full(G_OBJECT(row), "display-name", g_strdup(display_name), g_free);
-        count++;
+    GtkApplication *app = NULL;
+    if (win->window) {
+        app = gtk_window_get_application(GTK_WINDOW(win->window));
     }
-    g_list_free(tabs);
+
+    if (app) {
+        gboolean needs_splitter = (current_window_tabs > 0);
+        GList *windows = gtk_application_get_windows(app);
+        for (GList *w = windows; w != NULL; w = w->next) {
+            ViteWindow *other_win = g_object_get_data(G_OBJECT(w->data), "vite-window");
+            if (!other_win || other_win == win || !other_win->tab_bar) continue;
+            if (vite_tab_bar_get_n_tabs(other_win->tab_bar) == 0) continue;
+
+            if (needs_splitter) {
+                append_open_tabs_splitter(list);
+            }
+
+            append_window_open_tabs(list, other_win);
+            needs_splitter = TRUE;
+        }
+    }
 
     GtkWidget *search_entry = g_object_get_data(G_OBJECT(popover), "search-entry");
     if (GTK_IS_SEARCH_ENTRY(search_entry)) {
