@@ -87,10 +87,22 @@ static void on_load_progress(double progress, FileEncoding encoding, NewlineType
 
 /* Globals removed: main_window, main_tab_bar, main_stack, main_window_title */
 static int untitled_count = 1;
-
 #define MAX_RECENT_FILES 10000
 
-static void open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean allow_reuse);
+static gboolean open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean allow_reuse);
+static void trigger_process_next_file(void);
+static void queue_open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean allow_reuse);
+
+/* Queue for sequential file loading */
+typedef struct {
+    GtkApplication *app;
+    ViteWindow *target_window;
+    GFile *file;
+    gboolean allow_reuse;
+} QueuedFile;
+
+static GQueue *pending_open_files = NULL;
+static gboolean is_opening = FALSE;
 static void create_new_tab (ViteWindow *win, const char *title, Document *doc);
 static ViteWindow *setup_window(AdwApplicationWindow *window);
 static void activate(GtkApplication *app, gpointer user_data);
@@ -117,7 +129,9 @@ on_file_opened (GObject* source_object G_GNUC_UNUSED, GAsyncResult* res G_GNUC_U
     GtkApplication *app = GTK_APPLICATION(user_data);
     GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
     if (file) {
-        open_file(app, NULL, file, FALSE);
+        /* Route single file opens through the new queue system as well! */
+        GFile *files[1] = { file };
+        on_open(app, files, 1, NULL, NULL);
         g_object_unref(file);
     }
 }
@@ -1043,7 +1057,7 @@ on_open_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer us
         guint n = g_list_model_get_n_items(files);
         for (guint i = 0; i < n; i++) {
             GFile *file = g_list_model_get_item(files, i);
-            open_file(gtk_window_get_application(GTK_WINDOW(win->window)), win, file, TRUE);
+            queue_open_file(gtk_window_get_application(GTK_WINDOW(win->window)), win, file, TRUE);
             g_object_unref(file);
         }
         g_object_unref(files);
@@ -2963,7 +2977,7 @@ on_recent_item_activated(GtkListBox *list_box, GtkListBoxRow *row, gpointer user
     const char *uri = g_object_get_data(G_OBJECT(row), "uri");
     if (uri) {
         GFile *file = g_file_new_for_uri(uri);
-        open_file(app, target_win, file, TRUE);
+        queue_open_file(app, target_win, file, TRUE);
         g_object_unref(file);
     }
     
@@ -3633,7 +3647,7 @@ on_window_drop(GtkDropTarget *target G_GNUC_UNUSED, const GValue *value, double 
         GtkApplication *app = gtk_window_get_application(GTK_WINDOW(win->window));
         for (GSList *l = files; l != NULL; l = l->next) {
             GFile *file = G_FILE(l->data);
-            open_file(app, win, file, TRUE);
+            queue_open_file(app, win, file, TRUE);
         }
         return TRUE;
     }
@@ -3842,7 +3856,7 @@ on_reopen_closed_tab_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *param
     }
 
     GFile *file = g_file_new_for_path(path);
-    open_file(app, win, file, FALSE);
+    queue_open_file(app, win, file, FALSE);
     g_object_unref(file);
     g_free(path);
 }
@@ -5504,13 +5518,16 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     /* Defer freeing ctx to allow pending idle progress callbacks to complete safely */
     /* Defer freeing ctx to allow pending idle progress callbacks to complete safely */
     g_idle_add(free_load_context_idle, ctx);
+
+    /* Process the next file in the sequential queue */
+    trigger_process_next_file();
 }
 
-static void
+static gboolean
 open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean allow_reuse)
 {
     char *path = g_file_get_path(file);
-    if (!path) return;
+    if (!path) return FALSE;
 
     /* GLOBAL CHECK: Iterate ALL windows to find if file is already open */
     GList *all_windows = gtk_application_get_windows(app);
@@ -5540,7 +5557,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
                             
                     g_free(path);
                     g_list_free(tabs);
-                    return;
+                    return FALSE;
                 }
             }
         }
@@ -5756,14 +5773,73 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
     g_free(path);
     g_free(basename);
     g_ptr_array_unref(editors);
+    return TRUE;
 }
 
+static gboolean
+process_next_pending_file_idle(gpointer user_data)
+{
+    if (!pending_open_files || g_queue_is_empty(pending_open_files)) {
+        is_opening = FALSE;
+        return G_SOURCE_REMOVE;
+    }
 
+    /* Process one file per idle frame */
+    QueuedFile *qf = g_queue_pop_head(pending_open_files);
+    gboolean async_started = FALSE;
+    
+    if (qf) {
+        if (qf->file) {
+            if (qf->app) {
+                async_started = open_file(qf->app, qf->target_window, qf->file, qf->allow_reuse);
+            }
+            g_object_unref(qf->file);
+        }
+        g_free(qf);
+    }
+
+    if (!async_started) {
+        /* If no async load was started, try the next file immediately */
+        return G_SOURCE_CONTINUE;
+    }
+
+    /* Async load started. We will process the next file when on_load_complete fires. */
+    return G_SOURCE_REMOVE;
+}
+
+static void
+trigger_process_next_file(void)
+{
+    g_idle_add(process_next_pending_file_idle, NULL);
+}
+
+static void
+queue_open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean allow_reuse)
+{
+    if (!pending_open_files) {
+        pending_open_files = g_queue_new();
+    }
+    
+    QueuedFile *qf = g_new0(QueuedFile, 1);
+    qf->app = app;
+    qf->target_window = target_window;
+    qf->file = g_object_ref(file);
+    qf->allow_reuse = allow_reuse;
+    
+    g_queue_push_tail(pending_open_files, qf);
+    
+    if (!is_opening) {
+        is_opening = TRUE;
+        trigger_process_next_file();
+    }
+}
 
 static void
 on_open(GtkApplication *app, GFile **files, int n_files, char *hint G_GNUC_UNUSED, gpointer user_data G_GNUC_UNUSED)
 {
-    for (int i = 0; i < n_files; i++) open_file(app, NULL, files[i], TRUE);
+    for (int i = 0; i < n_files; i++) {
+        queue_open_file(app, NULL, files[i], TRUE);
+    }
 }
 
 
