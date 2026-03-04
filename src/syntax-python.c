@@ -425,32 +425,21 @@ syntax_highlight_python(SyntaxContext *ctx, PangoAttrList *attrs, const char *te
                  continue;
             }
             
-            /* Parens track depth & Rainbow Brackets */
-            /* Cycle: Orange -> Purple -> Cyan */
+            /* Brackets use theme-defined rainbow bracket slots */
             if (strchr("([{", text[cur])) {
-                 ViteColorSlot bracket_color;
-                 int depth_mod = paren_depth % 3;
-                 
-                 if (depth_mod == 0) bracket_color = COLOR_PUNCTUATION; /* Orange */
-                 else if (depth_mod == 1) bracket_color = COLOR_KEYWORD; /* Purple */
-                 else bracket_color = COLOR_LOGICAL; /* Cyan */
-                 
-                 add_color_attr(ctx, attrs, cur, cur+1, bracket_color);
+                 int color_idx = COLOR_BRACKET_1 + (paren_depth % 6);
+                 add_color_attr(ctx, attrs, cur, cur + 1, color_idx);
                  paren_depth++;
                  cur++;
                  continue;
             }
             if (strchr(")]}", text[cur])) {
-                 if (paren_depth > 0) paren_depth--;
-                 
-                 ViteColorSlot bracket_color;
-                 int depth_mod = paren_depth % 3;
-                 
-                 if (depth_mod == 0) bracket_color = COLOR_PUNCTUATION; /* Orange */
-                 else if (depth_mod == 1) bracket_color = COLOR_KEYWORD; /* Purple */
-                 else bracket_color = COLOR_LOGICAL; /* Cyan */
-                 
-                 add_color_attr(ctx, attrs, cur, cur+1, bracket_color);
+                 int color_idx = COLOR_BRACKET_UNMATCHED;
+                 if (paren_depth > 0) {
+                     paren_depth--;
+                     color_idx = COLOR_BRACKET_1 + (paren_depth % 6);
+                 }
+                 add_color_attr(ctx, attrs, cur, cur + 1, color_idx);
                  cur++;
                  continue;
             }
