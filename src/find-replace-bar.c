@@ -22,6 +22,7 @@ struct _ViteFindReplaceBar {
     
     guint search_timeout_id;
     SearchTask *current_search;
+    gboolean initial_jump_done;
     
     /* Viewport Search */
     gboolean viewport_mode;
@@ -220,6 +221,12 @@ static void on_search_update(GArray *matches, gboolean finished, void *user_data
     
     editor_widget_set_search_results(self->editor, viewport_matches);
     if (viewport_matches) g_array_unref(viewport_matches);
+    
+    /* Jump to the first match after cursor automatically when search finds matches (only once per search) */
+    if (match_count > 0 && !self->initial_jump_done) {
+        self->initial_jump_done = TRUE;
+        editor_widget_next_match(self->editor);
+    }
 }
 
 
@@ -409,6 +416,7 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
     gtk_label_set_text(GTK_LABEL(self->matches_label), _("Finding..."));
     gtk_widget_set_visible(self->matches_label, TRUE);
     
+    self->initial_jump_done = FALSE;
     self->current_search = document_search_async_start(doc, text, regex, case_sensitive, whole_word, on_search_update, self);
     
     /* Set active search on editor for global navigation */
