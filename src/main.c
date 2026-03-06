@@ -76,6 +76,10 @@ typedef struct {
     ViteWindow *window; /* Raw Pointer - Valid only if gtkw_ref is valid */
     GtkWindow *gtkw_ref; /* Weak Ref to actual GtkWindow */
     Document *doc; /* Reference to document being loaded */
+    gboolean is_reload;
+    FileEncoding prev_encoding;
+    NewlineType prev_newline;
+    gboolean has_prev_format;
 } LoadContext;
 
 
@@ -257,6 +261,8 @@ static void load_css(void);
 static gboolean on_search_key_pressed(GtkEventControllerKey *controller, guint keyval, guint keycode, GdkModifierType state, gpointer user_data);
 static void on_search_changed(GtkSearchEntry *entry, gpointer user_data);
 static void update_window_title_for_tab(ViteTab *tab);
+static void update_header_spinner(ViteWindow *win);
+static void update_reload_action_enabled(ViteWindow *win, GtkWidget *editor);
 static gboolean tab_has_unsaved_changes(ViteTab *tab);
 static void close_tab_now(ViteWindow *win, ViteTab *tab);
 
@@ -638,10 +644,14 @@ reset_tab_to_empty(ViteWindow *win, ViteTab *tab)
     GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
     if (page) {
         Document *doc = document_new(NULL);
+        GtkWidget *view_container = gtk_widget_get_first_child(page);
         page_set_document(page, doc);
 
         document_add_modification_callback(doc, on_document_modified, tab);
         document_add_content_callback(doc, on_document_content_changed, tab);
+        if (view_container) {
+            document_add_external_change_callback(doc, on_document_changed_externally, view_container);
+        }
     }
 
     char *title = g_strdup_printf("Untitled %d", untitled_count++);
@@ -689,26 +699,138 @@ pop_recently_closed_file(void)
     return path;
 }
 
-/* Discard Changes Implementation */
+/* Reload-from-disk implementation */
+static ViteTab *
+find_tab_for_widget(GtkWidget *widget)
+{
+    while (widget) {
+        ViteTab *tab = g_object_get_data(G_OBJECT(widget), "tab");
+        if (tab && VITE_IS_TAB(tab)) {
+            return tab;
+        }
+        widget = gtk_widget_get_parent(widget);
+    }
+    return NULL;
+}
+
+static gboolean
+reload_tab_from_disk(ViteWindow *win, ViteTab *tab)
+{
+    GtkWidget *page;
+    GtkWidget *editor;
+    Document *doc;
+    const char *path;
+    GPtrArray *editors;
+    LoadContext *ctx;
+    GCancellable *cancellable;
+
+    if (!win || !tab) return FALSE;
+    if (vite_tab_is_loading(tab)) return FALSE;
+
+    page = g_object_get_data(G_OBJECT(tab), "page");
+    if (!page) return FALSE;
+
+    editor = get_editor_from_page(page);
+    if (!editor || !EDITOR_IS_WIDGET(editor)) return FALSE;
+
+    doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+    if (!doc) return FALSE;
+
+    path = document_get_file_path(doc);
+    if (!path || !*path) return FALSE;
+
+    editors = find_all_editors_recursive(page);
+    for (guint i = 0; i < editors->len; i++) {
+        GtkWidget *ed = g_ptr_array_index(editors, i);
+        gtk_widget_set_sensitive(ed, FALSE);
+    }
+    g_ptr_array_unref(editors);
+
+    vite_tab_set_operation_type(tab, VITE_OP_LOADING);
+    vite_tab_set_loading(tab, TRUE);
+    update_window_title_for_tab(tab);
+    update_reload_action_enabled(win, editor);
+
+    win->loading_count++;
+    update_header_spinner(win);
+
+    ctx = g_new0(LoadContext, 1);
+    ctx->tab = tab;
+    ctx->tab_bar = win->tab_bar;
+    ctx->header_progress = win->header_progress;
+    ctx->header_spinner = win->header_spinner;
+    ctx->filename = g_strdup(path);
+    ctx->window = win;
+    ctx->gtkw_ref = GTK_WINDOW(win->window);
+    ctx->doc = document_ref(doc);
+    ctx->is_reload = TRUE;
+    ctx->prev_encoding = document_get_encoding(doc);
+    ctx->prev_newline = document_get_newline_type(doc);
+    ctx->has_prev_format = TRUE;
+
+    g_object_add_weak_pointer(G_OBJECT(tab), (gpointer *)&ctx->tab);
+    if (ctx->tab_bar) {
+        g_object_add_weak_pointer(G_OBJECT(ctx->tab_bar), (gpointer *)&ctx->tab_bar);
+    }
+    if (ctx->header_progress) {
+        g_object_add_weak_pointer(G_OBJECT(ctx->header_progress), (gpointer *)&ctx->header_progress);
+    }
+    if (ctx->header_spinner) {
+        g_object_add_weak_pointer(G_OBJECT(ctx->header_spinner), (gpointer *)&ctx->header_spinner);
+    }
+    if (ctx->gtkw_ref) {
+        g_object_add_weak_pointer(G_OBJECT(ctx->gtkw_ref), (gpointer *)&ctx->gtkw_ref);
+    }
+
+    document_set_progress_callback(doc, on_load_progress, ctx);
+
+    cancellable = g_cancellable_new();
+    vite_tab_set_cancellable(tab, cancellable);
+    document_load_file_async(doc, path, cancellable, on_load_complete, ctx);
+    g_object_unref(cancellable);
+
+    return TRUE;
+}
+
+static gboolean
+reload_active_tab_from_disk(ViteWindow *win)
+{
+    ViteTab *tab;
+
+    if (!win || !win->tab_bar) return FALSE;
+    tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!tab) return FALSE;
+    return reload_tab_from_disk(win, tab);
+}
+
+static void
+update_reload_action_enabled(ViteWindow *win, GtkWidget *editor)
+{
+    GAction *act;
+    gboolean enabled = FALSE;
+
+    if (!win || !win->window) return;
+
+    act = g_action_map_lookup_action(G_ACTION_MAP(win->window), "discard-changes");
+    if (!act || !G_IS_SIMPLE_ACTION(act)) return;
+
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+        if (doc && document_get_file_path(doc)) {
+            ViteTab *tab = find_tab_for_widget(editor);
+            enabled = (!tab || !vite_tab_is_loading(tab));
+        }
+    }
+
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(act), enabled);
+}
+
 static void
 on_discard_all_response(AdwAlertDialog *dialog G_GNUC_UNUSED, const char *response, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
-    if (g_strcmp0(response, "discard") == 0) {
-        ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
-        if (tab) {
-             GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
-             GtkWidget *editor = get_editor_from_page(page);
-             if (editor && EDITOR_IS_WIDGET(editor)) {
-                 Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
-                 if (doc) {
-                     while (document_can_undo(doc)) {
-                         document_undo(doc);
-                     }
-                     document_clear_undo_redo(doc);
-                 }
-             }
-        }
+    if (g_strcmp0(response, "reload") == 0) {
+        reload_active_tab_from_disk(win);
     }
 }
 
@@ -718,6 +840,7 @@ static void
 on_discard_all_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
+    gboolean modified = FALSE;
     
     /* Check active tab */
     ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
@@ -728,14 +851,20 @@ on_discard_all_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G
     if (!editor) return;
     
     Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
-    if (!document_can_undo(doc)) return;
+    if (!doc || !document_get_file_path(doc)) return;
+
+    modified = document_is_modified(doc);
+    if (!modified) {
+        reload_active_tab_from_disk(win);
+        return;
+    }
     
-    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(_("Discard Changes?"), 
-                                                 _("This will undo all changes and clear undo/redo history. The document will return to its last saved (or opened) state.")));
+    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(_("Reload from Disk?"),
+                                                 _("This will replace the current tab with file contents from disk and clear undo/redo history. Unsaved changes will be lost.")));
     
     adw_alert_dialog_add_response(dialog, "cancel", _("Cancel"));
-    adw_alert_dialog_add_response(dialog, "discard", _("Discard Changes"));
-    adw_alert_dialog_set_response_appearance(dialog, "discard", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_add_response(dialog, "reload", _("Reload"));
+    adw_alert_dialog_set_response_appearance(dialog, "reload", ADW_RESPONSE_DESTRUCTIVE);
     
     adw_alert_dialog_set_default_response(dialog, "cancel");
     adw_alert_dialog_set_close_response(dialog, "cancel");
@@ -888,7 +1017,7 @@ on_shortcuts_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_G
     "            <child>"
     "              <object class='GtkShortcutsShortcut'>"
     "                <property name='accelerator'>F5</property>"
-    "                <property name='title' translatable='yes'>Discard Changes</property>"
+    "                <property name='title' translatable='yes'>Reload</property>"
     "              </object>"
     "            </child>"
     "            <child>"
@@ -1629,7 +1758,7 @@ static void
 on_document_content_changed(Document *doc, void *user_data)
 {
     ViteTab *tab = VITE_TAB(user_data);
-    if (!document_get_file_path(doc)) {
+    if (!document_get_file_path(doc) && !vite_tab_is_loading(tab)) {
         size_t len;
         char *line = document_get_line(doc, 0, &len);
         if (line && len > 0) {
@@ -1707,11 +1836,24 @@ static void
 on_document_modified(Document *doc G_GNUC_UNUSED, gboolean modified, void *user_data)
 {
     ViteTab *tab = VITE_TAB(user_data);
+    GtkWidget *page;
+    GtkWidget *editor;
+    GtkRoot *root;
+    ViteWindow *win;
+
     vite_tab_set_modified(tab, modified);
     
     /* Update window title if this is the active tab */
     if (vite_tab_is_active(tab)) {
         update_window_title_for_tab(tab);
+
+        page = g_object_get_data(G_OBJECT(tab), "page");
+        editor = page ? get_editor_from_page(page) : NULL;
+        root = gtk_widget_get_root(GTK_WIDGET(tab));
+        win = root ? g_object_get_data(G_OBJECT(root), "vite-window") : NULL;
+        if (win) {
+            update_reload_action_enabled(win, editor);
+        }
     }
 }
 
@@ -1887,6 +2029,8 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
         }
     }
     
+    update_reload_action_enabled(win, get_editor_from_page(page));
+
     /* Update title based on active view in this page */
     /* Update title based on active view in this page */
     update_window_title_for_tab(tab);
@@ -3726,25 +3870,23 @@ static void
 on_reload_external_change(GtkButton *btn, gpointer user_data)
 {
     GtkWidget *editor = GTK_WIDGET(user_data);
-    Document *doc = NULL;
+    GtkRoot *root;
+    ViteWindow *win;
+    ViteTab *tab;
     
-    if (editor) {
-        if (GTK_IS_SCROLLED_WINDOW(editor)) {
-             editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(editor));
-        }
-        if (EDITOR_IS_WIDGET(editor)) {
-             doc = editor_widget_get_document(EDITOR_WIDGET(editor));
-        }
+    root = gtk_widget_get_root(GTK_WIDGET(btn));
+    if (!root) return;
+
+    win = g_object_get_data(G_OBJECT(root), "vite-window");
+    if (!win) return;
+
+    tab = find_tab_for_widget(editor);
+    if (!tab && win->tab_bar) {
+        tab = vite_tab_bar_get_active_tab(win->tab_bar);
     }
-    
-    if (doc) {
-        document_reload_from_disk(doc);
-    }
-    
-    GtkWidget *revealer = g_object_get_data(G_OBJECT(btn), "revealer");
-    if (revealer && GTK_IS_REVEALER(revealer)) {
-        gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
-    }
+    if (!tab) return;
+
+    reload_tab_from_disk(win, tab);
 }
 
 static void
@@ -3835,14 +3977,14 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
         }
     }
     
-    /* Create Container (Overlay) */
-    GtkWidget *overlay = create_view_container(win, scrolled);
+    /* Create per-view container (overlay + find bar + external-change revealer) */
+    GtkWidget *view_container = create_view_container(win, scrolled);
     
     /* Wrap in TabRoot (Box) to support splitting */
     GtkWidget *page_root = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(page_root, TRUE);
     gtk_widget_set_vexpand(page_root, TRUE);
-    gtk_box_append(GTK_BOX(page_root), overlay);
+    gtk_box_append(GTK_BOX(page_root), view_container);
     
     char id[32];
     sprintf(id, "page_%p", (void *)page_root);
@@ -3874,7 +4016,7 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     /* Connect modification and content callbacks */
     document_add_modification_callback(doc, on_document_modified, tab);
     document_add_content_callback(doc, on_document_content_changed, tab);
-    document_add_external_change_callback(doc, on_document_changed_externally, page_root);
+    document_add_external_change_callback(doc, on_document_changed_externally, view_container);
     
     /* Calculate insertion position (next to active) */
     int position = -1;
@@ -5015,6 +5157,12 @@ setup_window(AdwApplicationWindow *window)
         { "select-all", on_select_all_action, NULL, NULL, NULL, { 0 } }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(window), win_entries, G_N_ELEMENTS(win_entries), win);
+    {
+        GAction *reload_act = g_action_map_lookup_action(G_ACTION_MAP(window), "discard-changes");
+        if (reload_act && G_IS_SIMPLE_ACTION(reload_act)) {
+            g_simple_action_set_enabled(G_SIMPLE_ACTION(reload_act), FALSE);
+        }
+    }
     
     /* KEYBOARD SHORTCUTS */
     GtkShortcutController *shortcuts = GTK_SHORTCUT_CONTROLLER(gtk_shortcut_controller_new());
@@ -5160,7 +5308,7 @@ setup_window(AdwApplicationWindow *window)
     GMenu *s_file = g_menu_new();
     g_menu_append(s_file, _("Save"), "win.save");
     g_menu_append(s_file, _("Save As…"), "win.save-as");
-    g_menu_append(s_file, _("Discard Changes"), "win.discard-changes");
+    g_menu_append(s_file, _("Reload"), "win.discard-changes");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_file));
     g_object_unref(s_file);
     
@@ -5508,48 +5656,70 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
             GtkWidget *ed = g_ptr_array_index(editors, i);
             gtk_widget_set_sensitive(ed, TRUE);
             if (success) {
+                SyntaxContext *syntax_ctx = editor_widget_get_syntax_context(EDITOR_WIDGET(ed));
+                if (syntax_ctx) {
+                    syntax_context_invalidate_all(syntax_ctx);
+                }
+                editor_widget_clear_search(EDITOR_WIDGET(ed));
                 editor_widget_rebuild_folding(EDITOR_WIDGET(ed));
             }
         }
         g_ptr_array_unref(editors);
         
         if (success) {
-             document_set_file_path(doc, ctx->filename);
-             
-             /* Force title update */
-             vite_tab_set_title(ctx->tab, g_path_get_basename(ctx->filename));
-             update_window_title_for_tab(ctx->tab);
+            const char *loaded_path = document_get_file_path(doc);
+            if (loaded_path && *loaded_path) {
+                char *basename = g_path_get_basename(loaded_path);
+                vite_tab_set_title(ctx->tab, basename);
+                g_free(basename);
+            }
 
-             /* Refresh status bar (Encoding/Line Endings known now) */
-             if (vite_tab_is_active(ctx->tab)) {
-                 on_tab_clicked(ctx->tab, NULL);
-             }
+            if (ctx->is_reload) {
+                GtkWidget *view_container = gtk_widget_get_first_child(page);
+                GtkWidget *revealer = view_container ? g_object_get_data(G_OBJECT(view_container), "external_change_revealer") : NULL;
+                if (revealer && GTK_IS_REVEALER(revealer)) {
+                    gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
+                }
+            }
+            update_window_title_for_tab(ctx->tab);
+
+            /* Refresh status bar (Encoding/Line Endings known now) */
+            if (vite_tab_is_active(ctx->tab)) {
+                on_tab_clicked(ctx->tab, NULL);
+            }
              
         } else {
-             if (g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-                 /* Revert title on cancellation */
-                 vite_tab_restore_original_title(ctx->tab);
-                 update_window_title_for_tab(ctx->tab);
-                 
-                 /* Revert Encoding/Newline to defaults (since load failed/cancelled) */
-                 if (ctx->doc) {
-                     document_set_encoding(ctx->doc, ENCODING_UTF8);
-                     document_set_newline_type(ctx->doc, NEWLINE_LF);
-                 }
-                 
-                 /* Refresh status bar to show UTF-8 again */
-                 if (vite_tab_is_active(ctx->tab)) {
-                     on_tab_clicked(ctx->tab, NULL);
-                 }
-             } else {
-                 /* Show error dialog */
-                 GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(ctx->tab));
-                 if (root) {
-                     AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new("Failed to open file", err->message));
-                     adw_alert_dialog_add_response(dialog, "ok", "OK");
-                     adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
-                 }
-             }
+            if (ctx->is_reload && ctx->doc && ctx->has_prev_format) {
+                document_set_encoding(ctx->doc, ctx->prev_encoding);
+                document_set_newline_type(ctx->doc, ctx->prev_newline);
+            }
+
+            if (g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+                if (!ctx->is_reload) {
+                    /* Revert title on cancellation */
+                    vite_tab_restore_original_title(ctx->tab);
+                    update_window_title_for_tab(ctx->tab);
+
+                    /* Revert Encoding/Newline to defaults (since load failed/cancelled) */
+                    if (ctx->doc) {
+                        document_set_encoding(ctx->doc, ENCODING_UTF8);
+                        document_set_newline_type(ctx->doc, NEWLINE_LF);
+                    }
+                }
+
+                if (vite_tab_is_active(ctx->tab)) {
+                    on_tab_clicked(ctx->tab, NULL);
+                }
+            } else {
+                /* Show error dialog */
+                GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(ctx->tab));
+                if (root) {
+                    const char *title = ctx->is_reload ? _("Failed to reload file") : _("Failed to open file");
+                    AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(title, err->message));
+                    adw_alert_dialog_add_response(dialog, "ok", "OK");
+                    adw_alert_dialog_choose(dialog, GTK_WIDGET(root), NULL, NULL, NULL);
+                }
+            }
         }
         
         vite_tab_set_operation_type(ctx->tab, VITE_OP_NONE);
@@ -5606,8 +5776,10 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     /* Defer freeing ctx to allow pending idle progress callbacks to complete safely */
     g_idle_add(free_load_context_idle, ctx);
 
-    /* Process the next file in the sequential queue */
-    trigger_process_next_file();
+    /* Process queued files only for open-file operations */
+    if (!ctx->is_reload) {
+        trigger_process_next_file();
+    }
 }
 
 static gboolean
@@ -5706,6 +5878,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
 
     if (reused && reused_tab) {
         GtkWidget *page = g_object_get_data(G_OBJECT(reused_tab), "page");
+        GtkWidget *view_container = gtk_widget_get_first_child(page);
         
         doc = document_new_empty();
         page_set_document(page, doc);
@@ -5713,6 +5886,9 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
         /* Update tab callbacks for new doc */
         document_add_modification_callback(doc, on_document_modified, reused_tab);
         document_add_content_callback(doc, on_document_content_changed, reused_tab);
+        if (view_container) {
+            document_add_external_change_callback(doc, on_document_changed_externally, view_container);
+        }
         
         tab_to_use = reused_tab;
     } else {
@@ -5830,6 +6006,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
     ctx->window = target_window;
     ctx->gtkw_ref = GTK_WINDOW(target_window->window);
     ctx->doc = document_ref(doc);
+    ctx->is_reload = FALSE;
     
     /* Weak references for safety */
     g_object_add_weak_pointer(G_OBJECT(tab_to_use), (gpointer *)&ctx->tab);
@@ -6189,6 +6366,7 @@ on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user
     
     /* UI Cleanup */
     ViteTab *tab = g_weak_ref_get(&data->tab_ref);
+    gboolean saved_tab_is_active = FALSE;
     if (tab) {
         vite_tab_set_loading(tab, FALSE);
         vite_tab_set_operation_type(tab, VITE_OP_NONE);
@@ -6198,11 +6376,15 @@ on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user
         
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
         GPtrArray *editors = find_all_editors_recursive(page);
+        GtkWidget *first_editor = NULL;
         Document *doc = NULL;
         
         for (guint i = 0; i < editors->len; i++) {
             GtkWidget *ed = g_ptr_array_index(editors, i);
             gtk_widget_set_sensitive(ed, TRUE);
+            if (i == 0) {
+                first_editor = ed;
+            }
             if (i == 0) {
                 doc = editor_widget_get_document(EDITOR_WIDGET(ed));
             }
@@ -6225,8 +6407,19 @@ on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user
                      g_free(uri);
                  }
              }
+         }
+
+        {
+            GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tab));
+            ViteWindow *win_for_tab = root ? g_object_get_data(G_OBJECT(root), "vite-window") : NULL;
+            if (win_for_tab && win_for_tab->tab_bar) {
+                saved_tab_is_active = (vite_tab_bar_get_active_tab(win_for_tab->tab_bar) == tab);
+                if (saved_tab_is_active) {
+                    update_reload_action_enabled(win_for_tab, first_editor);
+                }
+            }
         }
-        
+         
          if (vite_tab_get_close_when_done(tab)) {
              if (!error) {
                  g_signal_emit_by_name(tab, "close-clicked", NULL);
@@ -6254,12 +6447,17 @@ on_save_complete(GObject *source G_GNUC_UNUSED, GAsyncResult *res, gpointer user
              ViteTab *current_tab = vite_tab_bar_get_active_tab(win->tab_bar);
              ViteTab *saved_tab = g_weak_ref_get(&data->tab_ref);
              
-             if (saved_tab) {
-                 if (current_tab == saved_tab) {
-                      GtkWidget *active_editor = get_active_editor(win);
-                      if (active_editor && gtk_widget_get_visible(active_editor) && gtk_widget_get_sensitive(active_editor)) {
-                          gtk_widget_grab_focus(active_editor);
-                      }
+                 if (saved_tab) {
+                     if (current_tab == saved_tab) {
+                         if (!saved_tab_is_active) {
+                             GtkWidget *saved_page = g_object_get_data(G_OBJECT(saved_tab), "page");
+                             GtkWidget *saved_editor = saved_page ? get_editor_from_page(saved_page) : NULL;
+                             update_reload_action_enabled(win, saved_editor);
+                         }
+                          GtkWidget *active_editor = get_active_editor(win);
+                          if (active_editor && gtk_widget_get_visible(active_editor) && gtk_widget_get_sensitive(active_editor)) {
+                              gtk_widget_grab_focus(active_editor);
+                          }
                  }
                  g_object_unref(saved_tab);
              }
@@ -6341,11 +6539,13 @@ do_save_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const char *
         vite_tab_set_loading(tab, TRUE);
         vite_tab_set_operation_type(tab, VITE_OP_SAVING);
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+        GtkWidget *editor = get_editor_from_page(page);
         GPtrArray *editors = find_all_editors_recursive(page);
         for (guint i = 0; i < editors->len; i++) {
             gtk_widget_set_sensitive(GTK_WIDGET(g_ptr_array_index(editors, i)), FALSE);
         }
         g_ptr_array_unref(editors);
+        update_reload_action_enabled(win, editor);
     }
     
     if (win) {

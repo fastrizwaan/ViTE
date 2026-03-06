@@ -15,6 +15,14 @@
 
 /* Zero-RAM strategy: No RAM threshold, always disk. */
 
+static const char *
+undo_temp_dir(void)
+{
+    const char *tmp_dir = g_get_tmp_dir();
+    if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
+    return tmp_dir;
+}
+
 UndoStack *
 undo_stack_new(void)
 {
@@ -27,15 +35,16 @@ undo_stack_new(void)
     
     /* Create log file for text storage */
     /* Create log file for text storage */
+    const char *tmp_dir = undo_temp_dir();
 #ifdef O_TMPFILE
-    int fd = open("/tmp", O_TMPFILE | O_RDWR | O_EXCL, 0600);
+    int fd = open(tmp_dir, O_TMPFILE | O_RDWR | O_EXCL, 0600);
     if (fd != -1) {
         s->log_file = fdopen(fd, "w+");
         s->log_file_path = NULL; /* No path needed for O_TMPFILE */
     } else
 #endif
     {
-        s->log_file_path = g_strdup("/tmp/vite_undo_log_XXXXXX");
+        s->log_file_path = g_strdup_printf("%s/vite_undo_log_XXXXXX", tmp_dir);
         int fd = mkstemp(s->log_file_path);
         if (fd != -1) {
             /* Unlink immediately so file is deleted when fd closes (crash safety) */
@@ -167,7 +176,7 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
         cmd->log_offset = ftello(stack->log_file);
         
         /* Check disk space before writing */
-        if (!resource_can_write_disk("/tmp", len)) {
+        if (!resource_can_write_disk(undo_temp_dir(), len)) {
              g_warning("undo_stack_push_insert: Disk full, dropping undo data");
              /* Truncate len? Or just fail? For now, we commit what we can or empty command */
              cmd->length = 0;
@@ -206,7 +215,7 @@ undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t le
         cmd->log_offset = ftello(stack->log_file);
         
         /* Check disk space */
-        if (!resource_can_write_disk("/tmp", len)) {
+        if (!resource_can_write_disk(undo_temp_dir(), len)) {
              g_warning("undo_stack_push_insert_from_fd: Disk full");
              cmd->length = 0;
         } else {
@@ -263,7 +272,7 @@ undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text,
         fseeko(stack->log_file, 0, SEEK_END);
         cmd->log_offset = ftello(stack->log_file);
         
-        if (!resource_can_write_disk("/tmp", len)) {
+        if (!resource_can_write_disk(undo_temp_dir(), len)) {
              g_warning("undo_stack_push_delete: Disk full");
              cmd->length = 0;
         } else {

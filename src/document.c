@@ -17,6 +17,34 @@
 static char *document_snapshot_to_file(Document *doc);
 
 static gboolean
+file_monitor_event_may_change_content(GFileMonitorEvent event_type)
+{
+    switch (event_type) {
+        case G_FILE_MONITOR_EVENT_CHANGED:
+        case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
+        case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED:
+        case G_FILE_MONITOR_EVENT_CREATED:
+        case G_FILE_MONITOR_EVENT_DELETED:
+        case G_FILE_MONITOR_EVENT_RENAMED:
+            return TRUE;
+#ifdef G_FILE_MONITOR_EVENT_MOVED
+        case G_FILE_MONITOR_EVENT_MOVED:
+            return TRUE;
+#endif
+#ifdef G_FILE_MONITOR_EVENT_MOVED_IN
+        case G_FILE_MONITOR_EVENT_MOVED_IN:
+            return TRUE;
+#endif
+#ifdef G_FILE_MONITOR_EVENT_MOVED_OUT
+        case G_FILE_MONITOR_EVENT_MOVED_OUT:
+            return TRUE;
+#endif
+        default:
+            return FALSE;
+    }
+}
+
+static gboolean
 check_disk_space(const char *dir, size_t required_bytes)
 {
     struct statvfs stat;
@@ -35,10 +63,19 @@ check_disk_space(const char *dir, size_t required_bytes)
     return TRUE;
 }
 
+static const char *
+document_temp_dir(void)
+{
+    const char *tmp_dir = g_get_tmp_dir();
+    if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
+    return tmp_dir;
+}
+
 struct _Document {
     PieceTable *pt;
     UndoStack *undo_stack;
     char *file_path;
+    char *pending_file_path;
     
     /* Modification State */
     /* Modification State Listeners */
@@ -89,6 +126,22 @@ typedef struct {
 } EditCallbackNode;
 
 static void
+document_set_last_mtime_from_info(Document *doc, GFileInfo *info)
+{
+    GDateTime *mtime;
+
+    if (!doc || !info) return;
+
+    mtime = g_file_info_get_modification_date_time(info);
+    if (!mtime) return;
+
+    if (doc->last_mtime) {
+        g_date_time_unref(doc->last_mtime);
+    }
+    doc->last_mtime = g_date_time_ref(mtime);
+}
+
+static void
 check_modification_state(Document *doc)
 {
     if (doc->callbacks_suspended) return;
@@ -116,8 +169,8 @@ document_new(const char *filename)
     Document *doc = g_new0(Document, 1);
     doc->pt = piece_table_new(filename);
     doc->undo_stack = undo_stack_new();
-    doc->file_path = filename ? g_strdup(filename) : NULL;
     doc->ref_count = 1;
+    document_set_file_path(doc, filename);
     return doc;
 }
 
@@ -164,6 +217,7 @@ document_free(Document *doc)
     piece_table_free(doc->pt);
     undo_stack_free(doc->undo_stack);
     g_free(doc->file_path);
+    g_free(doc->pending_file_path);
     /* Free callback lists */
     g_list_free_full(doc->mod_callbacks, g_free);
     g_list_free_full(doc->content_callbacks, g_free);
@@ -187,27 +241,36 @@ on_file_changed (GFileMonitor *monitor G_GNUC_UNUSED,
                  gpointer user_data)
 {
     Document *doc = (Document *)user_data;
+    GFile *current_file;
+    GFileInfo *info;
+    GDateTime *mtime;
+
     if (!doc || !doc->file_path) return;
+    if (!file_monitor_event_may_change_content(event_type)) return;
 
-    if (event_type == G_FILE_MONITOR_EVENT_CHANGED || event_type == G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT) {
-        GFileInfo *info = g_file_query_info(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 
-                                            G_FILE_QUERY_INFO_NONE, NULL, NULL);
-        if (info) {
-            GDateTime *mtime = g_file_info_get_modification_date_time(info);
-            g_object_unref(info);
+    current_file = g_file_new_for_path(doc->file_path);
+    info = g_file_query_info(current_file,
+                             G_FILE_ATTRIBUTE_TIME_MODIFIED "," G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
+                             G_FILE_QUERY_INFO_NONE, NULL, NULL);
+    if (!info) {
+        g_object_unref(current_file);
+        return;
+    }
 
-            if (mtime) {
-                if (!doc->last_mtime || g_date_time_compare(mtime, doc->last_mtime) > 0) {
-                    /* File changed externally */
-                    for (GList *l = doc->ext_mod_callbacks; l != NULL; l = l->next) {
-                        ExtModCallbackData *cb = l->data;
-                        cb->func(doc, cb->user_data);
-                    }
-                }
-                g_date_time_unref(mtime);
+    mtime = g_file_info_get_modification_date_time(info);
+    if (mtime) {
+        if (!doc->last_mtime || g_date_time_compare(mtime, doc->last_mtime) != 0) {
+            document_set_last_mtime_from_info(doc, info);
+            /* File changed externally */
+            for (GList *l = doc->ext_mod_callbacks; l != NULL; l = l->next) {
+                ExtModCallbackData *cb = l->data;
+                cb->func(doc, cb->user_data);
             }
         }
     }
+
+    g_object_unref(info);
+    g_object_unref(current_file);
 }
 
 void
@@ -230,7 +293,11 @@ document_set_file_path(Document *doc, const char *path)
     if (doc->file_path) {
         GFile *file = g_file_new_for_path(doc->file_path);
         GError *error = NULL;
-        doc->file_monitor = g_file_monitor_file(file, G_FILE_MONITOR_NONE, NULL, &error);
+        GFileMonitorFlags monitor_flags = G_FILE_MONITOR_NONE;
+#ifdef G_FILE_MONITOR_WATCH_MOVES
+        monitor_flags |= G_FILE_MONITOR_WATCH_MOVES;
+#endif
+        doc->file_monitor = g_file_monitor_file(file, monitor_flags, NULL, &error);
         
         if (doc->file_monitor) {
             g_signal_connect(doc->file_monitor, "changed", G_CALLBACK(on_file_changed), doc);
@@ -239,10 +306,11 @@ document_set_file_path(Document *doc, const char *path)
             g_error_free(error);
         }
         
-        GFileInfo *info = g_file_query_info(file, G_FILE_ATTRIBUTE_TIME_MODIFIED,
+        GFileInfo *info = g_file_query_info(file,
+                                            G_FILE_ATTRIBUTE_TIME_MODIFIED "," G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
                                             G_FILE_QUERY_INFO_NONE, NULL, NULL);
         if (info) {
-            doc->last_mtime = g_file_info_get_modification_date_time(info);
+            document_set_last_mtime_from_info(doc, info);
             g_object_unref(info);
         }
         
@@ -2662,7 +2730,7 @@ document_replace_streaming_start(Document *doc, const char *raw_query, const cha
     }
     
     /* Create temp file for output */
-    task->output_path = g_strdup("/tmp/vite_replace_XXXXXX");
+    task->output_path = g_strdup_printf("%s/vite_replace_XXXXXX", document_temp_dir());
     int fd = mkstemp(task->output_path);
     if (fd < 0) {
         g_warning("Failed to create temp file for replace: %s", strerror(errno));
@@ -2773,6 +2841,9 @@ void
 document_load_file_async(Document *doc, const char *filename, GCancellable *cancellable, GAsyncReadyCallback callback, gpointer user_data)
 {
     if (!doc) return;
+
+    g_free(doc->pending_file_path);
+    doc->pending_file_path = filename ? g_strdup(filename) : NULL;
     
     DocLoadCtx *ctx = g_new0(DocLoadCtx, 1);
     ctx->doc = doc;
@@ -2796,46 +2867,12 @@ document_load_file_finish(Document *doc, GAsyncResult *res, GError **error)
         /* Reset document state */
         undo_stack_free(doc->undo_stack);
         doc->undo_stack = undo_stack_new();
-        
-        g_free(doc->file_path);
-        /* We need to recover filename? It was in the async task. 
-           But piece_table doesn't store filename in PT. 
-           We can look at the task source tag or data if we had access.
-           Wait, we passed filename to load_file_async. 
-           Ideally we should update it here.
-           But we don't have it easily here unless we stashed it in the GTask or passed it via source object.
-           Actually, the caller usually knows what file they loaded.
-           BUT, document_open meant setting the path.
-           Let's retrieve it from the GTask if possible?
-           Or just require caller to set it?
-           
-           Better: document_load_file_async caller (main.c) updates the path on success.
-           Wait, `document_new(filename)` sets it.
-           If we use `document_new_empty`, path is NULL.
-           Then `document_load_file_async`.
-           
-           I will fix this by setting the path in Document in the start of async load?
-           No, only on success.
-           
-           I'll rely on the caller (main.c) to set the path using `document_set_file_path` (which I need to add)
-           OR I can peek into the task data if I really want to.
-           
-           Actually, let's add `document_set_path` helper or just expose it?
-           `document.c` has `doc->file_path`.
-           
-           Let's just update `doc->file_path` inside `document_load_file_async` immediately? 
-           No, if it fails we shouldn't.
-           
-           I will add `char *pending_filename` to DocLoadCtx and access it?
-           No, Finish function receives `res`.
-           
-           Option: Store filename in GTask/AsyncResult's source object data?
-           
-           Simplest: Add `document_set_file_path` to header/impl and let caller handle it.
-           BUT `document_new` sets it. `main.c` relies on `document_get_file_path`.
-           
-           I will add `document_set_file_path(doc, filename)` usage in main.c's callback.
-        */
+
+        if (doc->pending_file_path) {
+            char *loaded_path = g_steal_pointer(&doc->pending_file_path);
+            document_set_file_path(doc, loaded_path);
+            g_free(loaded_path);
+        }
         
         doc->saved_command = NULL;
         doc->callbacks_suspended = FALSE;
@@ -2846,6 +2883,8 @@ document_load_file_finish(Document *doc, GAsyncResult *res, GError **error)
             ContentCallbackData *cb = l->data;
             cb->func(doc, cb->user_data);
         }
+    } else {
+        g_clear_pointer(&doc->pending_file_path, g_free);
     }
     return success;
 }
@@ -3144,7 +3183,7 @@ streaming_change_case_task_free(StreamingChangeCaseTask *task)
 static char *
 document_snapshot_to_file(Document *doc)
 {
-    char *path = g_strdup("/tmp/vite_snapshot_XXXXXX");
+    char *path = g_strdup_printf("%s/vite_snapshot_XXXXXX", document_temp_dir());
     int fd = mkstemp(path);
     if (fd == -1) {
         g_free(path);
@@ -3309,7 +3348,7 @@ document_change_case_streaming_start(Document *doc,
     /* Require 5% margin or at least 10MB extra */
     size_t required = total_size + (total_size / 20) + (10 * 1024 * 1024);
     
-    if (!check_disk_space("/tmp", required)) {
+    if (!check_disk_space(document_temp_dir(), required)) {
         return NULL;
     }
     
@@ -3324,7 +3363,7 @@ document_change_case_streaming_start(Document *doc,
     task->new_word = TRUE; /* Default start state */
     
     /* Create temp file */
-    task->output_path = g_strdup("/tmp/vite_case_XXXXXX");
+    task->output_path = g_strdup_printf("%s/vite_case_XXXXXX", document_temp_dir());
     int fd = mkstemp(task->output_path);
     if (fd < 0) {
         g_warning("Failed to create temp file: %s", strerror(errno));
@@ -3429,13 +3468,11 @@ document_save_as(Document *doc, const char *path, GError **error)
     
     /* Provide changes done hint to trigger external change monitor immediately on save if not monitored */
     GFile *gfile = g_file_new_for_path(path);
-    GFileInfo *info = g_file_query_info(gfile, G_FILE_ATTRIBUTE_TIME_MODIFIED,
+    GFileInfo *info = g_file_query_info(gfile,
+                                        G_FILE_ATTRIBUTE_TIME_MODIFIED "," G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
                                         G_FILE_QUERY_INFO_NONE, NULL, NULL);
     if (info) {
-        if (doc->last_mtime) {
-            g_date_time_unref(doc->last_mtime);
-        }
-        doc->last_mtime = g_file_info_get_modification_date_time(info);
+        document_set_last_mtime_from_info(doc, info);
         g_object_unref(info);
     }
     g_object_unref(gfile);
@@ -3467,13 +3504,11 @@ document_reload_from_disk(Document *doc)
 
     /* Update last_mtime after reload */
     GFile *file = g_file_new_for_path(doc->file_path);
-    GFileInfo *info = g_file_query_info(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 
+    GFileInfo *info = g_file_query_info(file,
+                                        G_FILE_ATTRIBUTE_TIME_MODIFIED "," G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
                                         G_FILE_QUERY_INFO_NONE, NULL, NULL);
     if (info) {
-        if (doc->last_mtime) {
-            g_date_time_unref(doc->last_mtime);
-        }
-        doc->last_mtime = g_file_info_get_modification_date_time(info);
+        document_set_last_mtime_from_info(doc, info);
         g_object_unref(info);
     }
     g_object_unref(file);
@@ -3644,13 +3679,11 @@ document_save_async_finish(DocumentSaveTask *task, GError **error)
     } else {
         /* Provide changes done hint after async save */
         GFile *gfile = g_file_new_for_path(task->path);
-        GFileInfo *info = g_file_query_info(gfile, G_FILE_ATTRIBUTE_TIME_MODIFIED,
+        GFileInfo *info = g_file_query_info(gfile,
+                                            G_FILE_ATTRIBUTE_TIME_MODIFIED "," G_FILE_ATTRIBUTE_TIME_MODIFIED_USEC,
                                             G_FILE_QUERY_INFO_NONE, NULL, NULL);
         if (info) {
-            if (task->doc->last_mtime) {
-                g_date_time_unref(task->doc->last_mtime);
-            }
-            task->doc->last_mtime = g_file_info_get_modification_date_time(info);
+            document_set_last_mtime_from_info(task->doc, info);
             g_object_unref(info);
         }
         g_object_unref(gfile);
