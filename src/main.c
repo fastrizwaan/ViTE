@@ -246,8 +246,10 @@ static void on_quit_window_action(GSimpleAction *action G_GNUC_UNUSED, GVariant 
 
 static void on_document_modified(Document *doc, gboolean modified, void *user_data);
 static void on_document_content_changed(Document *doc, void *user_data);
+static void on_document_changed_externally(Document *doc, void *user_data);
+static void on_ignore_external_change(GtkButton *btn, gpointer user_data);
+static void on_reload_external_change(GtkButton *btn, gpointer user_data);
 static void on_recent_item_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data);
-static void on_recent_popover_unmap(GtkWidget *popover, gpointer user_data);
 static void on_tab_close_clicked(ViteTab *tab, gpointer user_data G_GNUC_UNUSED);
 static void on_tab_move_to_new_window(ViteTab *tab, gpointer user_data G_GNUC_UNUSED);
 static void on_open_tab_close_btn_clicked(GtkButton *btn, gpointer user_data);
@@ -1411,6 +1413,45 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
         
     }
     
+    /* External Change Revealer */
+    GtkWidget *revealer = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
+    
+    GtkWidget *info_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class(info_box, "view-split"); /* gives it a nice background/border */
+    gtk_widget_set_margin_start(info_box, 12);
+    gtk_widget_set_margin_end(info_box, 12);
+    gtk_widget_set_margin_top(info_box, 6);
+    gtk_widget_set_margin_bottom(info_box, 6);
+    
+    GtkWidget *icon = gtk_image_new_from_icon_name("dialog-warning-symbolic");
+    GtkWidget *label = gtk_label_new(_("This file has been modified by another program."));
+    gtk_widget_set_hexpand(label, TRUE);
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    
+    GtkWidget *btn_reload = gtk_button_new_with_label(_("Reload"));
+    GtkWidget *btn_ignore = gtk_button_new_with_label(_("Ignore"));
+    gtk_widget_add_css_class(btn_reload, "suggested-action");
+    
+    gtk_box_append(GTK_BOX(info_box), icon);
+    gtk_box_append(GTK_BOX(info_box), label);
+    gtk_box_append(GTK_BOX(info_box), btn_ignore);
+    gtk_box_append(GTK_BOX(info_box), btn_reload);
+    
+    gtk_revealer_set_child(GTK_REVEALER(revealer), info_box);
+    
+    /* Insert at the top of the root box (index 0) */
+    gtk_box_prepend(GTK_BOX(root_box), revealer);
+    
+    /* Store references */
+    g_object_set_data(G_OBJECT(root_box), "external_change_revealer", revealer);
+    g_object_set_data(G_OBJECT(btn_reload), "revealer", revealer);
+    g_object_set_data(G_OBJECT(btn_ignore), "revealer", revealer);
+    
+    /* We'll pass the editor widget to extract the document inside the callbacks */
+    g_signal_connect(btn_ignore, "clicked", G_CALLBACK(on_ignore_external_change), editor);
+    g_signal_connect(btn_reload, "clicked", G_CALLBACK(on_reload_external_change), editor);
+
     return root_box;
 }
 
@@ -3673,6 +3714,52 @@ on_insert_mode_changed(EditorWidget *editor, gpointer user_data)
 }
 
 static void
+on_ignore_external_change(GtkButton *btn, gpointer user_data G_GNUC_UNUSED)
+{
+    GtkWidget *revealer = g_object_get_data(G_OBJECT(btn), "revealer");
+    if (revealer && GTK_IS_REVEALER(revealer)) {
+        gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
+    }
+}
+
+static void
+on_reload_external_change(GtkButton *btn, gpointer user_data)
+{
+    GtkWidget *editor = GTK_WIDGET(user_data);
+    Document *doc = NULL;
+    
+    if (editor) {
+        if (GTK_IS_SCROLLED_WINDOW(editor)) {
+             editor = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(editor));
+        }
+        if (EDITOR_IS_WIDGET(editor)) {
+             doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+        }
+    }
+    
+    if (doc) {
+        document_reload_from_disk(doc);
+    }
+    
+    GtkWidget *revealer = g_object_get_data(G_OBJECT(btn), "revealer");
+    if (revealer && GTK_IS_REVEALER(revealer)) {
+        gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
+    }
+}
+
+static void
+on_document_changed_externally(Document *doc G_GNUC_UNUSED, void *user_data)
+{
+    GtkWidget *page_root = GTK_WIDGET(user_data);
+    if (!page_root) return;
+    
+    GtkWidget *revealer = g_object_get_data(G_OBJECT(page_root), "external_change_revealer");
+    if (revealer && GTK_IS_REVEALER(revealer)) {
+        gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), TRUE);
+    }
+}
+
+static void
 create_new_tab (ViteWindow *win, const char *title, Document *doc)
 {
     if (!win) return;
@@ -3785,9 +3872,9 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     g_signal_connect(tab, "move-to-new-window", G_CALLBACK(on_tab_move_to_new_window), NULL); /* Connect new signal */
     
     /* Connect modification and content callbacks */
-    /* Connect modification and content callbacks */
     document_add_modification_callback(doc, on_document_modified, tab);
     document_add_content_callback(doc, on_document_content_changed, tab);
+    document_add_external_change_callback(doc, on_document_changed_externally, page_root);
     
     /* Calculate insertion position (next to active) */
     int position = -1;

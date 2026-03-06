@@ -55,6 +55,11 @@ struct _Document {
     DocumentProgressCallback progress_cb;
     void *progress_user_data;
     
+    /* External File Monitoring */
+    GFileMonitor *file_monitor;
+    GDateTime *last_mtime;
+    GList *ext_mod_callbacks; /* List of struct { func, user_data } */
+
     int ref_count;
 };
 
@@ -72,6 +77,11 @@ typedef struct {
     void (*func)(Document *doc, size_t start_line, int line_delta, void *user_data);
     void *user_data;
 } UpdateCallbackData;
+
+typedef struct {
+    void (*func)(Document *doc, void *user_data);
+    void *user_data;
+} ExtModCallbackData;
 
 typedef struct {
     void (*func)(Document *doc, size_t offset, int64_t delta, void *user_data);
@@ -143,6 +153,14 @@ document_free(Document *doc)
     /* Invalidate any clipboard references to this document */
     vite_clipboard_invalidate_for_document(vite_clipboard_get_default(), doc);
 
+    if (doc->file_monitor) {
+        g_file_monitor_cancel(doc->file_monitor);
+        g_object_unref(doc->file_monitor);
+    }
+    if (doc->last_mtime) {
+        g_date_time_unref(doc->last_mtime);
+    }
+
     piece_table_free(doc->pt);
     undo_stack_free(doc->undo_stack);
     g_free(doc->file_path);
@@ -151,6 +169,7 @@ document_free(Document *doc)
     g_list_free_full(doc->content_callbacks, g_free);
     g_list_free_full(doc->update_callbacks, g_free);
     g_list_free_full(doc->edit_callbacks, g_free);
+    g_list_free_full(doc->ext_mod_callbacks, g_free);
     g_free(doc);
 }
 
@@ -160,11 +179,75 @@ document_get_file_path(Document *doc)
     return doc->file_path;
 }
 
+static void
+on_file_changed (GFileMonitor *monitor G_GNUC_UNUSED,
+                 GFile *file G_GNUC_UNUSED,
+                 GFile *other_file G_GNUC_UNUSED,
+                 GFileMonitorEvent event_type,
+                 gpointer user_data)
+{
+    Document *doc = (Document *)user_data;
+    if (!doc || !doc->file_path) return;
+
+    if (event_type == G_FILE_MONITOR_EVENT_CHANGED || event_type == G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT) {
+        GFileInfo *info = g_file_query_info(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 
+                                            G_FILE_QUERY_INFO_NONE, NULL, NULL);
+        if (info) {
+            GDateTime *mtime = g_file_info_get_modification_date_time(info);
+            g_object_unref(info);
+
+            if (mtime) {
+                if (!doc->last_mtime || g_date_time_compare(mtime, doc->last_mtime) > 0) {
+                    /* File changed externally */
+                    for (GList *l = doc->ext_mod_callbacks; l != NULL; l = l->next) {
+                        ExtModCallbackData *cb = l->data;
+                        cb->func(doc, cb->user_data);
+                    }
+                }
+                g_date_time_unref(mtime);
+            }
+        }
+    }
+}
+
 void
 document_set_file_path(Document *doc, const char *path)
 {
     g_free(doc->file_path);
     doc->file_path = path ? g_strdup(path) : NULL;
+
+    if (doc->file_monitor) {
+        g_file_monitor_cancel(doc->file_monitor);
+        g_object_unref(doc->file_monitor);
+        doc->file_monitor = NULL;
+    }
+    
+    if (doc->last_mtime) {
+        g_date_time_unref(doc->last_mtime);
+        doc->last_mtime = NULL;
+    }
+
+    if (doc->file_path) {
+        GFile *file = g_file_new_for_path(doc->file_path);
+        GError *error = NULL;
+        doc->file_monitor = g_file_monitor_file(file, G_FILE_MONITOR_NONE, NULL, &error);
+        
+        if (doc->file_monitor) {
+            g_signal_connect(doc->file_monitor, "changed", G_CALLBACK(on_file_changed), doc);
+        } else if (error) {
+            g_warning("Failed to create file monitor for %s: %s", doc->file_path, error->message);
+            g_error_free(error);
+        }
+        
+        GFileInfo *info = g_file_query_info(file, G_FILE_ATTRIBUTE_TIME_MODIFIED,
+                                            G_FILE_QUERY_INFO_NONE, NULL, NULL);
+        if (info) {
+            doc->last_mtime = g_file_info_get_modification_date_time(info);
+            g_object_unref(info);
+        }
+        
+        g_object_unref(file);
+    }
 }
 
 char *
@@ -226,6 +309,27 @@ document_remove_update_callback(Document *doc, DocumentUpdateCallback callback, 
     }
 }
 
+void
+document_add_external_change_callback(Document *doc, DocumentExternalChangeCallback callback, void *user_data)
+{
+    ExtModCallbackData *data = g_new(ExtModCallbackData, 1);
+    data->func = callback;
+    data->user_data = user_data;
+    doc->ext_mod_callbacks = g_list_append(doc->ext_mod_callbacks, data);
+}
+
+void
+document_remove_external_change_callback(Document *doc, DocumentExternalChangeCallback callback, void *user_data)
+{
+    for (GList *l = doc->ext_mod_callbacks; l != NULL; l = l->next) {
+        ExtModCallbackData *data = l->data;
+        if (data->func == callback && data->user_data == user_data) {
+            doc->ext_mod_callbacks = g_list_delete_link(doc->ext_mod_callbacks, l);
+            g_free(data);
+            return;
+        }
+    }
+}
 
 char *
 document_get_text_range(Document *doc, size_t offset, size_t len)
@@ -3323,11 +3427,73 @@ document_save_as(Document *doc, const char *path, GError **error)
     
     g_free(temp_path);
     
+    /* Provide changes done hint to trigger external change monitor immediately on save if not monitored */
+    GFile *gfile = g_file_new_for_path(path);
+    GFileInfo *info = g_file_query_info(gfile, G_FILE_ATTRIBUTE_TIME_MODIFIED,
+                                        G_FILE_QUERY_INFO_NONE, NULL, NULL);
+    if (info) {
+        if (doc->last_mtime) {
+            g_date_time_unref(doc->last_mtime);
+        }
+        doc->last_mtime = g_file_info_get_modification_date_time(info);
+        g_object_unref(info);
+    }
+    g_object_unref(gfile);
+
     /* Update document state */
     document_set_file_path(doc, path);
     document_mark_saved(doc);
     
     return TRUE;
+}
+
+void
+document_reload_from_disk(Document *doc)
+{
+    if (!doc || !doc->file_path) return;
+
+    /* Suspend callbacks to prevent partial UI updates */
+    document_suspend_callbacks(doc);
+
+    size_t old_line_count = piece_table_get_line_count(doc->pt);
+
+    /* Close old piece table and open fresh from disk */
+    piece_table_free(doc->pt);
+    doc->pt = piece_table_new(doc->file_path);
+
+    /* Clear undo stack */
+    undo_stack_clear(doc->undo_stack);
+    doc->saved_command = NULL;
+
+    /* Update last_mtime after reload */
+    GFile *file = g_file_new_for_path(doc->file_path);
+    GFileInfo *info = g_file_query_info(file, G_FILE_ATTRIBUTE_TIME_MODIFIED, 
+                                        G_FILE_QUERY_INFO_NONE, NULL, NULL);
+    if (info) {
+        if (doc->last_mtime) {
+            g_date_time_unref(doc->last_mtime);
+        }
+        doc->last_mtime = g_file_info_get_modification_date_time(info);
+        g_object_unref(info);
+    }
+    g_object_unref(file);
+
+    /* Compute changes */
+    size_t new_line_count = piece_table_get_line_count(doc->pt);
+    int line_delta = (int)new_line_count - (int)old_line_count;
+
+    /* Resume and trigger updates */
+    document_resume_callbacks(doc);
+
+    /* Force trigger the edit callback to notify it has been replaced from 0 length */
+    size_t current_len = document_get_length(doc);
+    for (GList *l = doc->edit_callbacks; l != NULL; l = l->next) {
+        EditCallbackNode *cb = l->data;
+        /* Technically the whole file was replaced, but sending delta of new length provides a hint to recompute length etc */
+        cb->func(doc, 0, current_len, cb->user_data);
+    }
+
+    document_emit_update(doc, 0, line_delta);
 }
 
 gboolean
@@ -3476,6 +3642,19 @@ document_save_async_finish(DocumentSaveTask *task, GError **error)
                     "Rename failed: %s", strerror(errno));
         unlink(task->temp_path);
     } else {
+        /* Provide changes done hint after async save */
+        GFile *gfile = g_file_new_for_path(task->path);
+        GFileInfo *info = g_file_query_info(gfile, G_FILE_ATTRIBUTE_TIME_MODIFIED,
+                                            G_FILE_QUERY_INFO_NONE, NULL, NULL);
+        if (info) {
+            if (task->doc->last_mtime) {
+                g_date_time_unref(task->doc->last_mtime);
+            }
+            task->doc->last_mtime = g_file_info_get_modification_date_time(info);
+            g_object_unref(info);
+        }
+        g_object_unref(gfile);
+
         /* Success - update document state */
         document_set_file_path(task->doc, task->path);
         document_mark_saved(task->doc);

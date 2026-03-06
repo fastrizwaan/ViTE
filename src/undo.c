@@ -106,6 +106,29 @@ undo_stack_free(UndoStack *stack)
 }
 
 void
+undo_stack_clear(UndoStack *stack)
+{
+    if (!stack) return;
+    
+    g_list_free_full(stack->undo_stack, free_command);
+    stack->undo_stack = NULL;
+    
+    g_list_free_full(stack->redo_stack, free_command);
+    stack->redo_stack = NULL;
+    
+    if (stack->current_group) {
+        free_command(stack->current_group);
+        stack->current_group = NULL;
+    }
+    
+    stack->group_depth = 0;
+    
+    /* We could also truncate the log file to reclaim space, but for now we'll just keep appending.
+     * In a full implementation, we might want to truncate if log_offset goes back to 0.
+     */
+}
+
+void
 undo_stack_push_command(UndoStack *stack, UndoCommand *cmd)
 {
     if (stack->current_group) {

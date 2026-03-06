@@ -58,6 +58,7 @@ typedef struct {
 
 UndoStack *undo_stack_new(void);
 void undo_stack_free(UndoStack *stack);
+void undo_stack_clear(UndoStack *stack);
 
 void undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t len);
 /* Push insertion where content is read from a file descriptor (for HUGE files) */

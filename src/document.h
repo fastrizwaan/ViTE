@@ -67,16 +67,21 @@ void document_save_async_finish(DocumentSaveTask *task, GError **error);
 gboolean document_save_async_had_lossy(DocumentSaveTask *task);
 void document_save_async_cancel(DocumentSaveTask *task);
 
-/* Content Observation & Partial Invalidation */
+/* Content Observation Listeners */
 typedef void (*DocumentContentCallback)(Document *doc, void *user_data);
 /* start_line: where change began. line_delta: change in total lines (can be negative). */
 typedef void (*DocumentUpdateCallback)(Document *doc, size_t start_line, int line_delta, void *user_data);
+
+typedef void (*DocumentExternalChangeCallback)(Document *doc, void *user_data);
 
 void document_add_content_callback(Document *doc, DocumentContentCallback callback, void *user_data);
 void document_remove_content_callback(Document *doc, DocumentContentCallback callback, void *user_data);
 
 void document_add_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data);
 void document_remove_update_callback(Document *doc, DocumentUpdateCallback callback, void *user_data);
+
+void document_add_external_change_callback(Document *doc, DocumentExternalChangeCallback callback, void *user_data);
+void document_remove_external_change_callback(Document *doc, DocumentExternalChangeCallback callback, void *user_data);
 
 /* Precise Content Editing (Byte-level) */
 /* delta_len is positive for insertion, negative for deletion. offset is where the change happened. */
@@ -135,6 +140,7 @@ UndoRedoTask *document_undo_async(Document *doc, UndoRedoProgressCallback callba
 UndoRedoTask *document_redo_async(Document *doc, UndoRedoProgressCallback callback, gpointer user_data);
 void document_undo_redo_cancel(UndoRedoTask *task);
 
+void document_reload_from_disk(Document *doc);
 
 typedef struct {
     size_t start;
