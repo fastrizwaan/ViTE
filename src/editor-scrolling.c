@@ -53,7 +53,6 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
         if (chars_per_line < 1) chars_per_line = 1;
 
         g_array_set_size(self->line_y_offsets, 0);
-        
         if (total_lines <= 1500) {
             /* Lightweight O(N) full scan: reuse a single PangoLayout and just swap
              * text per line.  Skips syntax highlighting and per-line object creation.
@@ -123,7 +122,7 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
             content_height = current_y + self->padding_top * 2;
             
         } else {
-            /* Large file: sampling approach (~50 Pango layouts) */
+            /* Large file: sampling approach: Take 1st 500 lines, find longest lines as average */
             PangoContext *pango_ctx = gtk_widget_get_pango_context(GTK_WIDGET(self));
             PangoLayout *measure_layout = pango_layout_new(pango_ctx);
             pango_layout_set_font_description(measure_layout, self->font_desc);
@@ -131,17 +130,42 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
             pango_layout_set_wrap(measure_layout, PANGO_WRAP_WORD_CHAR);
             
             double total_sample_height = 0;
-            int samples = 50;
-            int step = total_lines / samples;
-            if (step < 1) step = 1;
             
-            int actual_samples = 0;
-            for (int i = 0; i < samples; i++) {
-                size_t idx = i * step;
-                if (idx >= total_lines) break;
-                size_t phys_idx = get_physical_line_index(self, idx);
+            /* Find up to 50 largest lines in the first 100 lines */
+            int scan_limit = (total_lines > 100) ? 100 : total_lines;
+            typedef struct { size_t idx; size_t len; } LineInfo;
+            LineInfo top_lines[50] = {0};
+            int num_top = 0;
+            
+            for (int i = 0; i < scan_limit; i++) {
+                size_t phys_idx = get_physical_line_index(self, i);
                 if (phys_idx == (size_t)-1) continue;
                 size_t line_len_bytes = document_get_line_length(self->doc, phys_idx);
+                
+                if (num_top < 50) {
+                    top_lines[num_top].idx = phys_idx;
+                    top_lines[num_top].len = line_len_bytes;
+                    num_top++;
+                    for (int j = num_top - 1; j > 0 && top_lines[j].len > top_lines[j-1].len; j--) {
+                        LineInfo tmp = top_lines[j];
+                        top_lines[j] = top_lines[j-1];
+                        top_lines[j-1] = tmp;
+                    }
+                } else if (line_len_bytes > top_lines[49].len) {
+                    top_lines[49].idx = phys_idx;
+                    top_lines[49].len = line_len_bytes;
+                    for (int j = 49; j > 0 && top_lines[j].len > top_lines[j-1].len; j--) {
+                        LineInfo tmp = top_lines[j];
+                        top_lines[j] = top_lines[j-1];
+                        top_lines[j-1] = tmp;
+                    }
+                }
+            }
+            
+            int actual_samples = 0;
+            for (int i = 0; i < num_top; i++) {
+                size_t phys_idx = top_lines[i].idx;
+                size_t line_len_bytes = top_lines[i].len;
                 
                 if (line_len_bytes > 4096) {
                     size_t visual_lines = 1;
@@ -173,6 +197,12 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
             double avg_height = (actual_samples > 0) ? (total_sample_height / actual_samples) : self->line_height;
             self->avg_visual_lines = avg_height / self->line_height;
             content_height = (double)total_lines * avg_height + self->padding_top * 2;
+            
+            /* Add some extra scrolling space at the bottom to ensure the last lines are reachable
+             * if our estimation slightly underestimated the final wrap size. */
+            double page = gtk_adjustment_get_page_size(self->vadjustment);
+            if (page <= 0) page = 600; 
+            content_height += page * 0.25; 
         }
     }
     
