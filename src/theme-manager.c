@@ -1249,6 +1249,40 @@ on_system_theme_changed(AdwStyleManager *style_mgr G_GNUC_UNUSED, GParamSpec *ps
     }
 }
 
+/* --- Theme Sorting --- */
+
+/* Sort order:
+ * 1. ViTE Built-In (Auto)
+ * 2. One Dark (Built-in)
+ * 3. One Light (Built-in)
+ * 4. Alphabetical (case-insensitive)
+ */
+static int
+theme_compare(const void *a, const void *b)
+{
+    const ViteTheme *theme_a = *(const ViteTheme **)a;
+    const ViteTheme *theme_b = *(const ViteTheme **)b;
+
+    /* Define priority scores for special themes (lower is higher priority) */
+    int score_a = 999;
+    int score_b = 999;
+
+    if (g_strcmp0(theme_a->name, "ViTE Built-In (Auto)") == 0) score_a = 1;
+    else if (g_strcmp0(theme_a->name, "One Dark (Built-in)") == 0) score_a = 2;
+    else if (g_strcmp0(theme_a->name, "One Light (Built-in)") == 0) score_a = 3;
+
+    if (g_strcmp0(theme_b->name, "ViTE Built-In (Auto)") == 0) score_b = 1;
+    else if (g_strcmp0(theme_b->name, "One Dark (Built-in)") == 0) score_b = 2;
+    else if (g_strcmp0(theme_b->name, "One Light (Built-in)") == 0) score_b = 3;
+
+    if (score_a != score_b) {
+        return score_a - score_b;
+    }
+
+    /* Fallback to alphabetical sorting */
+    return g_ascii_strcasecmp(theme_a->name, theme_b->name);
+}
+
 void
 theme_manager_init(void)
 {
@@ -1319,6 +1353,9 @@ theme_manager_init(void)
     if (all_themes->len <= 3) {
         g_warning("No external theme files found; using only built-in themes");
     }
+
+    /* Sort themes: built-ins first, then alphabetical */
+    g_ptr_array_sort(all_themes, (GCompareFunc)theme_compare);
 
     AdwStyleManager *style_mgr = adw_style_manager_get_default();
 
