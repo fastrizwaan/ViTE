@@ -127,6 +127,8 @@ disk_buffer_append(DiskBuffer *buf, const char *data, size_t len)
     }
     
     size_t new_len = buf->len + len;
+    const char *tmp_dir = g_get_tmp_dir();
+    if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
     
     /* Sanity check for obviously corrupt/overflowed values */
     if (!resource_size_valid(new_len)) {
@@ -147,7 +149,7 @@ disk_buffer_append(DiskBuffer *buf, const char *data, size_t len)
         new_cap = (new_cap + 4095) & ~4095;
         
         /* Check disk space before allocation */
-        if (!resource_can_write_disk("/tmp", new_cap - buf->capacity)) {
+        if (!resource_can_write_disk(tmp_dir, new_cap - buf->capacity)) {
             g_warning("disk_buffer_append: Insufficient disk space for %zu bytes", new_cap);
             return;
         }
@@ -1216,6 +1218,27 @@ free_tree(PieceNode *node)
     free(node);
 }
 
+static void
+piece_table_clear_external_sources(PieceTable *pt)
+{
+    if (!pt || !pt->external_sources) return;
+
+    for (guint i = 0; i < pt->external_sources->len; i++) {
+        PieceTableSource *src = g_ptr_array_index(pt->external_sources, i);
+        if (!src) continue;
+        if (src->mmap_base && src->size > 0) {
+            munmap(src->mmap_base, src->size);
+        }
+        if (src->fd >= 0) close(src->fd);
+        g_free(src->path);
+        g_free(src);
+    }
+
+    /* Elements are already freed above. */
+    g_ptr_array_free(pt->external_sources, FALSE);
+    pt->external_sources = NULL;
+}
+
 void
 piece_table_free(PieceTable *pt)
 {
@@ -1236,18 +1259,7 @@ piece_table_free(PieceTable *pt)
     disk_buffer_free(pt->add_buffer);
     
     /* Clean up external sources */
-    if (pt->external_sources) {
-        for (guint i = 0; i < pt->external_sources->len; i++) {
-            PieceTableSource *src = g_ptr_array_index(pt->external_sources, i);
-            if (src->mmap_base && src->size > 0) {
-                munmap(src->mmap_base, src->size);
-            }
-            if (src->fd >= 0) close(src->fd);
-            g_free(src->path);
-            g_free(src);
-        }
-        g_ptr_array_free(pt->external_sources, TRUE);
-    }
+    piece_table_clear_external_sources(pt);
     
     free(pt);
 }
@@ -2578,6 +2590,15 @@ typedef struct {
 } LoadResult;
 
 static void
+piece_table_load_data_free(PieceTableLoadData *data)
+{
+    if (!data) return;
+    g_free(data->filename);
+    if (data->cancellable) g_object_unref(data->cancellable);
+    g_free(data);
+}
+
+static void
 load_result_free(LoadResult *res)
 {
     if (res->root) {
@@ -3002,7 +3023,7 @@ piece_table_load_async(PieceTable *pt, const char *filename, GCancellable *cance
     data->progress_data = progress_data;
     data->cancellable = cancellable ? g_object_ref(cancellable) : NULL;
     
-    g_task_set_task_data(task, data, (GDestroyNotify)g_free);
+    g_task_set_task_data(task, data, (GDestroyNotify)piece_table_load_data_free);
     g_task_run_in_thread(task, load_file_worker);
     g_object_unref(task);
 }
@@ -3025,6 +3046,7 @@ piece_table_load_finish(PieceTable *pt, GAsyncResult *res, GError **error)
         pt->temp_path = NULL;
     }
     free_tree(pt->root);
+    piece_table_clear_external_sources(pt);
     
     /* Apply new state */
     pt->mmap_base = lr->mmap_base;

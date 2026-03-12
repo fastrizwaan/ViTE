@@ -6101,11 +6101,20 @@ queue_open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gbo
 static void
 on_open(GtkApplication *app, GFile **files, int n_files, char *hint G_GNUC_UNUSED, gpointer user_data G_GNUC_UNUSED)
 {
+    /* Ensure at least one window exists before returning, 
+     * otherwise GApplication will immediately shut down since loading is async. */
+    GList *windows = gtk_application_get_windows(app);
+    if (!windows) {
+        AdwApplicationWindow *window = ADW_APPLICATION_WINDOW(adw_application_window_new(app));
+        setup_window(window);
+        gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
+        gtk_window_present(GTK_WINDOW(window));
+    }
+
     for (int i = 0; i < n_files; i++) {
         queue_open_file(app, NULL, files[i], TRUE);
     }
 }
-
 
 
 static void

@@ -943,6 +943,35 @@ on_doc_content_changed(Document *doc G_GNUC_UNUSED, void *user_data)
 void
 editor_widget_set_document(EditorWidget *self, Document *doc)
 {
+    if (self->syntax_scan_idle_id) {
+        g_source_remove(self->syntax_scan_idle_id);
+        self->syntax_scan_idle_id = 0;
+    }
+
+    if (self->syntax_ctx) {
+        syntax_context_invalidate_all(self->syntax_ctx);
+    }
+
+    editor_widget_clear_search(self);
+
+    if (self->filtered_lines) {
+        compact_matches_free(self->filtered_lines);
+        self->filtered_lines = NULL;
+    }
+    g_free(self->filter_pattern);
+    self->filter_pattern = NULL;
+    if (self->filter_regex_pattern) {
+        g_regex_unref(self->filter_regex_pattern);
+        self->filter_regex_pattern = NULL;
+    }
+    self->filter_case_sensitive = FALSE;
+    self->filter_is_regex = FALSE;
+
+    if (self->line_y_offsets) g_array_set_size(self->line_y_offsets, 0);
+    if (self->fold_ranges) g_array_set_size(self->fold_ranges, 0);
+    if (self->fold_collapsed) g_array_set_size(self->fold_collapsed, 0);
+    if (self->collapsed_ranges) g_array_set_size(self->collapsed_ranges, 0);
+
     if (self->doc) {
         document_remove_content_callback(self->doc, on_doc_content_changed, self);
         document_remove_update_callback(self->doc, on_document_update, self);
