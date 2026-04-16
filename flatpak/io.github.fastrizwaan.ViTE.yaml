@@ -1,6 +1,6 @@
 app-id: io.github.fastrizwaan.ViTE
 runtime: org.gnome.Platform
-runtime-version: '48'
+runtime-version: '50'
 sdk: org.gnome.Sdk
 command: vite
 finish-args:
@@ -31,6 +31,7 @@ modules:
     config-opts:
       - "-DCMAKE_BUILD_TYPE=Release"
       - "-DBUILD_STATIC=0"
+      - "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
     cleanup:
       - "/bin"
       - "/share/man"
