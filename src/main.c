@@ -205,7 +205,7 @@ page_set_document(GtkWidget *page, Document *new_doc)
     for (guint i = 0; i < editors->len; i++) {
         EditorWidget *ed = EDITOR_WIDGET(g_ptr_array_index(editors, i));
         if (i == 0) {
-            old_doc = editor_widget_get_document(ed);
+            old_doc = document_ref(editor_widget_get_document(ed));
         }
         editor_widget_set_document(ed, new_doc);
     }
@@ -652,6 +652,7 @@ reset_tab_to_empty(ViteWindow *win, ViteTab *tab)
         if (view_container) {
             document_add_external_change_callback(doc, on_document_changed_externally, view_container);
         }
+        document_free(doc);
     }
 
     char *title = g_strdup_printf("Untitled %d", untitled_count++);
@@ -3089,6 +3090,7 @@ close_tab_now(ViteWindow *win, ViteTab *tab)
     if (vite_tab_bar_get_n_tabs(win->tab_bar) == 0) {
         Document *doc = document_new(NULL);
         create_new_tab(win, "Untitled", doc);
+        document_free(doc);
     }
 }
 
@@ -3124,6 +3126,7 @@ on_new_tab_clicked_header (GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
     if (win) {
         Document *doc = document_new(NULL);
         create_new_tab(win, "Untitled", doc);
+        document_free(doc);
     }
 }
 
@@ -3719,6 +3722,7 @@ on_new_tab_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNU
     ViteWindow *win = (ViteWindow *)user_data;
     Document *doc = document_new(NULL);
     create_new_tab(win, "Untitled", doc);
+    document_free(doc);
 }
 static void
 on_tab_move_to_new_window (ViteTab *tab, gpointer user_data G_GNUC_UNUSED)
@@ -5549,6 +5553,7 @@ activate(GtkApplication *app, gpointer user_data G_GNUC_UNUSED)
     
     Document *doc = document_new(NULL);
     create_new_tab(win, "Untitled", doc);
+    document_free(doc);
     
     gtk_window_present(GTK_WINDOW(window));
 }
@@ -5744,7 +5749,7 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     /* ctx->tab_bar is weak ref. */
     if (ctx->tab_bar) {
         GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(ctx->tab_bar));
-        if (root) {
+        if (root && GTK_IS_WIDGET(root)) {
             ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
             if (win && win->loading_count > 0) {
                 win->loading_count--;
@@ -5772,7 +5777,6 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
     g_free(ctx->filename);
     ctx->filename = NULL;
     
-    /* Defer freeing ctx to allow pending idle progress callbacks to complete safely */
     /* Defer freeing ctx to allow pending idle progress callbacks to complete safely */
     g_idle_add(free_load_context_idle, ctx);
 
@@ -5881,6 +5885,17 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
         GtkWidget *view_container = gtk_widget_get_first_child(page);
         
         doc = document_new_empty();
+        
+        /* Disconnect old doc from tab before replacing */
+        GtkWidget *editor = get_editor_from_page(page);
+        if (EDITOR_IS_WIDGET(editor)) {
+            Document *old_doc = editor_widget_get_document(EDITOR_WIDGET(editor));
+            if (old_doc) {
+                document_remove_modification_callback(old_doc, on_document_modified, reused_tab);
+                document_remove_content_callback(old_doc, on_document_content_changed, reused_tab);
+            }
+        }
+        
         page_set_document(page, doc);
         
         /* Update tab callbacks for new doc */
@@ -6037,6 +6052,11 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
     g_free(path);
     g_free(basename);
     g_ptr_array_unref(editors);
+    
+    if (doc) {
+        document_free(doc);
+    }
+    
     return TRUE;
 }
 

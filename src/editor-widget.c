@@ -375,6 +375,7 @@ editor_widget_dispose(GObject *object)
         document_remove_content_callback(self->doc, on_doc_content_changed, self);
         document_remove_update_callback(self->doc, on_document_update, self);
         document_remove_edit_callback(self->doc, on_document_edit, self);
+        document_free(self->doc);
         self->doc = NULL;
     }
     
@@ -976,8 +977,9 @@ editor_widget_set_document(EditorWidget *self, Document *doc)
         document_remove_content_callback(self->doc, on_doc_content_changed, self);
         document_remove_update_callback(self->doc, on_document_update, self);
         document_remove_edit_callback(self->doc, on_document_edit, self);
+        document_free(self->doc);
     }
-    self->doc = doc;
+    self->doc = doc ? document_ref(doc) : NULL;
     if (self->doc) {
         document_add_content_callback(self->doc, on_doc_content_changed, self);
         document_add_update_callback(self->doc, on_document_update, self);

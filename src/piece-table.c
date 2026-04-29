@@ -8,7 +8,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#ifdef HAVE_UCHARDET
 #include <uchardet.h>
+#endif
 
 /* -- DiskBuffer: Zero-RAM disk-backed buffer using mmap -- */
 
@@ -487,6 +489,7 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
     if (size == 0) return;
 
     /* --- uchardet-based detection (no BOM found) --- */
+#ifdef HAVE_UCHARDET
     {
         size_t probe_len = (size > 65536) ? 65536 : size;
         uchardet_t ud = uchardet_new();
@@ -505,6 +508,7 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
             uchardet_delete(ud);
         }
     }
+#endif
 
     /* --- Fallback: simple null-byte heuristic for UTF-16 without BOM --- */
     {
@@ -3335,31 +3339,94 @@ piece_table_check_encoding_lossy(PieceTable *pt)
     size_t chunk_len;
     const char *chunk;
 
+    char pending_bytes[6];
+    size_t pending_len = 0;
+
     while ((chunk = piece_table_iter_get_chunk(&iter, &chunk_len)) != NULL) {
         if (chunk_len == 0) {
             piece_table_iter_advance(&iter, 1);
             continue;
         }
 
-        /* Ensure the chunk is valid UTF-8 first */
-        if (!g_utf8_validate(chunk, (gssize)chunk_len, NULL)) {
-            piece_table_iter_advance(&iter, chunk_len);
-            return TRUE; /* Invalid UTF-8 bytes = will need substitution */
+        /* Combine pending bytes with current chunk */
+        char *combined = NULL;
+        const char *working_data = chunk;
+        size_t working_len = chunk_len;
+        
+        if (pending_len > 0) {
+            combined = g_malloc(pending_len + chunk_len);
+            memcpy(combined, pending_bytes, pending_len);
+            memcpy(combined + pending_len, chunk, chunk_len);
+            working_data = combined;
+            working_len = pending_len + chunk_len;
+            pending_len = 0;
         }
 
-        /* Try strict conversion with no fallback */
-        GError *conv_error = NULL;
-        gsize bytes_read, bytes_written;
-        char *converted = g_convert(chunk, (gssize)chunk_len,
-                                    target_charset, "UTF-8",
-                                    &bytes_read, &bytes_written, &conv_error);
-        if (!converted) {
-            g_clear_error(&conv_error);
-            piece_table_iter_advance(&iter, chunk_len);
-            return TRUE; /* This chunk has unencodable characters */
+        /* Find the last complete UTF-8 character */
+        size_t safe_len = working_len;
+        {
+            /* Check if the last few bytes form a complete UTF-8 sequence */
+            const char *p = working_data + working_len;
+            size_t trailing = 0;
+            
+            /* Scan backwards to find start of last UTF-8 character */
+            while (trailing < 4 && trailing < working_len) {
+                p--;
+                trailing++;
+                unsigned char c = (unsigned char)*p;
+                if ((c & 0x80) == 0) {
+                    /* ASCII - complete */
+                    trailing = 0;
+                    break;
+                } else if ((c & 0xC0) == 0xC0) {
+                    /* Start of multi-byte sequence - check if complete */
+                    size_t expected = 0;
+                    if ((c & 0xE0) == 0xC0) expected = 2;
+                    else if ((c & 0xF0) == 0xE0) expected = 3;
+                    else if ((c & 0xF8) == 0xF0) expected = 4;
+                    
+                    if (trailing < expected) {
+                        /* Incomplete sequence - save for next chunk */
+                        safe_len = working_len - trailing;
+                        memcpy(pending_bytes, working_data + safe_len, trailing);
+                        pending_len = trailing;
+                    } else {
+                        trailing = 0;  /* Complete */
+                    }
+                    break;
+                }
+                /* else continuation byte, keep scanning */
+            }
         }
-        g_free(converted);
+
+        if (safe_len > 0) {
+            /* Ensure the chunk is valid UTF-8 first */
+            if (!g_utf8_validate(working_data, (gssize)safe_len, NULL)) {
+                g_free(combined);
+                return TRUE; /* Invalid UTF-8 bytes = will need substitution */
+            }
+
+            /* Try strict conversion with no fallback */
+            GError *conv_error = NULL;
+            gsize bytes_read, bytes_written;
+            char *converted = g_convert(working_data, (gssize)safe_len,
+                                        target_charset, "UTF-8",
+                                        &bytes_read, &bytes_written, &conv_error);
+            if (!converted) {
+                g_clear_error(&conv_error);
+                g_free(combined);
+                return TRUE; /* This chunk has unencodable characters */
+            }
+            g_free(converted);
+        }
+
+        g_free(combined);
         piece_table_iter_advance(&iter, chunk_len);
+    }
+
+    /* Final check: if we have pending bytes at the end, they must be invalid */
+    if (pending_len > 0) {
+        return TRUE;
     }
 
     return FALSE; /* All content can be losslessly converted */

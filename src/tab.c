@@ -1223,9 +1223,6 @@ vite_tab_set_operation_type(ViteTab *self, ViteTabOperationType type)
     if (type == VITE_OP_LOADING && self->op_type != VITE_OP_LOADING) {
         g_free(self->original_title);
         self->original_title = g_strdup(self->title);
-        g_print("DEBUG: set_op_type: LOADING. Captured original_title: '%s'\n", self->original_title);
-    } else {
-        g_print("DEBUG: set_op_type: %d (current: %d)\n", type, self->op_type);
     }
 
     self->op_type = type;
