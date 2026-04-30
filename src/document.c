@@ -1985,6 +1985,44 @@ gboolean document_search_task_get_match_at(SearchTask *task, size_t idx, SearchM
     return FALSE;
 }
 
+void document_search_task_apply_edit(SearchTask *task, size_t offset, int64_t delta_len) {
+    if (!task) return;
+    
+    if (task->compact_matches) {
+        compact_matches_shift(task->compact_matches, offset, delta_len);
+    }
+    
+    /* If regex matches are used (GArray), we also shift them */
+    if (task->matches) {
+        if (delta_len > 0) {
+            for (guint i = 0; i < task->matches->len; i++) {
+                SearchMatch *m = &g_array_index(task->matches, SearchMatch, i);
+                if (m->start >= offset) {
+                    m->start += delta_len;
+                    m->end += delta_len;
+                } else if (m->end > offset) {
+                    g_array_remove_index(task->matches, i);
+                    i--; 
+                }
+            }
+        } else {
+            size_t abs_delta = (size_t)(-delta_len);
+            size_t del_end = offset + abs_delta;
+            for (guint i = 0; i < task->matches->len; i++) {
+                SearchMatch *m = &g_array_index(task->matches, SearchMatch, i);
+                if (m->end <= offset) continue;
+                if (m->start >= del_end) {
+                    m->start -= abs_delta;
+                    m->end -= abs_delta;
+                } else {
+                    g_array_remove_index(task->matches, i);
+                    i--;
+                }
+            }
+        }
+    }
+}
+
 
 static GRegex *compile_search_regex(const char *raw_query, gboolean regex, gboolean case_sensitive, gboolean whole_word) {
     char *query = NULL;

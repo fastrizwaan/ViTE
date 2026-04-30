@@ -225,3 +225,58 @@ GArray *compact_matches_to_array(CompactMatches *cm) {
     if (!cm || cm->count == 0) return NULL;
     return compact_matches_range_to_array(cm, 0, cm->count);
 }
+
+void compact_matches_shift(CompactMatches *cm, size_t offset, int64_t delta_len) {
+    if (!cm || !cm->data || cm->count == 0 || delta_len == 0) return;
+
+    /* Find the first match that might overlap or be after the edit.
+       Since we need to check matches that start BEFORE offset but end AFTER offset,
+       we must look back by at most match_length. */
+    size_t search_start = (offset > cm->match_length) ? (offset - cm->match_length) : 0;
+    
+    size_t first_idx;
+    compact_matches_find_range(cm, search_start, SIZE_MAX, &first_idx, NULL);
+    
+    size_t write_idx = first_idx;
+    
+    if (delta_len > 0) {
+        /* Insertion */
+        for (size_t i = first_idx; i < cm->count; i++) {
+            size_t m_start = cm->data[i];
+            size_t m_end = m_start + cm->match_length;
+            
+            if (m_start >= offset) {
+                /* Shift right */
+                cm->data[write_idx++] = m_start + delta_len;
+            } else if (m_end > offset) {
+                /* Strictly inside match: destroyed */
+            } else {
+                /* m_end <= offset: untouched */
+                cm->data[write_idx++] = m_start;
+            }
+        }
+    } else {
+        /* Deletion */
+        size_t abs_delta = (size_t)(-delta_len);
+        size_t del_end = offset + abs_delta;
+        
+        for (size_t i = first_idx; i < cm->count; i++) {
+            size_t m_start = cm->data[i];
+            size_t m_end = m_start + cm->match_length;
+            
+            if (m_end <= offset) {
+                /* Before deletion: untouched */
+                cm->data[write_idx++] = m_start;
+            } else if (m_start >= del_end) {
+                /* After deletion: shift left */
+                cm->data[write_idx++] = m_start - abs_delta;
+            } else {
+                /* Overlap: destroyed */
+            }
+        }
+    }
+    
+    /* Update count */
+    cm->count = write_idx;
+}
+

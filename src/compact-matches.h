@@ -43,6 +43,9 @@ void compact_matches_find_range(CompactMatches *cm, size_t start_offset, size_t 
 /* Get match at index */
 bool compact_matches_get(CompactMatches *cm, size_t index, size_t *start, size_t *end);
 
+/* Shift matches due to document edit */
+void compact_matches_shift(CompactMatches *cm, size_t offset, int64_t delta_len);
+
 /* Convert range to GArray for UI (only converts visible portion!) */
 GArray *compact_matches_range_to_array(CompactMatches *cm, size_t first_idx, size_t last_idx);
 

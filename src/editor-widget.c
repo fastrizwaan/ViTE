@@ -211,6 +211,11 @@ static void
 on_document_edit(Document *doc G_GNUC_UNUSED, size_t offset, int64_t delta_len, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
+    
+    if (self->active_search) {
+        document_search_task_apply_edit(self->active_search, offset, delta_len);
+    }
+    
     if (!self->search_matches || self->search_matches->len == 0) return;
     
     if (delta_len > 0) {
