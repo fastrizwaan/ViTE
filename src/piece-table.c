@@ -1329,7 +1329,7 @@ piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, siz
     
     pt->change_count++;
     
-    /* Clear existing tree - don't free, just orphan (leak is acceptable for perf) */
+    free_tree(pt->root);
     pt->root = NULL;
     
     if (len == 0) return;
@@ -1701,8 +1701,8 @@ piece_table_delete(PieceTable *pt, size_t offset, size_t len)
         } else {
             pt->root = NULL;
         }
-        /* TODO: Free deleted nodes (start_node and right) */
-        // free_tree(start_node); -- skipping for now, assume leak is acceptable in proto
+        start_node->left = NULL; /* Detach preserved left branch */
+        free_tree(start_node);
         return;
     }
     
@@ -1765,9 +1765,9 @@ piece_table_delete(PieceTable *pt, size_t offset, size_t len)
         splay(pt, left_anchor); /* Now left_anchor is new root of L */
         
         /* content to delete is left_anchor->right */
-        /* Free left_anchor->right */
-        /* PieceNode *deleted = left_anchor->right; - unused variable warning avoidance if not freeing */
+        PieceNode *deleted = left_anchor->right;
         left_anchor->right = NULL;
+        free_tree(deleted);
         update_node(pt, left_anchor);
         
         /* Reattach */
@@ -1783,8 +1783,9 @@ piece_table_delete(PieceTable *pt, size_t offset, size_t len)
            Delete Root->Left.
         */
         splay(pt, end_node);
-        // free_tree(end_node->left);
+        PieceNode *deleted = end_node->left;
         end_node->left = NULL;
+        free_tree(deleted);
         update_node(pt, end_node);
     }
 }

@@ -41,7 +41,9 @@ typedef enum {
     STATE_BASH_CASE_BODY = 15,      /* Inside a case statement, inside a command block */
     STATE_RUST_ML_COMMENT = 16,     /* Rust nested block comments */
     STATE_MD_CODE_BLOCK = 17,       /* Markdown ``` code block */
-    STATE_MD_BLOCK_QUOTE = 18       /* Markdown > block quote (multiline interaction) */
+    STATE_MD_BLOCK_QUOTE = 18,      /* Markdown > block quote (multiline interaction) */
+    STATE_XML_TAG = 19,             /* Inside XML tag < ... > */
+    STATE_XML_CDATA = 20            /* Inside XML <![CDATA[ ... ]]> */
 } SyntaxState;
 
 typedef struct _SyntaxContext SyntaxContext;

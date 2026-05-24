@@ -2673,9 +2673,21 @@ static gboolean streaming_replace_idle_step(gpointer user_data) {
     }
     
     /* All lines processed - replace document from temp file */
-    fflush(task->output_file);
+    if (fflush(task->output_file) != 0) {
+        g_warning("Streaming replace failed during fflush");
+        if (task->callback) task->callback(0, task->replace_count, FALSE, task->user_data);
+        task->idle_id = 0;
+        streaming_replace_task_free(task);
+        return G_SOURCE_REMOVE;
+    }
     int fd = fileno(task->output_file);
-    fsync(fd);
+    if (fsync(fd) < 0) {
+        g_warning("Streaming replace failed during fsync: %s", strerror(errno));
+        if (task->callback) task->callback(0, task->replace_count, FALSE, task->user_data);
+        task->idle_id = 0;
+        streaming_replace_task_free(task);
+        return G_SOURCE_REMOVE;
+    }
     
     /* Snapshot BEFORE replacing - for undo support */
     char *undo_path = document_snapshot_to_file(doc);
@@ -3342,9 +3354,21 @@ streaming_change_case_idle_step(gpointer user_data)
     
     if (task->current_offset >= task->total_size) {
         /* Done */
-        fflush(task->output_file);
+        if (fflush(task->output_file) != 0) {
+            g_warning("Streaming change case failed during fflush");
+            if (task->callback) task->callback(0, task->total_size, FALSE, task->user_data);
+            task->idle_id = 0;
+            streaming_change_case_task_free(task);
+            return G_SOURCE_REMOVE;
+        }
         int fd = fileno(task->output_file);
-        fsync(fd);
+        if (fsync(fd) < 0) {
+            g_warning("Streaming change case failed during fsync: %s", strerror(errno));
+            if (task->callback) task->callback(0, task->total_size, FALSE, task->user_data);
+            task->idle_id = 0;
+            streaming_change_case_task_free(task);
+            return G_SOURCE_REMOVE;
+        }
         
         /* Snapshot BEFORE replacing logic */
         char *undo_path = document_snapshot_to_file(doc);
@@ -3726,13 +3750,20 @@ document_save_async_finish(DocumentSaveTask *task, GError **error)
     piece_table_save_async_finalize(task->pt_task);
     
     /* fsync and close */
+    int fsync_err = 0;
     if (task->fd >= 0) {
-        fsync(task->fd);
+        if (fsync(task->fd) < 0) {
+            fsync_err = errno;
+        }
         close(task->fd);
     }
     
-    /* Atomic rename */
-    if (rename(task->temp_path, task->path) < 0) {
+    if (fsync_err != 0) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "fsync failed: %s", strerror(fsync_err));
+        unlink(task->temp_path);
+    } else if (rename(task->temp_path, task->path) < 0) {
+        /* Atomic rename */
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "Rename failed: %s", strerror(errno));
         unlink(task->temp_path);

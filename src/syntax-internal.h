@@ -36,6 +36,7 @@ struct _SyntaxContext {
     GRegex *xml_comment_end;
     GRegex *xml_cdata_start;
     GRegex *xml_cdata_end;
+    GRegex *xml_string_dq;
 
     /* Desktop Entry */
     GRegex *desktop_comment;

@@ -119,6 +119,7 @@ syntax_context_new(void)
     ctx->xml_comment_end = g_regex_new("-->", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->xml_cdata_start = g_regex_new("<!\\[CDATA\\[", G_REGEX_OPTIMIZE, 0, NULL);
     ctx->xml_cdata_end = g_regex_new("\\]\\]>", G_REGEX_OPTIMIZE, 0, NULL);
+    ctx->xml_string_dq = g_regex_new("\"[^\"]*\"", G_REGEX_OPTIMIZE, 0, NULL);
 
     /* Desktop Entry */
     ctx->desktop_comment = g_regex_new("#.*$", G_REGEX_OPTIMIZE, 0, NULL);
@@ -166,6 +167,7 @@ syntax_context_unref(SyntaxContext *ctx)
     if (ctx->xml_comment_end) g_regex_unref(ctx->xml_comment_end);
     if (ctx->xml_cdata_start) g_regex_unref(ctx->xml_cdata_start);
     if (ctx->xml_cdata_end) g_regex_unref(ctx->xml_cdata_end);
+    if (ctx->xml_string_dq) g_regex_unref(ctx->xml_string_dq);
 
     if (ctx->desktop_comment) g_regex_unref(ctx->desktop_comment);
     if (ctx->desktop_section) g_regex_unref(ctx->desktop_section);
