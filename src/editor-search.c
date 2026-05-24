@@ -89,7 +89,7 @@ editor_widget_next_match(EditorWidget *self)
             c->cursor_offset = m.end;
             c->selection_anchor = m.start;
             c->target_x = -1;
-            scroll_to_cursor(self);
+            scroll_to_cursor_centered(self);
         }
         gtk_widget_queue_draw(GTK_WIDGET(self));
         return;
@@ -132,7 +132,7 @@ editor_widget_next_match(EditorWidget *self)
     }
     
     /* Scroll to make match visible */
-    scroll_to_cursor(self);
+    scroll_to_cursor_centered(self);
     
     /* Update viewport matches to include new position */
     editor_widget_update_search_viewport(self);
@@ -157,7 +157,7 @@ editor_widget_prev_match(EditorWidget *self)
             c->cursor_offset = m.end;
             c->selection_anchor = m.start;
             c->target_x = -1;
-            scroll_to_cursor(self);
+            scroll_to_cursor_centered(self);
         }
         gtk_widget_queue_draw(GTK_WIDGET(self));
         return;
@@ -210,7 +210,7 @@ editor_widget_prev_match(EditorWidget *self)
     }
     
     /* Scroll to make match visible */
-    scroll_to_cursor(self);
+    scroll_to_cursor_centered(self);
     
     /* Update viewport matches to include new position */
     editor_widget_update_search_viewport(self);

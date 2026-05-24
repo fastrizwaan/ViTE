@@ -209,6 +209,7 @@ void editor_widget_add_cursor(EditorWidget *self, size_t offset);
 
 /* Scrolling */
 void scroll_to_cursor(EditorWidget *self);
+void scroll_to_cursor_centered(EditorWidget *self);
 void start_autoscroll(EditorWidget *self, int direction, double speed);
 void stop_autoscroll(EditorWidget *self);
 gboolean editor_on_scroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer user_data);

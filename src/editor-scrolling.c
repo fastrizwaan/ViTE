@@ -366,6 +366,66 @@ scroll_to_cursor(EditorWidget *self)
 }
 
 void
+scroll_to_cursor_centered(EditorWidget *self)
+{
+    EditorCursor *cur = editor_widget_get_primary_cursor(self);
+    if (!cur || !self->vadjustment) return;
+    
+    size_t line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
+    size_t line_start_offset = document_get_offset_of_line(self->doc, line_idx);
+    size_t offset_in_line = (cur->cursor_offset >= line_start_offset)
+        ? (cur->cursor_offset - line_start_offset)
+        : 0;
+    
+    double y = 0;
+    if (self->line_y_offsets && line_idx < self->line_y_offsets->len) {
+        y = g_array_index(self->line_y_offsets, double, line_idx);
+    } else {
+        /* Fallback for large files where offsets aren't cached: use average */
+        if (self->wrap_lines && self->avg_visual_lines > 1.0) {
+            y = (double)line_idx * self->avg_visual_lines * self->line_height;
+        } else {
+            y = (double)line_idx * self->line_height;
+        }
+    }
+
+    /* If wrapping, adjust y to the cursor's visual row within the line. */
+    if (self->wrap_lines) {
+        int widget_width = get_stable_width(self);
+        double text_start_x = get_effective_gutter_width(self) + self->padding_left;
+        double minimap_w = 0;
+        if (self->minimap_enabled) {
+            minimap_w = self->minimap_width;
+            if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
+        }
+        double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
+        if (wrap_width < 1.0) wrap_width = 1.0;
+        double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
+        int chars_per_line = (int)(wrap_width / cw);
+        if (chars_per_line < 1) chars_per_line = 1;
+        
+        size_t bytes_per_char = 1;
+        FileEncoding enc = document_get_encoding(self->doc);
+        if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+        else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+        
+        size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
+        size_t row = offset_in_line / bytes_per_line;
+        
+        y += (double)row * self->line_height;
+    }
+    
+    double page_size = gtk_adjustment_get_page_size(self->vadjustment);
+    
+    double centered_y = y - (page_size / 2.0) + (self->line_height / 2.0);
+    double upper = gtk_adjustment_get_upper(self->vadjustment) - page_size;
+    if (upper < 0) upper = 0;
+    
+    centered_y = CLAMP(centered_y, 0, upper);
+    gtk_adjustment_set_value(self->vadjustment, centered_y);
+}
+
+void
 editor_widget_scroll_to_cursor(EditorWidget *self)
 {
     scroll_to_cursor(self);
