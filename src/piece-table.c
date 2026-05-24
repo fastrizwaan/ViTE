@@ -1033,14 +1033,14 @@ piece_table_new(const char *filename)
             if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
             char *temp_template = g_strdup_printf("%s/vite-utf8-XXXXXX", tmp_dir);
             int temp_fd = mkstemp(temp_template);
-            if (temp_fd < 0) {
+            if (temp_fd >= 0) {
+                unlink(temp_template); /* Unlink immediately for automatic crash cleanup */
+            } else {
                 g_warning("Failed to create temp file for UTF-16 conversion: %s", strerror(errno));
                 /* Fall back to RAM-based conversion */
                 g_free(temp_template);
                 goto ram_fallback;
             }
-            
-            pt->temp_path = g_strdup(temp_template);
             g_free(temp_template);
             
             /* Stream-convert chunks from UTF-16 to UTF-8 */
@@ -1068,9 +1068,6 @@ piece_table_new(const char *filename)
                 }
                 if (to_convert == 0) {
                     close(temp_fd);
-                    unlink(pt->temp_path);
-                    g_free(pt->temp_path);
-                    pt->temp_path = NULL;
                     goto ram_fallback;
                 }
                 
@@ -1083,9 +1080,6 @@ piece_table_new(const char *filename)
                     g_warning("UTF-16 conversion failed: %s", conv_error ? conv_error->message : "Unknown");
                     g_clear_error(&conv_error);
                     close(temp_fd);
-                    unlink(pt->temp_path);
-                    g_free(pt->temp_path);
-                    pt->temp_path = NULL;
                     goto ram_fallback;
                 }
                 
@@ -1096,9 +1090,6 @@ piece_table_new(const char *filename)
                 if (written != (ssize_t)bytes_written) {
                     g_warning("Failed to write to temp file: %s", strerror(errno));
                     close(temp_fd);
-                    unlink(pt->temp_path);
-                    g_free(pt->temp_path);
-                    pt->temp_path = NULL;
                     goto ram_fallback;
                 }
                 
@@ -1124,9 +1115,6 @@ piece_table_new(const char *filename)
                 
                 if (utf8_mmap == MAP_FAILED) {
                     g_warning("Failed to mmap temp file: %s", strerror(errno));
-                    unlink(pt->temp_path);
-                    g_free(pt->temp_path);
-                    pt->temp_path = NULL;
                     pt->orig_data = g_strdup("");
                     pt->orig_size = 0;
                     pt->is_mmapped = FALSE;
@@ -1252,12 +1240,6 @@ piece_table_free(PieceTable *pt)
         if (pt->mmap_base && pt->mmap_size > 0) munmap(pt->mmap_base, pt->mmap_size);
     } else {
         g_free(pt->orig_data);
-    }
-    
-    /* Clean up temp file used for UTF-16 conversion */
-    if (pt->temp_path) {
-        unlink(pt->temp_path);
-        g_free(pt->temp_path);
     }
     
     disk_buffer_free(pt->add_buffer);
@@ -2747,22 +2729,19 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
             if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
             char *temp_template = g_strdup_printf("%s/vite-utf8-XXXXXX", tmp_dir);
             int temp_fd = mkstemp(temp_template);
-            if (temp_fd < 0) {
+            if (temp_fd >= 0) {
+                unlink(temp_template); /* Crash safety */
+            } else {
                 /* Fall back to RAM-based conversion */
                 g_free(temp_template);
                 goto ram_fallback;
             }
-            
-            res->temp_path = g_strdup(temp_template);
             g_free(temp_template);
 
             /* For stateful/multibyte encodings, prefer one-shot fallback conversion
                to avoid split-sequence artifacts in chunked conversion. */
             if (!file_encoding_is_stream_safe(res->encoding)) {
                 close(temp_fd);
-                unlink(res->temp_path);
-                g_free(res->temp_path);
-                res->temp_path = NULL;
                 goto ram_fallback;
             }
             
@@ -2819,9 +2798,6 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
                 }
                 if (to_convert == 0) {
                     close(temp_fd);
-                    unlink(res->temp_path);
-                    g_free(res->temp_path);
-                    res->temp_path = NULL;
                     goto ram_fallback;
                 }
                 
@@ -2831,11 +2807,8 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
                                              &bytes_read, &bytes_written, &conv_error);
                 
                 if (!utf8_chunk) {
-                    close(temp_fd);
-                    unlink(res->temp_path);
-                    g_free(res->temp_path);
-                    res->temp_path = NULL;
                     g_clear_error(&conv_error);
+                    close(temp_fd);
                     goto ram_fallback;
                 }
                 
@@ -2845,9 +2818,6 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
                 
                 if (written != (ssize_t)bytes_written) {
                     close(temp_fd);
-                    unlink(res->temp_path);
-                    g_free(res->temp_path);
-                    res->temp_path = NULL;
                     goto ram_fallback;
                 }
                 
@@ -2881,14 +2851,7 @@ load_file_worker(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer tas
                 close(temp_fd);
                 
                 if (utf8_mmap == MAP_FAILED) {
-                    unlink(res->temp_path);
-                    g_free(res->temp_path);
-                    res->temp_path = NULL;
-                    res->mmap_base = NULL;
-                    res->mmap_size = 0;
-                    res->data = g_strdup("");
-                    res->size = 0;
-                    res->is_mmapped = FALSE;
+                    goto ram_fallback;
                 } else {
                     res->mmap_base = utf8_mmap;
                     res->mmap_size = total_written;

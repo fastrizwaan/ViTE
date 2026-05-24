@@ -3465,12 +3465,23 @@ document_save_as(Document *doc, const char *path, GError **error)
     char *temp_path = g_strdup_printf("%s/.vite_save_XXXXXX", dir);
     g_free(dir);
     
+    struct stat st;
+    gboolean has_stat = (stat(path, &st) == 0);
+
     int fd = mkstemp(temp_path);
     if (fd < 0) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "Failed to create temp file: %s", strerror(errno));
         g_free(temp_path);
         return FALSE;
+    }
+    
+    if (has_stat) {
+        fchmod(fd, st.st_mode & 07777);
+    } else {
+        mode_t mask = umask(0);
+        umask(mask);
+        fchmod(fd, 0666 & ~mask);
     }
     
     /* Stream content to temp file */
@@ -3625,11 +3636,22 @@ document_save_async_start(Document *doc, const char *path)
     char *temp_path = g_strdup_printf("%s/.vite_save_XXXXXX", dir);
     g_free(dir);
     
+    struct stat st;
+    gboolean has_stat = (stat(path, &st) == 0);
+
     int fd = mkstemp(temp_path);
     if (fd < 0) {
         g_warning("Failed to create temp file: %s", strerror(errno));
         g_free(temp_path);
         return NULL;
+    }
+    
+    if (has_stat) {
+        fchmod(fd, st.st_mode & 07777);
+    } else {
+        mode_t mask = umask(0);
+        umask(mask);
+        fchmod(fd, 0666 & ~mask);
     }
     
     DocumentSaveTask *task = g_new0(DocumentSaveTask, 1);

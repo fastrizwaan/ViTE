@@ -6372,6 +6372,7 @@ save_worker_wrapper(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer 
     
     if (g_cancellable_is_cancelled(cancellable)) {
         document_save_async_cancel(save_task);
+        document_save_async_finish(save_task, NULL); /* Clean up leaked .vite_save_XXXXXX */
         g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
     } else {
         /* Query lossy BEFORE finish() frees the task */
