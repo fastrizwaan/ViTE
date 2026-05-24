@@ -100,8 +100,49 @@ editor_widget_next_match(EditorWidget *self)
     }
     
     /* Global navigation using SearchTask */
+    if (!self->active_search) {
+        if (self->filtered_lines) {
+            size_t total = compact_matches_count(self->filtered_lines);
+            if (total == 0) return;
+            
+            EditorCursor *c = editor_widget_get_primary_cursor(self);
+            size_t cursor_pos = c ? c->cursor_offset : 0;
+            size_t cursor_line = document_get_line_of_offset(self->doc, cursor_pos);
+            
+            size_t first_idx;
+            compact_matches_find_range(self->filtered_lines, cursor_line, SIZE_MAX, &first_idx, NULL);
+            
+            /* If we are exactly on the line, go to next */
+            size_t m_line;
+            if (first_idx < total && compact_matches_get(self->filtered_lines, first_idx, &m_line, NULL)) {
+                if (cursor_line >= m_line) {
+                    first_idx++;
+                }
+            }
+            if (first_idx >= total) first_idx = 0;
+            
+            if (compact_matches_get(self->filtered_lines, first_idx, &m_line, NULL)) {
+                size_t offset = document_get_offset_of_line(self->doc, m_line);
+                editor_widget_clear_cursors(self);
+                c = editor_widget_get_primary_cursor(self);
+                if (c) {
+                    c->cursor_offset = offset;
+                    c->selection_anchor = offset;
+                    c->target_x = -1;
+                    scroll_to_cursor_centered(self);
+                }
+            }
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+            g_signal_emit_by_name(self, "caret-moved");
+            size_t line, col;
+            editor_widget_get_cursor_position(self, &line, &col);
+            g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
+            return;
+        }
+        return;
+    }
+    
     size_t total = document_search_task_get_match_count(self->active_search);
-    if (total == 0) return;
     
     /* Get current cursor position */
     EditorCursor *c = editor_widget_get_primary_cursor(self);
@@ -177,8 +218,48 @@ editor_widget_prev_match(EditorWidget *self)
     }
     
     /* Global navigation using SearchTask */
+    if (!self->active_search) {
+        if (self->filtered_lines) {
+            size_t total = compact_matches_count(self->filtered_lines);
+            if (total == 0) return;
+            
+            EditorCursor *c = editor_widget_get_primary_cursor(self);
+            size_t cursor_pos = c ? c->cursor_offset : 0;
+            size_t cursor_line = document_get_line_of_offset(self->doc, cursor_pos);
+            
+            size_t first_idx;
+            compact_matches_find_range(self->filtered_lines, cursor_line, SIZE_MAX, &first_idx, NULL);
+            
+            /* Go to previous */
+            if (first_idx == 0) {
+                first_idx = total - 1;
+            } else {
+                first_idx--;
+            }
+            
+            size_t m_line;
+            if (compact_matches_get(self->filtered_lines, first_idx, &m_line, NULL)) {
+                size_t offset = document_get_offset_of_line(self->doc, m_line);
+                editor_widget_clear_cursors(self);
+                c = editor_widget_get_primary_cursor(self);
+                if (c) {
+                    c->cursor_offset = offset;
+                    c->selection_anchor = offset;
+                    c->target_x = -1;
+                    scroll_to_cursor_centered(self);
+                }
+            }
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+            g_signal_emit_by_name(self, "caret-moved");
+            size_t line, col;
+            editor_widget_get_cursor_position(self, &line, &col);
+            g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
+            return;
+        }
+        return;
+    }
+    
     size_t total = document_search_task_get_match_count(self->active_search);
-    if (total == 0) return;
     
     /* Get current cursor position */
     EditorCursor *c = editor_widget_get_primary_cursor(self);
@@ -454,6 +535,46 @@ editor_widget_get_current_match_index(EditorWidget *self)
         self->global_match_idx = idx;
         return (int)self->global_match_idx;
     }
+    
+    if (self->filtered_lines) {
+        size_t count = compact_matches_count(self->filtered_lines);
+        if (count == 0) return -1;
+        
+        EditorCursor *c = editor_widget_get_primary_cursor(self);
+        size_t cursor_pos = c ? c->cursor_offset : 0;
+        size_t cursor_line = document_get_line_of_offset(self->doc, cursor_pos);
+        
+        size_t first_idx;
+        compact_matches_find_range(self->filtered_lines, cursor_line, SIZE_MAX, &first_idx, NULL);
+        
+        /* If we are exactly on the line, we want that index */
+        if (first_idx < count) {
+            size_t m_line;
+            if (compact_matches_get(self->filtered_lines, first_idx, &m_line, NULL)) {
+                if (cursor_line == m_line) {
+                    return (int)first_idx;
+                }
+            }
+        }
+        
+        /* Check if previous match is the one */
+        if (first_idx > 0) {
+            size_t m_line;
+            if (compact_matches_get(self->filtered_lines, first_idx - 1, &m_line, NULL)) {
+                if (cursor_line == m_line) {
+                    return (int)(first_idx - 1);
+                }
+            }
+        }
+        
+        /* If we are past the last one, wrap to 0 */
+        if (first_idx >= count) {
+            return 0;
+        }
+        
+        return (int)first_idx;
+    }
+
     return self->current_match_idx;
 }
 

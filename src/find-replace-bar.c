@@ -201,8 +201,13 @@ update_matches_label(ViteFindReplaceBar *self) {
         if (count == 0) {
             gtk_label_set_text(GTK_LABEL(self->matches_label), _("No matches"));
         } else {
+            int current_idx = editor_widget_get_current_match_index(self->editor);
             char buf[64];
-            snprintf(buf, sizeof(buf), _("%zu matches"), count);
+            if (current_idx >= 0) {
+                snprintf(buf, sizeof(buf), _("%d of %zu matches"), current_idx + 1, count);
+            } else {
+                snprintf(buf, sizeof(buf), _("%zu matches"), count);
+            }
             gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
         }
         gtk_widget_set_visible(self->matches_label, TRUE);
@@ -237,8 +242,8 @@ static void
 on_caret_moved(EditorWidget *editor, ViteFindReplaceBar *self) {
     (void)editor;
     if (!self) return;
-    /* Only update if we have an active search */
-    if (self->current_search) {
+    /* Only update if we have an active search or active filter */
+    if (self->current_search || self->filter_mode) {
         update_matches_label(self);
     }
 }
@@ -968,7 +973,7 @@ static void set_filter_mode(ViteFindReplaceBar *bar, gboolean enabled) {
         gtk_widget_set_visible(bar->replace_box, FALSE);
         
         /* Update UI for Filter */
-        gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(bar->find_entry), "Filter lines (Ctrl+Alt+F)");
+        gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(bar->find_entry), "Filter lines (Ctrl+Shift+F)");
         gtk_widget_set_visible(bar->toggle_repl_btn, FALSE);
     }
     
