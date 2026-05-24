@@ -90,13 +90,24 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
                 if (line_len_bytes > 4096) {
                     size_t visual_lines = 1;
                     if (chars_per_line > 0) {
-                        visual_lines = (line_len_bytes + chars_per_line - 1) / chars_per_line;
+                        size_t bytes_per_char = 1;
+                        FileEncoding enc = document_get_encoding(self->doc);
+                        if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+                        else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+                        size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
+                        visual_lines = (line_len_bytes + bytes_per_line - 1) / bytes_per_line;
                     }
                     current_y += (double)(visual_lines > 0 ? visual_lines : 1) * self->line_height;
                 } else {
                     size_t fetched_len = 0;
                     char *text = document_get_line_truncated(self->doc, phys_idx, &fetched_len, 4096, NULL);
                     if (text) {
+                        if (fetched_len > 0 && !g_utf8_validate(text, fetched_len, NULL)) {
+                            char *safe_text = g_utf8_make_valid(text, fetched_len);
+                            g_free(text);
+                            text = safe_text;
+                            fetched_len = strlen(text);
+                        }
                         while (fetched_len > 0 && (text[fetched_len-1] == '\n' || text[fetched_len-1] == '\r'))
                             fetched_len--;
                         
@@ -170,7 +181,12 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
                 if (line_len_bytes > 4096) {
                     size_t visual_lines = 1;
                     if (chars_per_line > 0) {
-                        visual_lines = (line_len_bytes + chars_per_line - 1) / chars_per_line;
+                        size_t bytes_per_char = 1;
+                        FileEncoding enc = document_get_encoding(self->doc);
+                        if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+                        else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+                        size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
+                        visual_lines = (line_len_bytes + bytes_per_line - 1) / bytes_per_line;
                     }
                     total_sample_height += (double)visual_lines * self->line_height;
                     actual_samples++;
@@ -178,6 +194,12 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
                     size_t fetched_len = 0;
                     char *text = document_get_line_truncated(self->doc, phys_idx, &fetched_len, 4096, NULL);
                     if (text) {
+                        if (fetched_len > 0 && !g_utf8_validate(text, fetched_len, NULL)) {
+                            char *safe_text = g_utf8_make_valid(text, fetched_len);
+                            g_free(text);
+                            text = safe_text;
+                            fetched_len = strlen(text);
+                        }
                         while (fetched_len > 0 && (text[fetched_len-1] == '\n' || text[fetched_len-1] == '\r'))
                             fetched_len--;
                         pango_layout_set_text(measure_layout, text, (int)fetched_len);
@@ -317,7 +339,15 @@ scroll_to_cursor(EditorWidget *self)
         double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
         int chars_per_line = (int)(wrap_width / cw);
         if (chars_per_line < 1) chars_per_line = 1;
-        size_t row = offset_in_line / (size_t)chars_per_line;
+        
+        size_t bytes_per_char = 1;
+        FileEncoding enc = document_get_encoding(self->doc);
+        if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+        else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+        
+        size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
+        size_t row = offset_in_line / bytes_per_line;
+        
         y += (double)row * self->line_height;
     }
     

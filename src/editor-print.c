@@ -204,6 +204,11 @@ draw_page(GtkPrintOperation *operation G_GNUC_UNUSED, GtkPrintContext *context, 
         if (!text) {
              text = g_strdup("");
              len = 0;
+        } else if (len > 0 && !g_utf8_validate(text, len, NULL)) {
+             char *safe_text = g_utf8_make_valid(text, len);
+             g_free(text);
+             text = safe_text;
+             len = strlen(text);
         }
         
         /* Strip newlines */
@@ -212,7 +217,6 @@ draw_page(GtkPrintOperation *operation G_GNUC_UNUSED, GtkPrintContext *context, 
             len--;
         }
         
-        pango_layout_set_text(layout, text, len);
         pango_layout_set_text(layout, text, len);
         pango_layout_set_width(layout, (width - lnum_w) * PANGO_SCALE);
         pango_layout_set_alignment(layout, PANGO_ALIGN_LEFT); /* Default left align for text */

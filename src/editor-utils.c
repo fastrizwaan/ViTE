@@ -545,30 +545,14 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024, NULL);
     if (!text) return NULL;
     
-    /* SAFETY: Embedded nulls can confuse Pango if we pass explict length > strlen. */
-    size_t true_len = strlen(text);
-    if (true_len < len) len = true_len;
-
-    /* OPTIMIZATION: If line is massive (>40KB), truncation is handled by document_get_line_truncated 
-       (using MAX_PANGO_LINE_LEN = 10MB). 
-       However, 10MB layout is still too slow. 
-       If this helper is used for METRICS (e.g. word boundary), we might need the full line conceptually,
-       but we can't afford it. 
-       We truncate to 4096 for general utility usage to prevent stalls.
-       Callers requiring full line access (like renderer) use their own virtualization logic.
-    */
     if (len > 4096) {
         len = 4096;
-        /* Ensure valid UTF-8 cut */
-        while (len > 0 && (text[len] & 0xC0) == 0x80) len--;
+        /* Ensure valid UTF-8 cut if it happens to be UTF-8 */
+        FileEncoding enc = document_get_encoding(self->doc);
+        if (enc == ENCODING_UTF8) {
+            while (len > 0 && (text[len] & 0xC0) == 0x80) len--;
+        }
         text[len] = '\0';
-    }
-
-    if (!g_utf8_validate(text, len, NULL)) {
-        char *safe = g_utf8_make_valid(text, len);
-        g_free(text);
-        text = safe;
-        len = strlen(text);
     }
 
     /* Pango doesn't want the trailing newline */

@@ -2,7 +2,7 @@ project('Virtual Text Editor', 'c',
   version : '0.1',
   default_options : ['warning_level=3', 'c_std=gnu11'])
 
-add_project_arguments('-D_FILE_OFFSET_BITS=64', language: 'c')
+add_project_arguments('-D_FILE_OFFSET_BITS=64', '-Wno-pedantic', language: 'c')
 
 cc = meson.get_compiler('c')
 

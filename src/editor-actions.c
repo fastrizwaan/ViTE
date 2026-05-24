@@ -24,6 +24,7 @@ editor_widget_finish_typing_undo_group(EditorWidget *self)
 void
 move_cursor(EditorWidget *self, int visual_lines_delta)
 {
+    g_printerr("[DEBUG] move_cursor: visual_lines_delta=%d\n", visual_lines_delta);
     if (visual_lines_delta == 0) return;
     
     for (guint c = 0; c < self->cursors->len; c++) {
@@ -33,6 +34,103 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
         size_t line_start = document_get_offset_of_line(self->doc, line_idx);
         size_t char_idx = cur->cursor_offset - line_start;
         
+        g_printerr("[DEBUG] Cursor %d Initial: offset=%zu, line=%zu, char_idx=%zu\n", c, cur->cursor_offset, line_idx, char_idx);
+        
+        size_t full_len = document_get_line_length(self->doc, line_idx);
+        if (full_len > 4096 && self->wrap_lines) {
+            int width = gtk_widget_get_width(GTK_WIDGET(self));
+            double minimap_w = 0;
+            if (self->minimap_enabled) {
+                minimap_w = self->minimap_width;
+                if (minimap_w > (double)width / 2.0) minimap_w = (double)width / 2.0;
+            }
+            double gutter_w = get_effective_gutter_width(self);
+            int available_w = (int)((double)width - gutter_w - (double)self->padding_left - (double)self->active_right_padding - minimap_w);
+            if (available_w < 50) available_w = 50;
+            
+            PangoFontMetrics *metrics = pango_context_get_metrics(gtk_widget_get_pango_context(GTK_WIDGET(self)), self->font_desc, NULL);
+            double char_width = pango_units_to_double(pango_font_metrics_get_approximate_char_width(metrics));
+            pango_font_metrics_unref(metrics);
+            
+            size_t bytes_per_char = 1;
+            FileEncoding enc = document_get_encoding(self->doc);
+            if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+            else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+
+            size_t chars_per_line = (size_t)(available_w / char_width);
+            if (chars_per_line < 10) chars_per_line = 10;
+            size_t bytes_per_line = chars_per_line * bytes_per_char;
+            
+            size_t col_bytes = (cur->target_x >= 0) ? (size_t)((cur->target_x / char_width) * bytes_per_char) : (char_idx % bytes_per_line);
+            if (col_bytes >= bytes_per_line) col_bytes = bytes_per_line - bytes_per_char;
+            col_bytes = (col_bytes / bytes_per_char) * bytes_per_char; /* align to char boundary */
+            
+            if (cur->target_x < 0) {
+                 cur->target_x = (double)(col_bytes / bytes_per_char) * char_width;
+            }
+            
+            size_t current_line_idx = line_idx;
+            size_t current_char_idx = char_idx;
+            int local_delta = visual_lines_delta;
+            
+            while (TRUE) {
+                size_t full_len_loop = document_get_line_length(self->doc, current_line_idx);
+                size_t line_start_loop = document_get_offset_of_line(self->doc, current_line_idx);
+                size_t current_row = current_char_idx / bytes_per_line;
+                
+                if (local_delta > 0) {
+                    size_t next_row = current_row + local_delta;
+                    size_t next_char_idx = next_row * bytes_per_line + col_bytes;
+                    if (next_char_idx <= full_len_loop) {
+                        cur->cursor_offset = line_start_loop + next_char_idx;
+                        break;
+                    } else {
+                        size_t rows_remaining = (full_len_loop / bytes_per_line) - current_row;
+                        local_delta -= (rows_remaining + 1);
+                        size_t next_line = current_line_idx;
+                        if (editor_widget_get_next_visible_line(self, current_line_idx, &next_line)) {
+                            current_line_idx = next_line;
+                            current_char_idx = 0;
+                            if (document_get_line_length(self->doc, current_line_idx) <= 4096) {
+                                // Pango will handle the rest, just snap to start
+                                cur->cursor_offset = document_get_offset_of_line(self->doc, current_line_idx);
+                                break;
+                            }
+                        } else {
+                            cur->cursor_offset = document_get_length(self->doc);
+                            break;
+                        }
+                    }
+                } else {
+                    if (current_row >= (size_t)(-local_delta)) {
+                        size_t prev_row = current_row + local_delta;
+                        size_t prev_char_idx = prev_row * bytes_per_line + col_bytes;
+                        if (prev_char_idx > full_len_loop) prev_char_idx = full_len_loop > bytes_per_char ? full_len_loop - bytes_per_char : 0;
+                        cur->cursor_offset = line_start_loop + prev_char_idx;
+                        break;
+                    } else {
+                        int remaining_delta = local_delta + current_row + 1; // +1 to cross the boundary
+                        size_t prev_line = current_line_idx;
+                        if (editor_widget_get_prev_visible_line(self, current_line_idx, &prev_line)) {
+                            current_line_idx = prev_line;
+                            size_t prev_full_len = document_get_line_length(self->doc, current_line_idx);
+                            current_char_idx = prev_full_len > bytes_per_char ? prev_full_len - bytes_per_char : 0;
+                            local_delta = remaining_delta;
+                            if (prev_full_len <= 4096) {
+                                // Pango will handle the rest, snap to end
+                                cur->cursor_offset = document_get_offset_of_line(self->doc, current_line_idx) + current_char_idx;
+                                break;
+                            }
+                        } else {
+                            cur->cursor_offset = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
         char *text = NULL; size_t len;
         PangoLayout *layout = create_pango_layout_for_line(self, line_idx, &text, &len);
         if (!layout) continue;
@@ -53,19 +151,22 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
         
         PangoLayoutIter *iter = pango_layout_get_iter(layout);
         int current_v_line_idx = 0;
-        gboolean found_v_line = FALSE;
+        int best_v_line = 0;
+        int min_dist = 9999999;
         do {
             PangoRectangle line_extents;
             pango_layout_iter_get_line_extents(iter, NULL, &line_extents);
-            if (cursor_y_center >= line_extents.y && cursor_y_center < line_extents.y + line_extents.height) {
-                found_v_line = TRUE;
-                break;
+            int line_center = line_extents.y + (line_extents.height / 2);
+            int dist = abs(cursor_y_center - line_center);
+            if (dist < min_dist) {
+                min_dist = dist;
+                best_v_line = current_v_line_idx;
             }
             current_v_line_idx++;
         } while (pango_layout_iter_next_line(iter));
         pango_layout_iter_free(iter);
         
-        if (!found_v_line) current_v_line_idx = MAX(0, pango_layout_get_line_count(layout) - 1);
+        current_v_line_idx = best_v_line;
         
         int local_delta = visual_lines_delta;
         size_t current_line_idx = line_idx;
@@ -90,7 +191,7 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
                      local_delta -= (lines_remaining + 1);
                      size_t next_line = current_line_idx;
                      if (!editor_widget_get_next_visible_line(self, current_line_idx, &next_line)) {
-                         // ... (End of file logic)
+                         cur->cursor_offset = document_get_length(self->doc);
                          break;
                      }
                      current_line_idx = next_line;
@@ -102,7 +203,7 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
                      local_delta += (lines_above + 1);
                      size_t prev_line = current_line_idx;
                      if (!editor_widget_get_prev_visible_line(self, current_line_idx, &prev_line)) {
-                         // ... (Top of file logic)
+                         cur->cursor_offset = 0;
                          break;
                      }
                      current_line_idx = prev_line;
@@ -114,6 +215,11 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
         }
         g_object_unref(layout);
         g_free(text);
+    }
+    
+    for (guint c = 0; c < self->cursors->len; c++) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
+        g_printerr("[DEBUG] Cursor %d Final: offset=%zu\n", c, cur->cursor_offset);
     }
     
     editor_widget_update_im_cursor_location(self);

@@ -6061,7 +6061,7 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
 }
 
 static gboolean
-process_next_pending_file_idle(gpointer user_data)
+process_next_pending_file_idle(gpointer user_data G_GNUC_UNUSED)
 {
     if (!pending_open_files || g_queue_is_empty(pending_open_files)) {
         is_opening = FALSE;

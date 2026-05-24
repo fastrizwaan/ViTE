@@ -253,13 +253,20 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
             int chars_per_line = (int)((double)avail / cw);
             if (chars_per_line < 1) chars_per_line = 1;
             
-            size_t full_rows = (full_len + chars_per_line - 1) / chars_per_line;
+            size_t bytes_per_char = 1;
+            FileEncoding enc = document_get_encoding(self->doc);
+            if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+            else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+            
+            size_t bytes_per_line = chars_per_line * bytes_per_char;
+            
+            size_t full_rows = (full_len + bytes_per_line - 1) / bytes_per_line;
             virtual_full_height = (double)(full_rows > 0 ? full_rows : 1) * self->line_height;
-            size_t start_char_idx = start_row * chars_per_line;
+            size_t start_char_idx = start_row * bytes_per_line;
             if (start_char_idx > full_len) start_char_idx = full_len;
             
             size_t visible_rows = (size_t)(height / self->line_height) + 2; 
-            size_t safe_len = visible_rows * chars_per_line + 100;
+            size_t safe_len = visible_rows * bytes_per_line + (100 * bytes_per_char);
             if (start_char_idx + safe_len > full_len) safe_len = full_len - start_char_idx;
             
             text = document_get_text_range(self->doc, document_get_offset_of_line(self->doc, phys_line) + start_char_idx, safe_len);
@@ -558,7 +565,9 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
     float cursor_w = 0.4f; int scale = gtk_widget_get_scale_factor(GTK_WIDGET(self));
     for (guint c = 0; c < self->cursors->len; c++) {
         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
-        if (cur->cursor_offset >= line_start_off + chunk_padding && cur->cursor_offset <= (line_start_off + chunk_padding + len)) {
+        gboolean cursor_in_this_line = (cur->cursor_offset >= line_start_off && 
+            (cur->cursor_offset < line_end_off || cur->cursor_offset == document_get_length(self->doc)));
+        if (cursor_in_this_line && cur->cursor_offset >= line_start_off + chunk_padding && cur->cursor_offset <= (line_start_off + chunk_padding + len)) {
             if (gtk_widget_has_focus(GTK_WIDGET(self)) && self->cursor_alpha > 0.01 && cur->cursor_offset == cur->selection_anchor && !self->is_dragging_selection) {
                 int idx = (int)MIN(cur->cursor_offset - (line_start_off + chunk_padding), len);
                 PangoRectangle sp; pango_layout_get_cursor_pos(layout, idx, &sp, NULL);

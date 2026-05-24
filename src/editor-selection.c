@@ -192,7 +192,14 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
             int chars_per_line = (int)((double)available_w / cw);
             if (chars_per_line < 1) chars_per_line = 1;
 
-            size_t rows = (full_len + chars_per_line - 1) / chars_per_line;
+            size_t bytes_per_char = 1;
+            FileEncoding enc = document_get_encoding(self->doc);
+            if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+            else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+            
+            size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
+
+            size_t rows = (full_len + bytes_per_line - 1) / bytes_per_line;
             virtual_height = (double)rows * self->line_height;
 
             /* Set layout to something valid but small to avoid cost? 
@@ -246,6 +253,13 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                 int chars_per_line = (int)((double)available_w / cw);
                 if (chars_per_line < 1) chars_per_line = 1;
 
+                size_t bytes_per_char = 1;
+                FileEncoding enc = document_get_encoding(self->doc);
+                if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+                else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+                
+                size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
+
                 double relative_y = click_y - current_y;
                 int row_in_line = (int)(relative_y / self->line_height);
                 if (row_in_line < 0) row_in_line = 0;
@@ -265,7 +279,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                 size_t visible_rows = (size_t)(height / self->line_height) + 2;
                 if (visible_rows < 1) visible_rows = 1;
 
-                size_t start_char_idx = start_row * (size_t)chars_per_line;
+                size_t start_char_idx = start_row * bytes_per_line;
                 if (start_char_idx > full_len) start_char_idx = full_len;
 
                 size_t line_start = document_get_offset_of_line(self->doc, phys_line);
@@ -276,7 +290,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
                 start_char_idx = start_off - line_start;
 
                 size_t max_len = (full_len > start_char_idx) ? (full_len - start_char_idx) : 0;
-                size_t chars_to_fetch = visible_rows * (size_t)chars_per_line + 100;
+                size_t chars_to_fetch = visible_rows * bytes_per_line + 100 * bytes_per_char;
                 size_t safe_len = (chars_to_fetch < max_len) ? chars_to_fetch : max_len;
 
                 char *chunk_text = document_get_text_range(self->doc, start_off, safe_len);
