@@ -221,10 +221,13 @@ update_matches_label(ViteFindReplaceBar *self) {
     if (total == 0) {
         gtk_label_set_text(GTK_LABEL(self->matches_label), _("No matches"));
     } else {
-         /* For now, just show total count - getting current match index 
-            would require the full GArray which is expensive */
+         int current_idx = editor_widget_get_current_match_index(self->editor);
          char buf[64];
-         snprintf(buf, sizeof(buf), _("%zu matches"), total);
+         if (current_idx >= 0) {
+             snprintf(buf, sizeof(buf), _("%d of %zu matches"), current_idx + 1, total);
+         } else {
+             snprintf(buf, sizeof(buf), _("%zu matches"), total);
+         }
          gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
     }
     gtk_widget_set_visible(self->matches_label, TRUE);
@@ -270,9 +273,18 @@ static void on_search_update(GArray *matches, gboolean finished, void *user_data
         gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
         gtk_widget_set_visible(self->matches_label, TRUE);
     } else {
-        char buf[64];
-        snprintf(buf, sizeof(buf), _("%zu matches"), match_count);
-        gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
+        if (match_count == 0) {
+            gtk_label_set_text(GTK_LABEL(self->matches_label), _("No matches"));
+        } else {
+            int current_idx = editor_widget_get_current_match_index(self->editor);
+            char buf[64];
+            if (current_idx >= 0) {
+                snprintf(buf, sizeof(buf), _("%d of %zu matches"), current_idx + 1, match_count);
+            } else {
+                snprintf(buf, sizeof(buf), _("%zu matches"), match_count);
+            }
+            gtk_label_set_text(GTK_LABEL(self->matches_label), buf);
+        }
         gtk_widget_set_visible(self->matches_label, TRUE);
     }
     

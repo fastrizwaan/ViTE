@@ -92,6 +92,10 @@ editor_widget_next_match(EditorWidget *self)
             scroll_to_cursor_centered(self);
         }
         gtk_widget_queue_draw(GTK_WIDGET(self));
+        g_signal_emit_by_name(self, "caret-moved");
+        size_t line, col;
+        editor_widget_get_cursor_position(self, &line, &col);
+        g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
         return;
     }
     
@@ -136,6 +140,11 @@ editor_widget_next_match(EditorWidget *self)
     
     /* Update viewport matches to include new position */
     editor_widget_update_search_viewport(self);
+
+    g_signal_emit_by_name(self, "caret-moved");
+    size_t line, col;
+    editor_widget_get_cursor_position(self, &line, &col);
+    g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
 }
 
 void 
@@ -160,6 +169,10 @@ editor_widget_prev_match(EditorWidget *self)
             scroll_to_cursor_centered(self);
         }
         gtk_widget_queue_draw(GTK_WIDGET(self));
+        g_signal_emit_by_name(self, "caret-moved");
+        size_t line, col;
+        editor_widget_get_cursor_position(self, &line, &col);
+        g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
         return;
     }
     
@@ -214,6 +227,11 @@ editor_widget_prev_match(EditorWidget *self)
     
     /* Update viewport matches to include new position */
     editor_widget_update_search_viewport(self);
+
+    g_signal_emit_by_name(self, "caret-moved");
+    size_t line, col;
+    editor_widget_get_cursor_position(self, &line, &col);
+    g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
 }
 
 void
@@ -395,6 +413,47 @@ int
 editor_widget_get_current_match_index(EditorWidget *self)
 {
     g_return_val_if_fail(EDITOR_IS_WIDGET(self), -1);
+    if (self->active_search) {
+        EditorCursor *c = editor_widget_get_primary_cursor(self);
+        size_t cursor_pos = c ? c->cursor_offset : 0;
+        
+        size_t total = document_search_task_get_match_count(self->active_search);
+        if (total == 0) return -1;
+        
+        /* Find first match >= cursor_pos */
+        size_t idx = find_match_at_or_after_cursor(self, cursor_pos);
+        
+        /* Check if cursor is actually inside the PREVIOUS match */
+        if (idx == 0) {
+             SearchMatch prev;
+             if (document_search_task_get_match_at(self->active_search, total - 1, &prev)) {
+                  if (cursor_pos >= prev.start && cursor_pos <= prev.end) {
+                      self->global_match_idx = total - 1;
+                      return (int)self->global_match_idx;
+                  }
+             }
+        } else {
+             SearchMatch prev;
+             if (document_search_task_get_match_at(self->active_search, idx - 1, &prev)) {
+                  if (cursor_pos >= prev.start && cursor_pos <= prev.end) {
+                      self->global_match_idx = idx - 1;
+                      return (int)self->global_match_idx;
+                  }
+             }
+        }
+        
+        /* Check if cursor is exactly at current match start */
+        SearchMatch curr;
+        if (document_search_task_get_match_at(self->active_search, idx, &curr)) {
+             if (cursor_pos == curr.start) {
+                  self->global_match_idx = idx;
+                  return (int)self->global_match_idx;
+             }
+        }
+
+        self->global_match_idx = idx;
+        return (int)self->global_match_idx;
+    }
     return self->current_match_idx;
 }
 
