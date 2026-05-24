@@ -320,6 +320,14 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
     *advance_h = (is_virtualized && self->wrap_lines) ? virtual_full_height : layout_h;
     double centering_offset = floor((layout_h - pixel_h) / 2.0);
 
+    gboolean is_current_filter_match = FALSE;
+    if (self->filtered_lines && self->cursors && self->cursors->len > 0) {
+        EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+        if (phys_line == document_get_line_of_offset(self->doc, primary->cursor_offset)) {
+            is_current_filter_match = TRUE;
+        }
+    }
+
     /* Line Highlights */
     gboolean is_highlighted = FALSE;
     if (self->highlight_current_line) {
@@ -337,7 +345,7 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
         char lnum[32]; snprintf(lnum, sizeof(lnum), "%zu", phys_line + 1);
         
         PangoFontDescription *desc = pango_font_description_copy(self->font_desc);
-        if (is_highlighted) {
+        if (is_highlighted || is_current_filter_match) {
             pango_font_description_set_weight(desc, PANGO_WEIGHT_BOLD);
         }
         pango_layout_set_font_description(ctx->lnum_layout, desc);
@@ -493,7 +501,8 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
                                 if (rs) {
                                     for (int j = 0; j < nrs; j++) {
                                         double x0 = floor((double)rs[2*j]/PANGO_SCALE + 0.5), x1 = floor((double)rs[2*j+1]/PANGO_SCALE + 0.5);
-                                        if (x1 - x0 >= 1.0) gtk_snapshot_append_color(snapshot, &rc, &GRAPHENE_RECT_INIT((float)x0, (float)uy, (float)(x1-x0), 1.0f));
+                                        float thickness = is_current_filter_match ? 3.0f : 1.0f;
+                                        if (x1 - x0 >= 1.0) gtk_snapshot_append_color(snapshot, &rc, &GRAPHENE_RECT_INIT((float)x0, (float)uy, (float)(x1-x0), thickness));
                                     }
                                     g_free(rs);
                                 }

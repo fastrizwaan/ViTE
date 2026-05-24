@@ -306,22 +306,25 @@ scroll_to_cursor(EditorWidget *self)
     EditorCursor *cur = editor_widget_get_primary_cursor(self);
     if (!cur || !self->vadjustment) return;
     
-    size_t line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
-    size_t line_start_offset = document_get_offset_of_line(self->doc, line_idx);
+    size_t phys_line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
+    size_t line_start_offset = document_get_offset_of_line(self->doc, phys_line_idx);
     size_t offset_in_line = (cur->cursor_offset >= line_start_offset)
         ? (cur->cursor_offset - line_start_offset)
         : 0;
+        
+    size_t vis_line_idx = phys_line_idx;
+    editor_widget_get_visual_line_for_physical(self, phys_line_idx, &vis_line_idx);
     
     /* Find visual Y */
     double y = 0;
-    if (self->line_y_offsets && line_idx < self->line_y_offsets->len) {
-        y = g_array_index(self->line_y_offsets, double, line_idx);
+    if (self->line_y_offsets && vis_line_idx < self->line_y_offsets->len) {
+        y = g_array_index(self->line_y_offsets, double, vis_line_idx);
     } else {
         /* Fallback for large files where offsets aren't cached: use average */
         if (self->wrap_lines && self->avg_visual_lines > 1.0) {
-            y = (double)line_idx * self->avg_visual_lines * self->line_height;
+            y = (double)vis_line_idx * self->avg_visual_lines * self->line_height;
         } else {
-            y = (double)line_idx * self->line_height;
+            y = (double)vis_line_idx * self->line_height;
         }
     }
 
@@ -371,21 +374,24 @@ scroll_to_cursor_centered(EditorWidget *self)
     EditorCursor *cur = editor_widget_get_primary_cursor(self);
     if (!cur || !self->vadjustment) return;
     
-    size_t line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
-    size_t line_start_offset = document_get_offset_of_line(self->doc, line_idx);
+    size_t phys_line_idx = document_get_line_of_offset(self->doc, cur->cursor_offset);
+    size_t line_start_offset = document_get_offset_of_line(self->doc, phys_line_idx);
     size_t offset_in_line = (cur->cursor_offset >= line_start_offset)
         ? (cur->cursor_offset - line_start_offset)
         : 0;
+        
+    size_t vis_line_idx = phys_line_idx;
+    editor_widget_get_visual_line_for_physical(self, phys_line_idx, &vis_line_idx);
     
     double y = 0;
-    if (self->line_y_offsets && line_idx < self->line_y_offsets->len) {
-        y = g_array_index(self->line_y_offsets, double, line_idx);
+    if (self->line_y_offsets && vis_line_idx < self->line_y_offsets->len) {
+        y = g_array_index(self->line_y_offsets, double, vis_line_idx);
     } else {
         /* Fallback for large files where offsets aren't cached: use average */
         if (self->wrap_lines && self->avg_visual_lines > 1.0) {
-            y = (double)line_idx * self->avg_visual_lines * self->line_height;
+            y = (double)vis_line_idx * self->avg_visual_lines * self->line_height;
         } else {
-            y = (double)line_idx * self->line_height;
+            y = (double)vis_line_idx * self->line_height;
         }
     }
 
@@ -586,15 +592,18 @@ editor_widget_scroll_to_line(EditorWidget *self, size_t line)
     double target_y = 0;
     editor_widget_ensure_metrics(self);
 
+    size_t vis_line_idx = line;
+    editor_widget_get_visual_line_for_physical(self, line, &vis_line_idx);
+
     if (self->wrap_lines && total_lines > 50000) {
-        target_y = (double)line * self->avg_visual_lines * self->line_height;
+        target_y = (double)vis_line_idx * self->avg_visual_lines * self->line_height;
     } else {
         editor_widget_update_adjustments(self, -1, -1);
 
-        if (self->line_y_offsets && line < self->line_y_offsets->len) {
-            target_y = g_array_index(self->line_y_offsets, double, line);
+        if (self->line_y_offsets && vis_line_idx < self->line_y_offsets->len) {
+            target_y = g_array_index(self->line_y_offsets, double, vis_line_idx);
         } else {
-            target_y = (double)line * self->line_height;
+            target_y = (double)vis_line_idx * self->line_height;
         }
     }
 

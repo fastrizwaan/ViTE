@@ -73,9 +73,36 @@ editor_widget_set_search_results(EditorWidget *self, GArray *matches)
 void 
 editor_widget_next_match(EditorWidget *self) 
 {
-    /* Use global search task for navigation */
+    /* Filter mode navigation - check first since active_search is NULL in filter mode */
+    if (!self->active_search && self->filtered_lines) {
+        size_t total = compact_matches_count(self->filtered_lines);
+        if (total == 0) return;
+        
+        self->global_match_idx++;
+        if (self->global_match_idx >= total) self->global_match_idx = 0;
+        
+        size_t m_line;
+        if (compact_matches_get(self->filtered_lines, self->global_match_idx, &m_line, NULL)) {
+            size_t offset = document_get_offset_of_line(self->doc, m_line);
+            editor_widget_clear_cursors(self);
+            EditorCursor *c = editor_widget_get_primary_cursor(self);
+            if (c) {
+                c->cursor_offset = offset;
+                c->selection_anchor = offset;
+                c->target_x = -1;
+                scroll_to_cursor_centered(self);
+            }
+        }
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        g_signal_emit_by_name(self, "caret-moved");
+        size_t line, col;
+        editor_widget_get_cursor_position(self, &line, &col);
+        g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
+        return;
+    }
+    
+    /* Fallback: use viewport matches if no active search */
     if (!self->active_search) {
-        /* Fallback: use viewport matches if no active search */
         if (!self->search_matches || self->search_matches->len == 0) return;
         
         self->current_match_idx++;
@@ -99,77 +126,22 @@ editor_widget_next_match(EditorWidget *self)
         return;
     }
     
-    /* Global navigation using SearchTask */
-    if (!self->active_search) {
-        if (self->filtered_lines) {
-            size_t total = compact_matches_count(self->filtered_lines);
-            if (total == 0) return;
-            
-            EditorCursor *c = editor_widget_get_primary_cursor(self);
-            size_t cursor_pos = c ? c->cursor_offset : 0;
-            size_t cursor_line = document_get_line_of_offset(self->doc, cursor_pos);
-            
-            size_t first_idx;
-            compact_matches_find_range(self->filtered_lines, cursor_line, SIZE_MAX, &first_idx, NULL);
-            
-            /* If we are exactly on the line, go to next */
-            size_t m_line;
-            if (first_idx < total && compact_matches_get(self->filtered_lines, first_idx, &m_line, NULL)) {
-                if (cursor_line >= m_line) {
-                    first_idx++;
-                }
-            }
-            if (first_idx >= total) first_idx = 0;
-            
-            if (compact_matches_get(self->filtered_lines, first_idx, &m_line, NULL)) {
-                size_t offset = document_get_offset_of_line(self->doc, m_line);
-                editor_widget_clear_cursors(self);
-                c = editor_widget_get_primary_cursor(self);
-                if (c) {
-                    c->cursor_offset = offset;
-                    c->selection_anchor = offset;
-                    c->target_x = -1;
-                    scroll_to_cursor_centered(self);
-                }
-            }
-            gtk_widget_queue_draw(GTK_WIDGET(self));
-            g_signal_emit_by_name(self, "caret-moved");
-            size_t line, col;
-            editor_widget_get_cursor_position(self, &line, &col);
-            g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
-            return;
-        }
-        return;
-    }
-    
     size_t total = document_search_task_get_match_count(self->active_search);
+    if (total == 0) return;
     
-    /* Get current cursor position */
-    EditorCursor *c = editor_widget_get_primary_cursor(self);
-    size_t cursor_pos = c ? c->cursor_offset : 0;
+    /* Simply go to the next match by index */
+    self->global_match_idx++;
+    if (self->global_match_idx >= total) self->global_match_idx = 0;
     
-    /* Find first match AFTER current cursor position */
-    size_t new_idx = find_match_at_or_after_cursor(self, cursor_pos);
-    
-    /* If we're already at this match (cursor inside match), go to next one */
     SearchMatch m;
-    if (document_search_task_get_match_at(self->active_search, new_idx, &m)) {
-        if (cursor_pos >= m.start && cursor_pos <= m.end) {
-            /* We're inside or at this match, go to next */
-            new_idx++;
-            if (new_idx >= total) new_idx = 0;
-            document_search_task_get_match_at(self->active_search, new_idx, &m);
-        }
-    } else {
+    if (!document_search_task_get_match_at(self->active_search, self->global_match_idx, &m)) {
         return;
     }
-    
-    self->global_match_idx = new_idx;
     
     /* Update cursor and selection */
-    self->current_match_offset = m.start;  /* Track for highlight */
+    self->current_match_offset = m.start;
     editor_widget_clear_cursors(self);
-    c = editor_widget_get_primary_cursor(self);
+    EditorCursor *c = editor_widget_get_primary_cursor(self);
     if (c) {
         c->cursor_offset = m.end;
         c->selection_anchor = m.start;
@@ -191,9 +163,36 @@ editor_widget_next_match(EditorWidget *self)
 void 
 editor_widget_prev_match(EditorWidget *self) 
 {
-    /* Use global search task for navigation */
+    /* Filter mode navigation - check first since active_search is NULL in filter mode */
+    if (!self->active_search && self->filtered_lines) {
+        size_t total = compact_matches_count(self->filtered_lines);
+        if (total == 0) return;
+        
+        if (self->global_match_idx == 0) self->global_match_idx = total - 1;
+        else self->global_match_idx--;
+        
+        size_t m_line;
+        if (compact_matches_get(self->filtered_lines, self->global_match_idx, &m_line, NULL)) {
+            size_t offset = document_get_offset_of_line(self->doc, m_line);
+            editor_widget_clear_cursors(self);
+            EditorCursor *c = editor_widget_get_primary_cursor(self);
+            if (c) {
+                c->cursor_offset = offset;
+                c->selection_anchor = offset;
+                c->target_x = -1;
+                scroll_to_cursor_centered(self);
+            }
+        }
+        gtk_widget_queue_draw(GTK_WIDGET(self));
+        g_signal_emit_by_name(self, "caret-moved");
+        size_t line, col;
+        editor_widget_get_cursor_position(self, &line, &col);
+        g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
+        return;
+    }
+    
+    /* Fallback: use viewport matches if no active search */
     if (!self->active_search) {
-        /* Fallback: use viewport matches if no active search */
         if (!self->search_matches || self->search_matches->len == 0) return;
         
         self->current_match_idx--;
@@ -217,86 +216,22 @@ editor_widget_prev_match(EditorWidget *self)
         return;
     }
     
-    /* Global navigation using SearchTask */
-    if (!self->active_search) {
-        if (self->filtered_lines) {
-            size_t total = compact_matches_count(self->filtered_lines);
-            if (total == 0) return;
-            
-            EditorCursor *c = editor_widget_get_primary_cursor(self);
-            size_t cursor_pos = c ? c->cursor_offset : 0;
-            size_t cursor_line = document_get_line_of_offset(self->doc, cursor_pos);
-            
-            size_t first_idx;
-            compact_matches_find_range(self->filtered_lines, cursor_line, SIZE_MAX, &first_idx, NULL);
-            
-            /* Go to previous */
-            if (first_idx == 0) {
-                first_idx = total - 1;
-            } else {
-                first_idx--;
-            }
-            
-            size_t m_line;
-            if (compact_matches_get(self->filtered_lines, first_idx, &m_line, NULL)) {
-                size_t offset = document_get_offset_of_line(self->doc, m_line);
-                editor_widget_clear_cursors(self);
-                c = editor_widget_get_primary_cursor(self);
-                if (c) {
-                    c->cursor_offset = offset;
-                    c->selection_anchor = offset;
-                    c->target_x = -1;
-                    scroll_to_cursor_centered(self);
-                }
-            }
-            gtk_widget_queue_draw(GTK_WIDGET(self));
-            g_signal_emit_by_name(self, "caret-moved");
-            size_t line, col;
-            editor_widget_get_cursor_position(self, &line, &col);
-            g_signal_emit_by_name(self, "cursor-moved", (guint)line, (guint)col);
-            return;
-        }
-        return;
-    }
-    
     size_t total = document_search_task_get_match_count(self->active_search);
+    if (total == 0) return;
     
-    /* Get current cursor position */
-    EditorCursor *c = editor_widget_get_primary_cursor(self);
-    size_t cursor_pos = c ? c->cursor_offset : 0;
+    /* Simply go to the previous match by index */
+    if (self->global_match_idx == 0) self->global_match_idx = total - 1;
+    else self->global_match_idx--;
     
-    /* Find first match at or after cursor, then go back one */
-    size_t idx = find_match_at_or_after_cursor(self, cursor_pos);
-    
-    /* Go to previous match */
     SearchMatch m;
-    if (idx == 0) {
-        idx = total - 1; /* Wrap to end */
-    } else {
-        idx--;
-    }
-    
-    /* Check if cursor is inside this match - if so, go to previous again */
-    if (document_search_task_get_match_at(self->active_search, idx, &m)) {
-        if (cursor_pos >= m.start && cursor_pos <= m.end) {
-            /* We're inside this match, go to previous */
-            if (idx == 0) {
-                idx = total - 1;
-            } else {
-                idx--;
-            }
-            document_search_task_get_match_at(self->active_search, idx, &m);
-        }
-    } else {
+    if (!document_search_task_get_match_at(self->active_search, self->global_match_idx, &m)) {
         return;
     }
-    
-    self->global_match_idx = idx;
     
     /* Update cursor and selection */
-    self->current_match_offset = m.start;  /* Track for highlight */
+    self->current_match_offset = m.start;
     editor_widget_clear_cursors(self);
-    c = editor_widget_get_primary_cursor(self);
+    EditorCursor *c = editor_widget_get_primary_cursor(self);
     if (c) {
         c->cursor_offset = m.end;
         c->selection_anchor = m.start;
@@ -545,6 +480,16 @@ editor_widget_get_current_match_index(EditorWidget *self)
         size_t cursor_line = document_get_line_of_offset(self->doc, cursor_pos);
         
         size_t first_idx;
+        
+        if (self->global_match_idx < count) {
+            size_t m_line;
+            if (compact_matches_get(self->filtered_lines, self->global_match_idx, &m_line, NULL)) {
+                if (cursor_line == m_line) {
+                    return (int)self->global_match_idx;
+                }
+            }
+        }
+        
         compact_matches_find_range(self->filtered_lines, cursor_line, SIZE_MAX, &first_idx, NULL);
         
         /* If we are exactly on the line, we want that index */
@@ -552,6 +497,7 @@ editor_widget_get_current_match_index(EditorWidget *self)
             size_t m_line;
             if (compact_matches_get(self->filtered_lines, first_idx, &m_line, NULL)) {
                 if (cursor_line == m_line) {
+                    self->global_match_idx = first_idx;
                     return (int)first_idx;
                 }
             }
