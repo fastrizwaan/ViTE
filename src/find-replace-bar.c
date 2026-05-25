@@ -53,6 +53,8 @@ enum {
 
 static guint signals[N_SIGNALS] = {0};
 
+static void save_history_to_disk(GList *find_history, GList *replace_history);
+
 static void add_to_history(GList **history, const char *text) {
     if (!text || !*text) return;
     GList *found = g_list_find_custom(*history, text, (GCompareFunc)g_strcmp0);
@@ -66,6 +68,73 @@ static void add_to_history(GList **history, const char *text) {
         g_free(last->data);
         *history = g_list_delete_link(*history, last);
     }
+}
+
+static char *get_history_file_path(void) {
+    const char *state_dir = g_get_user_state_dir();
+    char *app_dir = g_build_filename(state_dir, "io.github.fastrizwaan.ViTE", NULL);
+    g_mkdir_with_parents(app_dir, 0755);
+    char *path = g_build_filename(app_dir, "find-history.ini", NULL);
+    g_free(app_dir);
+    return path;
+}
+
+static void save_history_to_disk(GList *find_history, GList *replace_history) {
+    GKeyFile *kf = g_key_file_new();
+    
+    int i = 0;
+    for (GList *l = find_history; l != NULL; l = l->next, i++) {
+        char key[32];
+        g_snprintf(key, sizeof(key), "entry%d", i);
+        g_key_file_set_string(kf, "FindHistory", key, (const char *)l->data);
+    }
+    g_key_file_set_integer(kf, "FindHistory", "count", i);
+    
+    i = 0;
+    for (GList *l = replace_history; l != NULL; l = l->next, i++) {
+        char key[32];
+        g_snprintf(key, sizeof(key), "entry%d", i);
+        g_key_file_set_string(kf, "ReplaceHistory", key, (const char *)l->data);
+    }
+    g_key_file_set_integer(kf, "ReplaceHistory", "count", i);
+    
+    char *path = get_history_file_path();
+    g_key_file_save_to_file(kf, path, NULL);
+    g_free(path);
+    g_key_file_free(kf);
+}
+
+static GList *load_history_from_section(GKeyFile *kf, const char *section) {
+    GList *history = NULL;
+    int count = g_key_file_get_integer(kf, section, "count", NULL);
+    if (count <= 0) return NULL;
+    if (count > 10) count = 10;
+    
+    /* Load in reverse order so prepend gives correct order */
+    for (int i = count - 1; i >= 0; i--) {
+        char key[32];
+        g_snprintf(key, sizeof(key), "entry%d", i);
+        char *val = g_key_file_get_string(kf, section, key, NULL);
+        if (val && *val) {
+            history = g_list_prepend(history, val);
+        } else {
+            g_free(val);
+        }
+    }
+    return history;
+}
+
+static void load_history_from_disk(GList **find_history, GList **replace_history) {
+    char *path = get_history_file_path();
+    GKeyFile *kf = g_key_file_new();
+    
+    if (g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) {
+        *find_history = load_history_from_section(kf, "FindHistory");
+        *replace_history = load_history_from_section(kf, "ReplaceHistory");
+    }
+    
+    g_key_file_free(kf);
+    g_free(path);
 }
 
 static void on_history_item_clicked(GtkButton *btn, gpointer user_data) {
@@ -101,14 +170,14 @@ static void populate_history_popover(GtkWidget *popover, GList *history, GtkWidg
     gtk_popover_set_child(GTK_POPOVER(popover), box);
 }
 
-static void on_history_btn_clicked(GtkWidget *popover, gpointer user_data) {
-    if (!VITE_IS_FIND_REPLACE_BAR(user_data)) return;
-    ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
-    
-    if (self->find_history_btn && popover == GTK_WIDGET(gtk_menu_button_get_popover(GTK_MENU_BUTTON(self->find_history_btn)))) {
-        populate_history_popover(popover, self->find_history, self->find_entry);
-    } else if (self->replace_history_btn && popover == GTK_WIDGET(gtk_menu_button_get_popover(GTK_MENU_BUTTON(self->replace_history_btn)))) {
-        populate_history_popover(popover, self->replace_history, self->replace_entry);
+static void update_history_popovers(ViteFindReplaceBar *self) {
+    if (self->find_history_btn) {
+        GtkWidget *pop = GTK_WIDGET(gtk_menu_button_get_popover(GTK_MENU_BUTTON(self->find_history_btn)));
+        if (pop) populate_history_popover(pop, self->find_history, self->find_entry);
+    }
+    if (self->replace_history_btn) {
+        GtkWidget *pop = GTK_WIDGET(gtk_menu_button_get_popover(GTK_MENU_BUTTON(self->replace_history_btn)));
+        if (pop) populate_history_popover(pop, self->replace_history, self->replace_entry);
     }
 }
 
@@ -173,6 +242,9 @@ static void vite_find_replace_bar_dispose(GObject *object) {
         g_signal_handlers_disconnect_by_data(self->editor, self);
     }
 
+    /* Save history before freeing */
+    save_history_to_disk(self->find_history, self->replace_history);
+    
     g_list_free_full(self->find_history, g_free);
     self->find_history = NULL;
     g_list_free_full(self->replace_history, g_free);
@@ -566,6 +638,8 @@ static void on_replace_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
     /* Add to history */
     add_to_history(&self->find_history, pattern_text);
     add_to_history(&self->replace_history, repl);
+    save_history_to_disk(self->find_history, self->replace_history);
+    update_history_popovers(self);
 
     /* Re-trigger search to update offsets */
     perform_search(self);
@@ -666,6 +740,12 @@ static void on_replace_all_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_d
     self->current_streaming_replace = document_replace_streaming_start(
         doc, query, repl, regex, case_sensitive, whole_word, 
         on_replace_progress, self);
+        
+    /* Add to history */
+    add_to_history(&self->find_history, query);
+    add_to_history(&self->replace_history, repl);
+    save_history_to_disk(self->find_history, self->replace_history);
+    update_history_popovers(self);
     
     if (self->current_streaming_replace) {
         gtk_button_set_label(GTK_BUTTON(self->replace_all_btn), "Stop");
@@ -689,6 +769,8 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller G_GNUC_UNUSED, 
         /* Add to history on Enter */
         const char *find_text = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
         add_to_history(&self->find_history, find_text);
+        save_history_to_disk(self->find_history, self->replace_history);
+        update_history_popovers(self);
         
         if (state & GDK_SHIFT_MASK) {
              editor_widget_prev_match(self->editor);
@@ -747,6 +829,9 @@ static void vite_find_replace_bar_init(ViteFindReplaceBar *self G_GNUC_UNUSED) {
 GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     ViteFindReplaceBar *self = g_object_new(VITE_TYPE_FIND_REPLACE_BAR, NULL);
     self->editor = editor;
+    
+    /* Load persisted history */
+    load_history_from_disk(&self->find_history, &self->replace_history);
     
     g_signal_connect(editor, "caret-moved", G_CALLBACK(on_caret_moved), self);
 
@@ -831,7 +916,6 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_add_css_class(self->find_history_btn, "flat");
     GtkWidget *find_popover = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->find_history_btn), find_popover);
-    g_signal_connect(find_popover, "map", G_CALLBACK(on_history_btn_clicked), self);
     gtk_box_append(GTK_BOX(row1), self->find_history_btn);
 
     /* Options Menu */
@@ -913,7 +997,6 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_add_css_class(self->replace_history_btn, "flat");
     GtkWidget *replace_popover = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->replace_history_btn), replace_popover);
-    g_signal_connect(replace_popover, "map", G_CALLBACK(on_history_btn_clicked), self);
     gtk_box_append(GTK_BOX(self->replace_box), self->replace_history_btn);
     
     /* Listen for document changes */
@@ -924,6 +1007,9 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     
     /* Listen for undo/redo on the editor to cancel search if needed */
     g_signal_connect(editor, "undo-redo-progress", G_CALLBACK(on_editor_undo_redo_progress), self);
+    
+    /* Populate history popovers with initially loaded history */
+    update_history_popovers(self);
     
     return GTK_WIDGET(self);
 }
