@@ -1,0 +1,18 @@
+1. Reload with different encoding. perhaps give a dialog with encodings, and line ending; (perhaps give autodetect checkbox.
+2. bottom blurry shadow above statusbar (perhaps toolbar view bottom related) must be removed
+3. Hide Save button by default
+4. Also on selecting encoding, show Save with selected encoding or Reload now with the selected encoding dialog aesthetic. Also for crlf
+
+svite goody goody
+1. Theme, use svit's color (default gnome colors)
+2. svite's  1st line no space or perhaps minimal; 
+3. see interface/ button sizes, find/replace etc. widgets, 
+
+choose which ever looks cute.
+
+1. Bugs: split view needs proper word wrapping. 
+2. ctrl+shift+z for redo
+
+Statusbar's new feature:
+
+clicking on Ln XX, Col XX; should show go to line gtk entry, it could support XX, YY (or XX,YY) to go to XX line and YY column

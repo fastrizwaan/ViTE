@@ -183,6 +183,8 @@ static void update_history_popovers(ViteFindReplaceBar *self) {
 
 G_DEFINE_TYPE(ViteFindReplaceBar, vite_find_replace_bar, GTK_TYPE_BOX)
 
+static void on_document_changed(Document *doc, gboolean modified, void *user_data);
+
 static void vite_find_replace_bar_dispose(GObject *object) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(object);
     if (self->search_timeout_id) {
@@ -239,6 +241,10 @@ static void vite_find_replace_bar_dispose(GObject *object) {
     }
 
     if (self->editor) {
+        Document *doc = editor_widget_get_document(self->editor);
+        if (doc) {
+            document_remove_modification_callback(doc, on_document_changed, self);
+        }
         g_signal_handlers_disconnect_by_data(self->editor, self);
     }
 
@@ -1102,6 +1108,28 @@ void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
     gtk_widget_set_visible(GTK_WIDGET(bar), FALSE);
     gtk_editable_set_text(GTK_EDITABLE(bar->find_entry), "");
     
+    /* Cancel any pending debounced searches */
+    if (bar->search_timeout_id) {
+        g_source_remove(bar->search_timeout_id);
+        bar->search_timeout_id = 0;
+    }
+    
+    if (bar->viewport_update_timeout_id) {
+        g_source_remove(bar->viewport_update_timeout_id);
+        bar->viewport_update_timeout_id = 0;
+    }
+    
+    /* Cancel ongoing replace tasks */
+    if (bar->current_replace_task) {
+        document_replace_async_cancel(bar->current_replace_task);
+        bar->current_replace_task = NULL;
+    }
+    
+    if (bar->current_streaming_replace) {
+        document_replace_streaming_cancel(bar->current_streaming_replace);
+        bar->current_streaming_replace = NULL;
+    }
+    
     if (bar->filter_mode) {
          /* Clear filter results */
          editor_widget_set_filtered_lines(bar->editor, NULL, NULL, FALSE, FALSE);
@@ -1113,12 +1141,22 @@ void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
              filter_result_free(bar->current_filter_result);
              bar->current_filter_result = NULL;
          }
+         if (bar->filter_tick_id) {
+             g_source_remove(bar->filter_tick_id);
+             bar->filter_tick_id = 0;
+         }
          editor_widget_scroll_to_cursor(bar->editor);
     } else {
          if (bar->current_search) {
              document_search_async_cancel(bar->current_search);
              bar->current_search = NULL;
          }
+    }
+    
+    /* Hide replace status label and reset any replace buttons */
+    gtk_widget_set_visible(bar->replace_status_label, FALSE);
+    if (bar->replace_all_btn) {
+        gtk_button_set_label(GTK_BUTTON(bar->replace_all_btn), "Replace All");
     }
     
     /* Always clear any search state to avoid stale/dangling pointers */
