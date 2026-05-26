@@ -185,6 +185,18 @@ G_DEFINE_TYPE(ViteFindReplaceBar, vite_find_replace_bar, GTK_TYPE_BOX)
 
 static void on_document_changed(Document *doc, gboolean modified, void *user_data);
 
+static void
+cancel_current_search(ViteFindReplaceBar *self)
+{
+    if (self->editor) {
+        editor_widget_set_active_search(self->editor, NULL);
+    }
+    if (self->current_search) {
+        document_search_async_cancel(self->current_search);
+        self->current_search = NULL;
+    }
+}
+
 static void vite_find_replace_bar_dispose(GObject *object) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(object);
     if (self->search_timeout_id) {
@@ -205,12 +217,8 @@ static void vite_find_replace_bar_dispose(GObject *object) {
         self->viewport_scroll_handler_id = 0;
     }
     
-    if (self->current_search) {
-        document_search_async_cancel(self->current_search);
-        self->current_search = NULL;
-    }
+    cancel_current_search(self);
     if (self->editor) {
-        editor_widget_set_active_search(self->editor, NULL);
         editor_widget_set_search_results(self->editor, NULL);
     }
     
@@ -424,10 +432,7 @@ static void update_viewport_search(ViteFindReplaceBar *self) {
     Document *doc = editor_widget_get_document(self->editor);
     if (!doc) {
         /* Document was closed/changed - cancel search */
-        if (self->current_search) {
-            document_search_async_cancel(self->current_search);
-            self->current_search = NULL;
-        }
+        cancel_current_search(self);
         editor_widget_set_search_results(self->editor, NULL);
         return;
     }
@@ -548,11 +553,7 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
     /* --- FIND MODE BRANCH --- */
     
     /* Cancel any previous async search */
-    if (self->current_search) {
-        document_search_async_cancel(self->current_search);
-        self->current_search = NULL;
-        editor_widget_set_active_search(self->editor, NULL);
-    }
+    cancel_current_search(self);
     
     if (!doc) return G_SOURCE_REMOVE;
     
@@ -672,10 +673,7 @@ static void on_replace_progress(int processed, int total, gboolean finished, voi
         gtk_button_set_label(GTK_BUTTON(self->replace_all_btn), "Replace All");
         
         editor_widget_reset_cursor_to_start(self->editor);
-        if (self->current_search) {
-             document_search_async_cancel(self->current_search);
-             self->current_search = NULL;
-        }
+        cancel_current_search(self);
         editor_widget_set_search_results(self->editor, NULL);
         
         char *msg = g_strdup_printf(_("Done (%d replaced)"), total);
@@ -734,10 +732,7 @@ static void on_replace_all_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_d
      * without storing all matches in memory. Works efficiently for any file size. */
     
     /* Clear any search highlights and cancel active search */
-    if (self->current_search) {
-        document_search_async_cancel(self->current_search);
-        self->current_search = NULL;
-    }
+    cancel_current_search(self);
     editor_widget_set_search_results(self->editor, NULL);
     
     gtk_label_set_text(GTK_LABEL(self->matches_label), "Replacing...");
@@ -796,12 +791,9 @@ on_editor_undo_redo_progress(EditorWidget *editor, double progress, gboolean fin
     
     /* When undo/redo starts, cancel active searches and filters */
     if (!finished && progress == 0.0) {
-        if (self->current_search) {
-             document_search_async_cancel(self->current_search);
-             self->current_search = NULL;
-             /* Clear highlights since content is about to change significantly */
-             editor_widget_set_search_results(self->editor, NULL);
-        }
+        cancel_current_search(self);
+        /* Clear highlights since content is about to change significantly */
+        editor_widget_set_search_results(self->editor, NULL);
         if (self->current_filter_task) {
              document_filter_async_cancel(self->current_filter_task);
              self->current_filter_task = NULL;
@@ -1057,10 +1049,7 @@ static void set_filter_mode(ViteFindReplaceBar *bar, gboolean enabled) {
     } else {
         /* Switching TO Filter Mode */
         /* Clear Find State */
-        if (bar->current_search) {
-            document_search_async_cancel(bar->current_search);
-            bar->current_search = NULL;
-        }
+        cancel_current_search(bar);
         editor_widget_clear_search(bar->editor);
         gtk_widget_set_visible(bar->replace_box, FALSE);
         
@@ -1147,10 +1136,7 @@ void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
          }
          editor_widget_scroll_to_cursor(bar->editor);
     } else {
-         if (bar->current_search) {
-             document_search_async_cancel(bar->current_search);
-             bar->current_search = NULL;
-         }
+         cancel_current_search(bar);
     }
     
     /* Hide replace status label and reset any replace buttons */
