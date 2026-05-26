@@ -22,6 +22,11 @@ struct _ViteStatusBar {
     
     GtkWidget *cursor_label;
     GtkWidget *ins_label;
+    
+    GtkWidget *file_type_listbox;
+    GtkWidget *plain_text_listbox;
+    GtkWidget *others_lbl;
+    GtkWidget *encoding_listbox;
 };
 
 G_DEFINE_TYPE(ViteStatusBar, vite_status_bar, GTK_TYPE_WIDGET)
@@ -113,8 +118,6 @@ on_line_ending_activated(GSimpleAction *action, GVariant *parameter, gpointer us
     
     const char *id = g_variant_get_string(parameter, NULL);
 
-    
-    vite_status_bar_set_line_ending(self, id);
     g_signal_emit(self, signals[LINE_ENDING_CHANGED], 0, id);
 }
 
@@ -140,9 +143,32 @@ create_line_ending_menu(ViteStatusBar *self)
 }
 
 static void
+update_encoding_popover_selection(ViteStatusBar *self)
+{
+    const char *current_label = gtk_label_get_text(GTK_LABEL(self->encoding_label));
+    
+    if (self->encoding_listbox) {
+        GtkWidget *child = gtk_widget_get_first_child(self->encoding_listbox);
+        while (child != NULL) {
+            if (GTK_IS_LIST_BOX_ROW(child)) {
+                GtkListBoxRow *row = GTK_LIST_BOX_ROW(child);
+                const char *enc_name = g_object_get_data(G_OBJECT(row), "enc-name");
+                GtkWidget *check = g_object_get_data(G_OBJECT(row), "check-img");
+                if (check && enc_name) {
+                    gboolean is_active = (g_strcmp0(current_label, enc_name) == 0 || g_strcmp0(current_label, _(enc_name)) == 0);
+                    gtk_widget_set_visible(check, is_active);
+                }
+            }
+            child = gtk_widget_get_next_sibling(child);
+        }
+    }
+}
+
+static void
 create_encoding_menu(ViteStatusBar *self)
 {
     GtkWidget *popover = gtk_popover_new();
+    gtk_widget_add_css_class(popover, "vite-status-custom-popover");
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->encoding_btn), popover);
 
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
@@ -161,10 +187,10 @@ create_encoding_menu(ViteStatusBar *self)
     gtk_widget_set_vexpand(scrolled, TRUE);
     gtk_box_append(GTK_BOX(box), scrolled);
 
-    GtkWidget *listbox = gtk_list_box_new();
-    gtk_list_box_set_selection_mode(GTK_LIST_BOX(listbox), GTK_SELECTION_NONE);
-    gtk_widget_add_css_class(listbox, "boxed-list");
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), listbox);
+    self->encoding_listbox = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(self->encoding_listbox), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class(self->encoding_listbox, "vite-popover-list");
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), self->encoding_listbox);
 
     for (int i = 0; i < file_encoding_get_count(); i++) {
         const char *disp = file_encoding_get_display_name_at(i);
@@ -172,23 +198,35 @@ create_encoding_menu(ViteStatusBar *self)
         if (!disp || !id) continue;
 
         GtkWidget *row = gtk_list_box_row_new();
+        GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+        gtk_widget_set_margin_start(row_box, 12);
+        gtk_widget_set_margin_end(row_box, 12);
+        gtk_widget_set_margin_top(row_box, 8);
+        gtk_widget_set_margin_bottom(row_box, 8);
+
         GtkWidget *lbl = gtk_label_new(disp);
-        gtk_widget_set_margin_start(lbl, 12);
-        gtk_widget_set_margin_end(lbl, 12);
-        gtk_widget_set_margin_top(lbl, 8);
-        gtk_widget_set_margin_bottom(lbl, 8);
         gtk_widget_set_halign(lbl, GTK_ALIGN_START);
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), lbl);
+        gtk_widget_set_hexpand(lbl, TRUE);
+        gtk_box_append(GTK_BOX(row_box), lbl);
+
+        GtkWidget *check = gtk_image_new_from_icon_name("object-select-symbolic");
+        gtk_widget_set_halign(check, GTK_ALIGN_END);
+        gtk_widget_set_visible(check, FALSE);
+        gtk_box_append(GTK_BOX(row_box), check);
+
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), row_box);
 
         g_object_set_data(G_OBJECT(row), "enc-name", (gpointer)disp);
         g_object_set_data(G_OBJECT(row), "enc-id", (gpointer)id);
+        g_object_set_data(G_OBJECT(row), "check-img", check);
 
-        gtk_list_box_append(GTK_LIST_BOX(listbox), row);
+        gtk_list_box_append(GTK_LIST_BOX(self->encoding_listbox), row);
     }
 
-    gtk_list_box_set_filter_func(GTK_LIST_BOX(listbox), encoding_filter_func, entry, NULL);
-    g_signal_connect(entry, "search-changed", G_CALLBACK(on_search_changed), listbox);
-    g_signal_connect(listbox, "row-activated", G_CALLBACK(on_encoding_row_activated), self);
+    gtk_list_box_set_filter_func(GTK_LIST_BOX(self->encoding_listbox), encoding_filter_func, entry, NULL);
+    g_signal_connect(entry, "search-changed", G_CALLBACK(on_search_changed), self->encoding_listbox);
+    g_signal_connect(self->encoding_listbox, "row-activated", G_CALLBACK(on_encoding_row_activated), self);
+    g_signal_connect_swapped(popover, "map", G_CALLBACK(update_encoding_popover_selection), self);
 }
 
 static GtkWidget *
@@ -246,15 +284,6 @@ on_file_type_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_da
 {
     ViteStatusBar *self = VITE_STATUS_BAR(user_data);
     const char *id = g_object_get_data(G_OBJECT(row), "lang-id");
-    const char *name = g_object_get_data(G_OBJECT(row), "lang-name");
-    
-    /* Update label */
-    /* Update label */
-    if (id == NULL) {
-        vite_status_bar_set_file_type(self, NULL);
-    } else {
-        vite_status_bar_set_file_type(self, _(name));
-    }
     
     /* Close popover first to release focus */
     GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(box), GTK_TYPE_POPOVER);
@@ -315,8 +344,6 @@ on_encoding_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user_dat
     ViteStatusBar *self = VITE_STATUS_BAR(user_data);
     const char *id = g_object_get_data(G_OBJECT(row), "enc-id");
     if (!id) return;
-
-    vite_status_bar_set_encoding(self, id);
 
     GtkWidget *popover = gtk_widget_get_ancestor(GTK_WIDGET(box), GTK_TYPE_POPOVER);
     if (popover) gtk_popover_popdown(GTK_POPOVER(popover));
@@ -384,6 +411,7 @@ create_indent_menu(ViteStatusBar *self)
     g_object_unref(menu);
 }
 
+
 static void
 on_search_changed(GtkEditable *entry G_GNUC_UNUSED, gpointer user_data)
 {
@@ -392,54 +420,96 @@ on_search_changed(GtkEditable *entry G_GNUC_UNUSED, gpointer user_data)
 }
 
 static void
+update_file_type_popover_selection(ViteStatusBar *self)
+{
+    const char *current_label = gtk_label_get_text(GTK_LABEL(self->file_type_label));
+    
+    if (self->file_type_listbox) {
+        GtkWidget *child = gtk_widget_get_first_child(self->file_type_listbox);
+        while (child != NULL) {
+            if (GTK_IS_LIST_BOX_ROW(child)) {
+                GtkListBoxRow *row = GTK_LIST_BOX_ROW(child);
+                const char *lang_name = g_object_get_data(G_OBJECT(row), "lang-name");
+                GtkWidget *check = g_object_get_data(G_OBJECT(row), "check-img");
+                if (check && lang_name) {
+                    gboolean is_active = (g_strcmp0(current_label, lang_name) == 0 || g_strcmp0(current_label, _(lang_name)) == 0);
+                    gtk_widget_set_visible(check, is_active);
+                }
+            }
+            child = gtk_widget_get_next_sibling(child);
+        }
+    }
+}
+
+static void
 create_file_type_menu(ViteStatusBar *self)
 {
     GtkWidget *popover = gtk_popover_new();
+    gtk_widget_add_css_class(popover, "vite-status-custom-popover");
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->file_type_btn), popover);
     
-    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_margin_top(box, 6);
-    gtk_widget_set_margin_bottom(box, 6);
-    gtk_widget_set_margin_start(box, 6);
-    gtk_widget_set_margin_end(box, 6);
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_widget_set_margin_top(box, 8);
+    gtk_widget_set_margin_bottom(box, 8);
+    gtk_widget_set_margin_start(box, 8);
+    gtk_widget_set_margin_end(box, 8);
     gtk_popover_set_child(GTK_POPOVER(popover), box);
     
     /* Search Entry */
     GtkWidget *entry = gtk_search_entry_new();
+    gtk_widget_set_margin_bottom(entry, 4);
     gtk_box_append(GTK_BOX(box), entry);
     
-    /* List Box in Scrolled Window */
+    /* Scrolled Window for all document types (including Plain Text) */
     GtkWidget *scrolled = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 200);
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 200);
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 260);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 220);
     gtk_widget_set_vexpand(scrolled, TRUE);
     gtk_box_append(GTK_BOX(box), scrolled);
     
-    GtkWidget *listbox = gtk_list_box_new();
-    gtk_list_box_set_selection_mode(GTK_LIST_BOX(listbox), GTK_SELECTION_NONE);
-    gtk_widget_add_css_class(listbox, "boxed-list");
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), listbox);
+    self->file_type_listbox = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(self->file_type_listbox), GTK_SELECTION_NONE);
+    gtk_widget_add_css_class(self->file_type_listbox, "vite-popover-list");
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), self->file_type_listbox);
     
+    /* Set Plain Text as NULL, and others to NULL etc. */
+    self->plain_text_listbox = NULL;
+    self->others_lbl = NULL;
+    
+    /* Populate Languages List Box */
     for (int i = 0; file_types[i].name != NULL; i++) {
         GtkWidget *row = gtk_list_box_row_new();
+        GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+        gtk_widget_set_margin_start(row_box, 12);
+        gtk_widget_set_margin_end(row_box, 12);
+        gtk_widget_set_margin_top(row_box, 8);
+        gtk_widget_set_margin_bottom(row_box, 8);
+        
         GtkWidget *lbl = gtk_label_new(_(file_types[i].name));
-        gtk_widget_set_margin_start(lbl, 12);
-        gtk_widget_set_margin_end(lbl, 12);
-        gtk_widget_set_margin_top(lbl, 8);
-        gtk_widget_set_margin_bottom(lbl, 8);
         gtk_widget_set_halign(lbl, GTK_ALIGN_START);
-        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), lbl);
+        gtk_widget_set_hexpand(lbl, TRUE);
+        gtk_box_append(GTK_BOX(row_box), lbl);
+        
+        GtkWidget *check = gtk_image_new_from_icon_name("object-select-symbolic");
+        gtk_widget_set_halign(check, GTK_ALIGN_END);
+        gtk_widget_set_visible(check, FALSE);
+        gtk_box_append(GTK_BOX(row_box), check);
+        
+        gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), row_box);
         
         g_object_set_data(G_OBJECT(row), "lang-name", (gpointer)file_types[i].name);
         g_object_set_data(G_OBJECT(row), "lang-id", (gpointer)file_types[i].id);
+        g_object_set_data(G_OBJECT(row), "check-img", check);
         
-        gtk_list_box_append(GTK_LIST_BOX(listbox), row);
+        gtk_list_box_append(GTK_LIST_BOX(self->file_type_listbox), row);
     }
     
-    g_signal_connect(listbox, "row-activated", G_CALLBACK(on_file_type_row_activated), self);
+    g_signal_connect(self->file_type_listbox, "row-activated", G_CALLBACK(on_file_type_row_activated), self);
     
-    gtk_list_box_set_filter_func(GTK_LIST_BOX(listbox), file_type_filter_func, entry, NULL);
-    g_signal_connect(entry, "search-changed", G_CALLBACK(on_search_changed), listbox);
+    gtk_list_box_set_filter_func(GTK_LIST_BOX(self->file_type_listbox), file_type_filter_func, entry, NULL);
+    g_signal_connect(entry, "search-changed", G_CALLBACK(on_search_changed), self->file_type_listbox);
+    
+    g_signal_connect_swapped(popover, "map", G_CALLBACK(update_file_type_popover_selection), self);
 }
 
 static void
@@ -528,42 +598,48 @@ vite_status_bar_set_cursor_position(ViteStatusBar *self, int line, int col)
 }
 
 void
-vite_status_bar_set_file_type(ViteStatusBar *self, const char *file_type)
+vite_status_bar_set_file_type(ViteStatusBar *self, const char *file_type, gboolean is_changed)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
     if (!file_type) file_type = _("Plain Text");
-    /* Bold if not plain text? svite does this. */
-    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", file_type);
+    
+    char *markup = g_strdup_printf("<span font_weight='%s'>%s</span>", 
+                                   is_changed ? "bold" : "normal", file_type);
     gtk_label_set_markup(GTK_LABEL(self->file_type_label), markup);
     g_free(markup);
 }
 
 
 void
-vite_status_bar_set_encoding(ViteStatusBar *self, const char *encoding_id)
+vite_status_bar_set_encoding(ViteStatusBar *self, const char *encoding_id, gboolean is_changed)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
     if (!encoding_id) encoding_id = "utf-8";
     
     const char *display = file_encoding_to_display_name_from_id(encoding_id);
     
-    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", display);
+    char *markup = g_strdup_printf("<span font_weight='%s'>%s</span>", 
+                                   is_changed ? "bold" : "normal", display);
     gtk_label_set_markup(GTK_LABEL(self->encoding_label), markup);
     g_free(markup);
 }
 
 void
-vite_status_bar_set_line_ending(ViteStatusBar *self, const char *line_ending_id)
+vite_status_bar_set_line_ending(ViteStatusBar *self, const char *line_ending_id, gboolean is_changed)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
     if (!line_ending_id) line_ending_id = "lf";
     
     /* Map ID to Display Name */
     const char *display = "LF";
-    if (g_strcmp0(line_ending_id, "crlf") == 0) display = "CRLF";
-    else if (g_strcmp0(line_ending_id, "cr") == 0) display = "CR";
+    if (g_strcmp0(line_ending_id, "crlf") == 0) {
+        display = "CRLF";
+    } else if (g_strcmp0(line_ending_id, "cr") == 0) {
+        display = "CR";
+    }
     
-    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", display);
+    char *markup = g_strdup_printf("<span font_weight='%s'>%s</span>", 
+                                   is_changed ? "bold" : "normal", display);
     gtk_label_set_markup(GTK_LABEL(self->line_ending_label), markup);
     g_free(markup);
     
@@ -577,7 +653,7 @@ vite_status_bar_set_line_ending(ViteStatusBar *self, const char *line_ending_id)
 }
 
 void
-vite_status_bar_set_indentation(ViteStatusBar *self, int width, gboolean use_tabs)
+vite_status_bar_set_indentation(ViteStatusBar *self, int width, gboolean use_tabs, gboolean is_changed)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
     
@@ -589,7 +665,8 @@ vite_status_bar_set_indentation(ViteStatusBar *self, int width, gboolean use_tab
         text = g_strdup_printf(_("Spaces: %d"), width);
     }
     
-    char *markup = g_strdup_printf("<span font_weight='normal'>%s</span>", text);
+    char *markup = g_strdup_printf("<span font_weight='%s'>%s</span>", 
+                                   is_changed ? "bold" : "normal", text);
     gtk_label_set_markup(GTK_LABEL(self->tab_width_label), markup);
     g_free(markup);
     g_free(text);

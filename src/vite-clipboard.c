@@ -74,11 +74,12 @@ vite_clipboard_free(ViteClipboard *clip)
     
     vite_clipboard_cancel_streaming(clip);
     free_entry(clip->current);
-    g_free(clip);
     
     if (clip == global_clipboard) {
         global_clipboard = NULL;
     }
+    
+    g_free(clip);
 }
 
 void
@@ -572,9 +573,15 @@ vite_clipboard_sync_to_system(ViteClipboard *clip)
              if (fd >= 0) {
                  entry->cached_text = resource_safe_malloc(len + 1);
                  if (entry->cached_text) {
-                     read(fd, entry->cached_text, len);
-                     entry->cached_text[len] = '\0';
-                     entry->cached_len = len;
+                     ssize_t r = read(fd, entry->cached_text, len);
+                     if (r < 0 || (size_t)r != len) {
+                         g_free(entry->cached_text);
+                         entry->cached_text = NULL;
+                         entry->cached_len = 0;
+                     } else {
+                         entry->cached_text[len] = '\0';
+                         entry->cached_len = len;
+                     }
                  }
                  close(fd);
              }

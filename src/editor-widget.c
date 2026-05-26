@@ -376,6 +376,24 @@ editor_widget_dispose(GObject *object)
     if (self->hadjustment) { g_object_unref(self->hadjustment); self->hadjustment = NULL; }
     if (self->vadjustment) { g_object_unref(self->vadjustment); self->vadjustment = NULL; }
     
+    /* Cancel all pending timer/idle sources FIRST to prevent UAF callbacks */
+    if (self->autoscroll_timer_id) {
+        g_source_remove(self->autoscroll_timer_id);
+        self->autoscroll_timer_id = 0;
+    }
+    if (self->idle_resize_id) {
+        g_source_remove(self->idle_resize_id);
+        self->idle_resize_id = 0;
+    }
+    if (self->cursor_blink_tick_id) {
+        gtk_widget_remove_tick_callback(GTK_WIDGET(self), self->cursor_blink_tick_id);
+        self->cursor_blink_tick_id = 0;
+    }
+    if (self->syntax_scan_idle_id) {
+        g_source_remove(self->syntax_scan_idle_id);
+        self->syntax_scan_idle_id = 0;
+    }
+    
     if (self->doc) {
         document_remove_content_callback(self->doc, on_doc_content_changed, self);
         document_remove_update_callback(self->doc, on_document_update, self);
@@ -385,7 +403,7 @@ editor_widget_dispose(GObject *object)
     }
     
     if (self->syntax_ctx) {
-        syntax_context_free(self->syntax_ctx);
+        syntax_context_unref(self->syntax_ctx);
         self->syntax_ctx = NULL;
     }
 
@@ -438,19 +456,6 @@ editor_widget_dispose(GObject *object)
     }
     g_free(self->font_name);
     self->font_name = NULL;
-    
-    if (self->cursor_blink_tick_id) {
-        gtk_widget_remove_tick_callback(GTK_WIDGET(self), self->cursor_blink_tick_id);
-        self->cursor_blink_tick_id = 0;
-    }
-    if (self->syntax_scan_idle_id) {
-        g_source_remove(self->syntax_scan_idle_id);
-        self->syntax_scan_idle_id = 0;
-    }
-    if (self->syntax_ctx) {
-        syntax_context_unref(self->syntax_ctx);
-        self->syntax_ctx = NULL;
-    }
 
     G_OBJECT_CLASS(editor_widget_parent_class)->dispose(object);
 }

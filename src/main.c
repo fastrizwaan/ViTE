@@ -1966,10 +1966,14 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
              
              /* Also update File Type / Encoding / Line Endings using Document properties */
              const char *lang_name = editor_widget_get_language_name(EDITOR_WIDGET(editor));
+             const char *orig_lang = g_object_get_data(G_OBJECT(editor), "original-file-type");
+             if (!orig_lang) orig_lang = "Plain Text";
+             gboolean lang_changed = (g_strcmp0(lang_name ? lang_name : "Plain Text", orig_lang) != 0);
+
              if (g_strcmp0(lang_name, "Plain Text") == 0) {
-                 vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL);
+                 vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL, lang_changed);
              } else {
-                 vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), lang_name);
+                 vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), lang_name, lang_changed);
              }
              
              /* BIND Menu Actions to Editor Properties */
@@ -1989,14 +1993,22 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
                  /* Encoding - Keep imperative */
                  FileEncoding enc = document_get_encoding(doc);
                  const char *enc_id = file_encoding_to_id(enc);
-                 vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), enc_id);
+                 const char *orig_enc = g_object_get_data(G_OBJECT(editor), "original-encoding");
+                 if (!orig_enc) orig_enc = "utf-8";
+                 gboolean enc_changed = (g_strcmp0(enc_id, orig_enc) != 0);
+                 
+                 vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), enc_id, enc_changed);
                  
                  /* Line Ending - Keep imperative */
                  NewlineType nl = document_get_newline_type(doc);
                  const char *nl_id = "lf";
                  if (nl == NEWLINE_CRLF) nl_id = "crlf";
                  else if (nl == NEWLINE_CR) nl_id = "cr";
-                 vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), nl_id);
+                 const char *orig_nl = g_object_get_data(G_OBJECT(editor), "original-newline");
+                 if (!orig_nl) orig_nl = "lf";
+                 gboolean nl_changed = (g_strcmp0(nl_id, orig_nl) != 0);
+                 
+                 vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), nl_id, nl_changed);
                  
                  /* Encoding Action State */
                  const char *enc_key = file_encoding_to_id(enc);
@@ -2014,7 +2026,14 @@ on_tab_clicked (ViteTab *tab, gpointer user_data)
                   int tab_w = 4;
                   int indent_s = 0;
                   g_object_get(G_OBJECT(editor), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
-                  vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), tab_w, indent_s == 1);
+                  
+                  gpointer orig_w_ptr = g_object_get_data(G_OBJECT(editor), "original-indent-width");
+                  gpointer orig_style_ptr = g_object_get_data(G_OBJECT(editor), "original-indent-style");
+                  int orig_w = orig_w_ptr ? GPOINTER_TO_INT(orig_w_ptr) : 4;
+                  int orig_style = orig_style_ptr ? GPOINTER_TO_INT(orig_style_ptr) : 0;
+                  
+                  gboolean indent_changed = (tab_w != orig_w || indent_s != orig_style);
+                  vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), tab_w, indent_s == 1, indent_changed);
                   
                   /* Update Folding Action State */
                   GAction *fold_act = g_action_map_lookup_action(map, "enable-folding");
@@ -3265,6 +3284,7 @@ update_overflow_idle (gpointer data)
     if (GTK_IS_WIDGET(u->btn)) {
         gtk_widget_set_visible(u->btn, u->overflowing);
     }
+    g_object_unref(u->btn);
     g_free(u);
 }
 
@@ -3274,7 +3294,7 @@ on_overflow_changed (ViteTabBar *bar G_GNUC_UNUSED, gboolean overflowing, gpoint
     GtkWidget *btn = GTK_WIDGET(user_data);
     
     OverflowUpdate *u = g_new(OverflowUpdate, 1);
-    u->btn = btn;
+    u->btn = g_object_ref(btn);
     u->overflowing = overflowing;
     g_idle_add_once(update_overflow_idle, u);
 }
@@ -3758,6 +3778,7 @@ close_window_idle(gpointer user_data)
     if (window && GTK_IS_WINDOW(window)) {
          gtk_window_close(window);
     }
+    g_object_unref(window);
     return G_SOURCE_REMOVE;
 }
 
@@ -3811,6 +3832,7 @@ move_tab_to_window(ViteWindow *target_win, ViteTab *tab, int position)
     if (vite_tab_bar_get_n_tabs(source_win->tab_bar) == 0) {
         /* Close source window if empty - ASYNCHRONOUSLY to avoid Wayland/Popup crash */
         if (source_win->window && GTK_IS_WINDOW(source_win->window)) {
+            g_object_ref(source_win->window);
             g_idle_add(close_window_idle, source_win->window);
         }
     }
@@ -3977,11 +3999,22 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
                 break;
             }
         }
+        /* Store original values for bold/normal diff tracking */
+        g_object_set_data_full(G_OBJECT(editor), "original-file-type", g_strdup(display_name), g_free);
+        g_object_set_data_full(G_OBJECT(editor), "original-encoding", g_strdup("utf-8"), g_free);
+        g_object_set_data_full(G_OBJECT(editor), "original-newline", g_strdup("lf"), g_free);
+        
+        int tab_w = 4;
+        int indent_s = 0;
+        g_object_get(G_OBJECT(editor), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
+        g_object_set_data(G_OBJECT(editor), "original-indent-width", GINT_TO_POINTER(tab_w));
+        g_object_set_data(G_OBJECT(editor), "original-indent-style", GINT_TO_POINTER(indent_s));
+
         if (win->status_bar) {
             if (g_strcmp0(display_name, "Plain Text") == 0) {
-                vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL);
+                vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL, FALSE);
             } else {
-                vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), _(display_name));
+                vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), _(display_name), FALSE);
             }
         }
     }
@@ -4368,6 +4401,8 @@ on_status_bar_file_type_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *la
 {
     ViteWindow *win = (ViteWindow*)user_data;
     ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    GtkWidget *active_editor = get_active_editor(win);
+    
     if (tab) {
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
         if (page) {
@@ -4376,6 +4411,32 @@ on_status_bar_file_type_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *la
                 editor_widget_set_language(EDITOR_WIDGET(g_ptr_array_index(editors, i)), lang_id);
             }
             g_ptr_array_unref(editors);
+        }
+    }
+
+    /* Compute display name and evaluate whether it has changed relative to original loaded type */
+    gboolean is_changed = FALSE;
+    const char *display_name = NULL;
+    if (lang_id) {
+        for (int i = 0; file_types[i].name != NULL; i++) {
+            if (g_strcmp0(file_types[i].id, lang_id) == 0) {
+                display_name = file_types[i].name;
+                break;
+            }
+        }
+    }
+    
+    if (active_editor && EDITOR_IS_WIDGET(active_editor)) {
+        const char *orig_lang = g_object_get_data(G_OBJECT(active_editor), "original-file-type");
+        if (!orig_lang) orig_lang = "Plain Text";
+        is_changed = (g_strcmp0(display_name ? display_name : "Plain Text", orig_lang) != 0);
+    }
+    
+    if (win->status_bar) {
+        if (g_strcmp0(lang_id, "plain") == 0 || !lang_id) {
+            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL, is_changed);
+        } else if (display_name) {
+            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), _(display_name), is_changed);
         }
     }
 
@@ -4390,7 +4451,6 @@ on_status_bar_file_type_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *la
     }
     
     /* Grab focus back to editor */
-    GtkWidget *active_editor = get_active_editor(win);
     if (active_editor && GTK_IS_WIDGET(active_editor)) {
          gtk_widget_grab_focus(active_editor);
     }
@@ -4401,6 +4461,8 @@ on_status_bar_line_ending_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *
 {
     ViteWindow *win = (ViteWindow*)user_data;
     ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    GtkWidget *active_editor = get_active_editor(win);
+    
     if (tab) {
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
         if (page) {
@@ -4412,6 +4474,17 @@ on_status_bar_line_ending_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *
         }
     }
     
+    gboolean is_changed = FALSE;
+    if (active_editor && EDITOR_IS_WIDGET(active_editor)) {
+        const char *orig_newline = g_object_get_data(G_OBJECT(active_editor), "original-newline");
+        if (!orig_newline) orig_newline = "lf";
+        is_changed = (g_strcmp0(line_ending_id, orig_newline) != 0);
+    }
+    
+    if (win->status_bar) {
+        vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), line_ending_id, is_changed);
+    }
+    
     /* Always Sync Menu Action */
     GActionMap *map = G_ACTION_MAP(GTK_WINDOW(win->window));
     GAction *act = g_action_map_lookup_action(map, "set-line-ending");
@@ -4421,7 +4494,6 @@ on_status_bar_line_ending_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *
     }
     
     /* Grab focus back to editor */
-    GtkWidget *active_editor = get_active_editor(win);
     if (active_editor && GTK_IS_WIDGET(active_editor)) {
          gtk_widget_grab_focus(active_editor);
     }
@@ -4432,6 +4504,8 @@ on_status_bar_encoding_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *enc
 {
     ViteWindow *win = (ViteWindow*)user_data;
     ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    GtkWidget *active_editor = get_active_editor(win);
+    
     if (tab) {
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
         if (page) {
@@ -4443,6 +4517,17 @@ on_status_bar_encoding_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *enc
         }
     }
     
+    gboolean is_changed = FALSE;
+    if (active_editor && EDITOR_IS_WIDGET(active_editor)) {
+        const char *orig_enc = g_object_get_data(G_OBJECT(active_editor), "original-encoding");
+        if (!orig_enc) orig_enc = "utf-8";
+        is_changed = (g_strcmp0(encoding_id, orig_enc) != 0);
+    }
+    
+    if (win->status_bar) {
+        vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), encoding_id, is_changed);
+    }
+    
     /* Always Sync Menu Action to match Status Bar selection */
     GActionMap *map = G_ACTION_MAP(GTK_WINDOW(win->window));
     GAction *act = g_action_map_lookup_action(map, "set-encoding");
@@ -4451,7 +4536,6 @@ on_status_bar_encoding_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *enc
     }
     
     /* Grab focus back to editor */
-    GtkWidget *active_editor = get_active_editor(win);
     if (active_editor && GTK_IS_WIDGET(active_editor)) {
          gtk_widget_grab_focus(active_editor);
     }
@@ -4471,9 +4555,17 @@ on_status_bar_indent_width_changed(ViteStatusBar *bar, int width, gpointer user_
                 g_object_set(ed, "tab-width", width, "indent-width", width, NULL);
             }
             if (editors->len > 0) {
+                 GtkWidget *ed0 = g_ptr_array_index(editors, 0);
                  int style = 0;
-                 g_object_get(g_ptr_array_index(editors, 0), "indent-style", &style, NULL);
-                 vite_status_bar_set_indentation(bar, width, style == 1);
+                 g_object_get(ed0, "indent-style", &style, NULL);
+                 
+                 gpointer orig_w_ptr = g_object_get_data(G_OBJECT(ed0), "original-indent-width");
+                 gpointer orig_style_ptr = g_object_get_data(G_OBJECT(ed0), "original-indent-style");
+                 int orig_w = orig_w_ptr ? GPOINTER_TO_INT(orig_w_ptr) : 4;
+                 int orig_style = orig_style_ptr ? GPOINTER_TO_INT(orig_style_ptr) : 0;
+                 
+                 gboolean indent_changed = (width != orig_w || style != orig_style);
+                 vite_status_bar_set_indentation(bar, width, style == 1, indent_changed);
             }
             g_ptr_array_unref(editors);
         }
@@ -4499,9 +4591,17 @@ on_status_bar_indent_style_changed(ViteStatusBar *bar, int style, gpointer user_
                 g_object_set(g_ptr_array_index(editors, i), "indent-style", style, NULL);
             }
             if (editors->len > 0) {
+                 GtkWidget *ed0 = g_ptr_array_index(editors, 0);
                  int width = 4;
-                 g_object_get(g_ptr_array_index(editors, 0), "tab-width", &width, NULL);
-                 vite_status_bar_set_indentation(bar, width, style == 1);
+                 g_object_get(ed0, "tab-width", &width, NULL);
+                 
+                 gpointer orig_w_ptr = g_object_get_data(G_OBJECT(ed0), "original-indent-width");
+                 gpointer orig_style_ptr = g_object_get_data(G_OBJECT(ed0), "original-indent-style");
+                 int orig_w = orig_w_ptr ? GPOINTER_TO_INT(orig_w_ptr) : 4;
+                 int orig_style = orig_style_ptr ? GPOINTER_TO_INT(orig_style_ptr) : 0;
+                 
+                 gboolean indent_changed = (width != orig_w || style != orig_style);
+                 vite_status_bar_set_indentation(bar, width, style == 1, indent_changed);
             }
             g_ptr_array_unref(editors);
         }
@@ -4522,7 +4622,14 @@ update_status_bar_from_editor(ViteWindow *win, GtkWidget *editor)
     int tab_w = 4;
     int indent_s = 0;
     g_object_get(G_OBJECT(editor), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
-    vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), tab_w, indent_s == 1);
+    
+    gpointer orig_w_ptr = g_object_get_data(G_OBJECT(editor), "original-indent-width");
+    gpointer orig_style_ptr = g_object_get_data(G_OBJECT(editor), "original-indent-style");
+    int orig_w = orig_w_ptr ? GPOINTER_TO_INT(orig_w_ptr) : 4;
+    int orig_style = orig_style_ptr ? GPOINTER_TO_INT(orig_style_ptr) : 0;
+    
+    gboolean indent_changed = (tab_w != orig_w || indent_s != orig_style);
+    vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), tab_w, indent_s == 1, indent_changed);
 }
 
 static void
@@ -4583,13 +4690,17 @@ on_set_encoding(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer u
     
     const char *encoding = g_variant_get_string(value, NULL);
     GtkWidget *editor = get_active_editor(win);
+    gboolean is_changed = FALSE;
     if (editor && EDITOR_IS_WIDGET(editor)) {
         editor_widget_set_encoding(EDITOR_WIDGET(editor), encoding);
+        const char *orig_enc = g_object_get_data(G_OBJECT(editor), "original-encoding");
+        if (!orig_enc) orig_enc = "utf-8";
+        is_changed = (g_strcmp0(encoding, orig_enc) != 0);
     }
     
     /* Pass ID directly; Status Bar handles text mapping */
     /* Update Status Bar regardless of editor presence to maintain UI consistency */
-    vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), encoding);
+    vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), encoding, is_changed);
     
     if (editor && EDITOR_IS_WIDGET(editor)) {
         gtk_widget_grab_focus(editor);
@@ -4604,13 +4715,17 @@ on_set_line_ending(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointe
     
     const char *le_id = g_variant_get_string(value, NULL);
     GtkWidget *editor = get_active_editor(win);
+    gboolean is_changed = FALSE;
     if (editor && EDITOR_IS_WIDGET(editor)) {
         editor_widget_set_line_ending(EDITOR_WIDGET(editor), le_id);
+        const char *orig_nl = g_object_get_data(G_OBJECT(editor), "original-newline");
+        if (!orig_nl) orig_nl = "lf";
+        is_changed = (g_strcmp0(le_id, orig_nl) != 0);
     }
     
     /* Pass ID directly */
     /* Update Status Bar regardless of editor presence */
-    vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), le_id);
+    vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), le_id, is_changed);
 
     if (editor && EDITOR_IS_WIDGET(editor)) {
          gtk_widget_grab_focus(editor);
@@ -4625,6 +4740,7 @@ on_set_file_type(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer 
 
     const char *lang_id = g_variant_get_string(value, NULL);
     GtkWidget *editor = get_active_editor(win);
+    gboolean is_changed = FALSE;
     if (editor && EDITOR_IS_WIDGET(editor)) {
         /* Convert "plain" to NULL for editor widget (which expects NULL for plain text) */
         const char *editor_lang_id = (g_strcmp0(lang_id, "plain") == 0) ? NULL : lang_id;
@@ -4641,11 +4757,17 @@ on_set_file_type(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer 
         }
     }
     
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        const char *orig_lang = g_object_get_data(G_OBJECT(editor), "original-file-type");
+        if (!orig_lang) orig_lang = "Plain Text";
+        is_changed = (g_strcmp0(display_name ? display_name : "Plain Text", orig_lang) != 0);
+    }
+    
     if (win->status_bar) {
         if (g_strcmp0(lang_id, "plain") == 0) {
-            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL);
+            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), NULL, is_changed);
         } else if (display_name) {
-            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), _(display_name));
+            vite_status_bar_set_file_type(VITE_STATUS_BAR(win->status_bar), _(display_name), is_changed);
         }
     }
     
@@ -5583,7 +5705,7 @@ on_load_progress(double progress, FileEncoding encoding, NewlineType newline, vo
     /* Update Status Bar immediately if we have valid window context */
     if (ctx->gtkw_ref && ctx->window && ctx->window->status_bar) {
         const char *enc_id = file_encoding_to_id(encoding);
-        vite_status_bar_set_encoding(VITE_STATUS_BAR(ctx->window->status_bar), enc_id);
+        vite_status_bar_set_encoding(VITE_STATUS_BAR(ctx->window->status_bar), enc_id, FALSE);
         
         const char *nl_id = "lf";
         switch (newline) {
@@ -5591,7 +5713,7 @@ on_load_progress(double progress, FileEncoding encoding, NewlineType newline, vo
             case NEWLINE_CR: nl_id = "cr"; break;
             default: break;
         }
-        vite_status_bar_set_line_ending(VITE_STATUS_BAR(ctx->window->status_bar), nl_id);
+        vite_status_bar_set_line_ending(VITE_STATUS_BAR(ctx->window->status_bar), nl_id, FALSE);
     }
     
     /* Update Document State so that any other UI updates (e.g. on_cursor_moved) 
@@ -5673,6 +5795,28 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
                 }
                 editor_widget_clear_search(EDITOR_WIDGET(ed));
                 editor_widget_rebuild_folding(EDITOR_WIDGET(ed));
+
+                /* Record the original values of the newly loaded file */
+                FileEncoding enc = document_get_encoding(doc);
+                const char *enc_id = file_encoding_to_id(enc);
+                
+                NewlineType nl = document_get_newline_type(doc);
+                const char *nl_id = "lf";
+                if (nl == NEWLINE_CRLF) nl_id = "crlf";
+                else if (nl == NEWLINE_CR) nl_id = "cr";
+
+                const char *lang_name = editor_widget_get_language_name(EDITOR_WIDGET(ed));
+                if (!lang_name) lang_name = "Plain Text";
+
+                int tab_w = 4;
+                int indent_s = 0;
+                g_object_get(G_OBJECT(ed), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
+
+                g_object_set_data_full(G_OBJECT(ed), "original-encoding", g_strdup(enc_id), g_free);
+                g_object_set_data_full(G_OBJECT(ed), "original-newline", g_strdup(nl_id), g_free);
+                g_object_set_data_full(G_OBJECT(ed), "original-file-type", g_strdup(lang_name), g_free);
+                g_object_set_data(G_OBJECT(ed), "original-indent-width", GINT_TO_POINTER(tab_w));
+                g_object_set_data(G_OBJECT(ed), "original-indent-style", GINT_TO_POINTER(indent_s));
             }
         }
         g_ptr_array_unref(editors);
@@ -5990,9 +6134,9 @@ open_file(GtkApplication *app, ViteWindow *target_window, GFile *file, gboolean 
         }
         if (target_window->status_bar) {
             if (g_strcmp0(display_name, "Plain Text") == 0) {
-                vite_status_bar_set_file_type(VITE_STATUS_BAR(target_window->status_bar), NULL);
+                vite_status_bar_set_file_type(VITE_STATUS_BAR(target_window->status_bar), NULL, FALSE);
             } else {
-                vite_status_bar_set_file_type(VITE_STATUS_BAR(target_window->status_bar), _(display_name));
+                vite_status_bar_set_file_type(VITE_STATUS_BAR(target_window->status_bar), _(display_name), FALSE);
             }
         }
     }

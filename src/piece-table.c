@@ -3160,9 +3160,6 @@ void piece_table_insert_from_fd_range(PieceTable *pt, size_t offset, int fd, siz
     src->size = map_len;
     
     if (!pt->external_sources) {
-        pt->external_sources = g_ptr_array_new_with_free_func(g_free);
-        /* dummy check to satisfy my paranoia */
-        if (pt->external_sources) g_ptr_array_unref(pt->external_sources); 
         pt->external_sources = g_ptr_array_new();
     }
     g_ptr_array_add(pt->external_sources, src);
@@ -3222,9 +3219,6 @@ piece_table_insert_from_fd(PieceTable *pt, size_t offset, int fd, size_t len, si
     src->size = len;
     
     if (!pt->external_sources) {
-        pt->external_sources = g_ptr_array_new_with_free_func(g_free);
-        /* dummy check to satisfy my paranoia */
-        if (pt->external_sources) g_ptr_array_unref(pt->external_sources); 
         pt->external_sources = g_ptr_array_new();
     }
     g_ptr_array_add(pt->external_sources, src);

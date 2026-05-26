@@ -507,7 +507,14 @@ editor_widget_cut(EditorWidget *self)
 static void
 on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_data)
 {
-    EditorWidget *self = EDITOR_WIDGET(user_data);
+    EditorWidget **self_ptr = (EditorWidget **)user_data;
+    EditorWidget *self = *self_ptr;
+    if (self) {
+        g_object_remove_weak_pointer(G_OBJECT(self), (gpointer *)self_ptr);
+    }
+    g_free(self_ptr);
+    if (!self) return;
+
     GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
     if (!text) return;
@@ -583,14 +590,25 @@ editor_widget_paste(EditorWidget *self)
          return;
     }
 
+    EditorWidget **self_ptr = g_new(EditorWidget *, 1);
+    *self_ptr = self;
+    g_object_add_weak_pointer(G_OBJECT(self), (gpointer *)self_ptr);
+
     GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
-    gdk_clipboard_read_text_async(clipboard, NULL, on_paste_text_received, self);
+    gdk_clipboard_read_text_async(clipboard, NULL, on_paste_text_received, self_ptr);
 }
 
 static void
 on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer user_data)
 {
-    EditorWidget *self = EDITOR_WIDGET(user_data);
+    EditorWidget **self_ptr = (EditorWidget **)user_data;
+    EditorWidget *self = *self_ptr;
+    if (self) {
+        g_object_remove_weak_pointer(G_OBJECT(self), (gpointer *)self_ptr);
+    }
+    g_free(self_ptr);
+    if (!self) return;
+
     GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
     
@@ -649,6 +667,10 @@ on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer us
 void
 editor_widget_paste_primary(EditorWidget *self)
 {
+    EditorWidget **self_ptr = g_new(EditorWidget *, 1);
+    *self_ptr = self;
+    g_object_add_weak_pointer(G_OBJECT(self), (gpointer *)self_ptr);
+
     GdkClipboard *clipboard = gdk_display_get_primary_clipboard(gtk_widget_get_display(GTK_WIDGET(self)));
-    gdk_clipboard_read_text_async(clipboard, NULL, on_primary_paste_received, self);
+    gdk_clipboard_read_text_async(clipboard, NULL, on_primary_paste_received, self_ptr);
 }

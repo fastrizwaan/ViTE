@@ -229,7 +229,6 @@ static void vite_find_replace_bar_dispose(GObject *object) {
     
     if (self->current_streaming_replace) {
         document_replace_streaming_cancel(self->current_streaming_replace);
-        document_replace_streaming_cancel(self->current_streaming_replace);
         self->current_streaming_replace = NULL;
     }
     

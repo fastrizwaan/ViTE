@@ -17,6 +17,8 @@ struct _ViteTabBar {
     guint drag_autoscroll_id;
     int drag_scroll_direction;
     
+    guint update_buttons_idle_id;
+    
     ViteTab *dragging_tab;
     int drag_original_pos;
     gboolean drop_occurred;
@@ -89,6 +91,12 @@ vite_tab_bar_finalize (GObject *object)
     if (self->drag_autoscroll_id) {
         g_source_remove(self->drag_autoscroll_id);
         self->drag_autoscroll_id = 0;
+    }
+    
+    /* Cancel pending update_buttons idle */
+    if (self->update_buttons_idle_id) {
+        g_source_remove(self->update_buttons_idle_id);
+        self->update_buttons_idle_id = 0;
     }
     
     g_list_free(self->tabs);
@@ -183,6 +191,7 @@ static gboolean
 update_buttons_idle (gpointer user_data)
 {
     ViteTabBar *self = VITE_TAB_BAR(user_data);
+    self->update_buttons_idle_id = 0;
     if (!self->scroller || !self->start_button || !self->end_button) return G_SOURCE_REMOVE;
     
     GtkAdjustment *adj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(self->scroller));
@@ -206,8 +215,10 @@ update_buttons_idle (gpointer user_data)
 static void
 update_buttons (ViteTabBar *self)
 {
-    /* Defer to idle to avoid layout conflicts during resize */
-    g_idle_add(update_buttons_idle, self);
+    /* Defer to idle to avoid layout conflicts during resize, but prevent duplicates */
+    if (self->update_buttons_idle_id == 0) {
+        self->update_buttons_idle_id = g_idle_add(update_buttons_idle, self);
+    }
 }
 
 static void

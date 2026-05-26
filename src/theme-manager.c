@@ -134,6 +134,12 @@ set_default_dark_theme(ViteTheme *theme)
     theme->entry_active_bg.alpha = -1.0;
     theme->entry_active_fg.alpha = -1.0;
     theme->entry_active_border.alpha = -1.0;
+    gdk_rgba_parse(&theme->file_type_popover_bg, "#2b2b2f");
+    gdk_rgba_parse(&theme->file_type_popover_fg, "#abb2bf");
+    gdk_rgba_parse(&theme->file_type_popover_card_bg, "#1d1d20");
+    gdk_rgba_parse(&theme->file_type_popover_card_fg, "#abb2bf");
+    gdk_rgba_parse(&theme->file_type_popover_card_hover_bg, "#2a2d36");
+    gdk_rgba_parse(&theme->file_type_popover_card_hover_fg, "#abb2bf");
 
     theme->is_dark = TRUE;
 }
@@ -191,10 +197,9 @@ apply_theme_inheritance_and_fallback(ViteTheme *theme, int *slot_scores)
 static void
 set_default_light_theme(ViteTheme *theme)
 {
-    /* Atom One Light Modern colors */
-    gdk_rgba_parse(&theme->editor_bg, "#F2F2F2");
+    gdk_rgba_parse(&theme->editor_bg, "#FFFFFF");
     gdk_rgba_parse(&theme->editor_fg, "#24292e");
-    gdk_rgba_parse(&theme->gutter_bg, "#F2F2F2");
+    gdk_rgba_parse(&theme->gutter_bg, "#FFFFFF");
     gdk_rgba_parse(&theme->gutter_fg, "#1b1f234d");
     gdk_rgba_parse(&theme->gutter_active_fg, "#24292e");
     gdk_rgba_parse(&theme->line_highlight, "#E8E8E8");
@@ -214,9 +219,9 @@ set_default_light_theme(ViteTheme *theme)
     gdk_rgba_parse(&theme->statusbar_bg, "#F2F2F2");
     gdk_rgba_parse(&theme->statusbar_fg, "#586069");
 
-    gdk_rgba_parse(&theme->scrollbar_bg, "#959da533");
-    gdk_rgba_parse(&theme->scrollbar_hover, "#959da544");
-    gdk_rgba_parse(&theme->scrollbar_active, "#959da588");
+    gdk_rgba_parse(&theme->scrollbar_bg, "#d2d2d4");
+    gdk_rgba_parse(&theme->scrollbar_hover, "#b5b5b7");
+    gdk_rgba_parse(&theme->scrollbar_active, "#909090");
 
     pango_color_parse(&theme->syntax[COLOR_KEYWORD], "#A626A4");
     pango_color_parse(&theme->syntax[COLOR_BUILTIN], "#0184BC");
@@ -266,6 +271,12 @@ set_default_light_theme(ViteTheme *theme)
     theme->entry_active_bg.alpha = -1.0;
     theme->entry_active_fg.alpha = -1.0;
     theme->entry_active_border.alpha = -1.0;
+    gdk_rgba_parse(&theme->file_type_popover_bg, "#fbfbfa");
+    gdk_rgba_parse(&theme->file_type_popover_fg, "#24292e");
+    gdk_rgba_parse(&theme->file_type_popover_card_bg, "#ffffff");
+    gdk_rgba_parse(&theme->file_type_popover_card_fg, "#24292e");
+    gdk_rgba_parse(&theme->file_type_popover_card_hover_bg, "#ebebeb");
+    gdk_rgba_parse(&theme->file_type_popover_card_hover_fg, "#24292e");
 
     theme->is_dark = FALSE;
 }
@@ -954,8 +965,22 @@ load_theme_from_yaml(const char *path)
                 
                 else if (g_strcmp0(key, "window_bg") == 0 || g_strcmp0(key, "window") == 0) parse_hex_color_to_rgba(val, &theme->window_bg);
                 else if (g_strcmp0(key, "window_fg") == 0) parse_hex_color_to_rgba(val, &theme->window_fg);
+                else if (g_strcmp0(key, "surface_bg") == 0 || g_strcmp0(key, "surface") == 0) {
+                    parse_hex_color_to_rgba(val, &theme->dialog_bg);
+                    parse_hex_color_to_rgba(val, &theme->popover_bg);
+                }
+                else if (g_strcmp0(key, "surface_fg") == 0) {
+                    parse_hex_color_to_rgba(val, &theme->dialog_fg);
+                    parse_hex_color_to_rgba(val, &theme->popover_fg);
+                }
                 else if (g_strcmp0(key, "popover_bg") == 0 || g_strcmp0(key, "popover") == 0) parse_hex_color_to_rgba(val, &theme->popover_bg);
                 else if (g_strcmp0(key, "popover_fg") == 0) parse_hex_color_to_rgba(val, &theme->popover_fg);
+                else if (g_strcmp0(key, "file_type_popover_bg") == 0) parse_hex_color_to_rgba(val, &theme->file_type_popover_bg);
+                else if (g_strcmp0(key, "file_type_popover_fg") == 0) parse_hex_color_to_rgba(val, &theme->file_type_popover_fg);
+                else if (g_strcmp0(key, "file_type_popover_card_bg") == 0) parse_hex_color_to_rgba(val, &theme->file_type_popover_card_bg);
+                else if (g_strcmp0(key, "file_type_popover_card_fg") == 0) parse_hex_color_to_rgba(val, &theme->file_type_popover_card_fg);
+                else if (g_strcmp0(key, "file_type_popover_card_hover_bg") == 0 || g_strcmp0(key, "popup_card_hover_bg") == 0) parse_hex_color_to_rgba(val, &theme->file_type_popover_card_hover_bg);
+                else if (g_strcmp0(key, "file_type_popover_card_hover_fg") == 0 || g_strcmp0(key, "popup_card_hover_fg") == 0) parse_hex_color_to_rgba(val, &theme->file_type_popover_card_hover_fg);
                 else if (g_strcmp0(key, "border_color") == 0 || g_strcmp0(key, "border") == 0) parse_hex_color_to_rgba(val, &theme->border_color);
                 else if (g_strcmp0(key, "card_bg") == 0) parse_hex_color_to_rgba(val, &theme->card_bg);
                 else if (g_strcmp0(key, "card_fg") == 0) parse_hex_color_to_rgba(val, &theme->card_fg);
@@ -1259,6 +1284,144 @@ generate_css(const ViteTheme *theme)
 
     /* (Dialog colors moved earlier to resolve compilation order) */
 
+    /* --- If it's a default theme, only generate custom status-bar popover, editor text styles, and scrollbar! --- */
+    if (is_default_theme(theme->name)) {
+        char c_selection[64], c_cursor[64];
+        rgba_to_css(&theme->selection, c_selection, sizeof(c_selection));
+        rgba_to_css(&theme->cursor_color, c_cursor, sizeof(c_cursor));
+
+        /* Text view highlights */
+        g_string_append_printf(css,
+            "textview text selection {\n"
+            "  background-color: %s;\n"
+            "  color: %s;\n"
+            "}\n"
+            "textview text {\n"
+            "  caret-color: %s;\n"
+            "}\n", c_selection, c_fg, c_cursor);
+
+        /* Custom status bar language/encoding popover styling */
+        char c_ftp_bg[64], c_ftp_fg[64], c_ftp_cbg[64], c_ftp_cfg[64], c_ftp_chbg[64], c_ftp_chfg[64];
+        if (theme->file_type_popover_bg.alpha >= 0.0) {
+            rgba_to_css(&theme->file_type_popover_bg, c_ftp_bg, sizeof(c_ftp_bg));
+        } else {
+            strcpy(c_ftp_bg, theme->is_dark ? "#2b2b2f" : "#fbfbfa");
+        }
+        if (theme->file_type_popover_fg.alpha >= 0.0) {
+            rgba_to_css(&theme->file_type_popover_fg, c_ftp_fg, sizeof(c_ftp_fg));
+        } else {
+            strcpy(c_ftp_fg, theme->is_dark ? "#abb2bf" : "#24292e");
+        }
+        if (theme->file_type_popover_card_bg.alpha >= 0.0) {
+            rgba_to_css(&theme->file_type_popover_card_bg, c_ftp_cbg, sizeof(c_ftp_cbg));
+        } else {
+            strcpy(c_ftp_cbg, theme->is_dark ? "#1d1d20" : "#ffffff");
+        }
+        if (theme->file_type_popover_card_fg.alpha >= 0.0) {
+            rgba_to_css(&theme->file_type_popover_card_fg, c_ftp_cfg, sizeof(c_ftp_cfg));
+        } else {
+            strcpy(c_ftp_cfg, theme->is_dark ? "#abb2bf" : "#24292e");
+        }
+        if (theme->file_type_popover_card_hover_bg.alpha >= 0.0) {
+            rgba_to_css(&theme->file_type_popover_card_hover_bg, c_ftp_chbg, sizeof(c_ftp_chbg));
+        } else {
+            strcpy(c_ftp_chbg, theme->is_dark ? "#2a2d36" : "#ebebeb");
+        }
+        if (theme->file_type_popover_card_hover_fg.alpha >= 0.0) {
+            rgba_to_css(&theme->file_type_popover_card_hover_fg, c_ftp_chfg, sizeof(c_ftp_chfg));
+        } else {
+            strcpy(c_ftp_chfg, theme->is_dark ? "#abb2bf" : "#24292e");
+        }
+
+        g_string_append_printf(css,
+            ".vite-status-custom-popover contents {\n"
+            "  background-color: %s; color: %s;\n"
+            "}\n"
+            
+            /* Scrolled window container (for languages list) */
+            ".vite-status-custom-popover scrolledwindow {\n"
+            "  background-color: %s;\n"
+            "  border: 1px solid %s;\n"
+            "  border-radius: 12px;\n"
+            "}\n"
+            ".vite-status-custom-popover scrolledwindow viewport {\n"
+            "  background-color: transparent;\n"
+            "  border-radius: 11px;\n"
+            "}\n"
+            ".vite-status-custom-popover scrolledwindow list {\n"
+            "  background-color: transparent;\n"
+            "  border-radius: 11px;\n"
+            "}\n"
+            ".vite-status-custom-popover scrolledwindow row {\n"
+            "  background-color: transparent; color: %s;\n"
+            "  border: none;\n"
+            "}\n"
+            ".vite-status-custom-popover scrolledwindow row:hover {\n"
+            "  background-color: %s; color: %s;\n"
+            "}\n"
+            ".vite-status-custom-popover scrolledwindow row:first-child {\n"
+            "  border-top-left-radius: 11px;\n"
+            "  border-top-right-radius: 11px;\n"
+            "}\n"
+            ".vite-status-custom-popover scrolledwindow row:last-child {\n"
+            "  border-bottom-left-radius: 11px;\n"
+            "  border-bottom-right-radius: 11px;\n"
+            "}\n"
+            
+            /* Flat and boxed lists (for Plain Text at the bottom) */
+            ".vite-status-custom-popover list.vite-popover-list-boxed {\n"
+            "  background-color: %s;\n"
+            "  border: 1px solid %s;\n"
+            "  border-radius: 12px;\n"
+            "}\n"
+            ".vite-status-custom-popover list.vite-popover-list-boxed row {\n"
+            "  background-color: transparent; color: %s;\n"
+            "  border: none;\n"
+            "}\n"
+            ".vite-status-custom-popover list.vite-popover-list-boxed row:hover {\n"
+            "  background-color: %s; color: %s;\n"
+            "}\n"
+            ".vite-status-custom-popover list.vite-popover-list-boxed row:first-child {\n"
+            "  border-top-left-radius: 12px;\n"
+            "  border-top-right-radius: 12px;\n"
+            "}\n"
+            ".vite-status-custom-popover list.vite-popover-list-boxed row:last-child {\n"
+            "  border-bottom-left-radius: 12px;\n"
+            "  border-bottom-right-radius: 12px;\n"
+            "}\n"
+            
+            /* Shared horizontal separator lines between rows */
+            ".vite-status-custom-popover list > row:not(:first-child) {\n"
+            "  border-top: 1px solid %s;\n"
+            "}\n",
+            c_ftp_bg, c_ftp_fg,
+            c_ftp_cbg, theme->is_dark ? "rgba(255, 255, 255, 0.08)" : "#e8e8e8", c_ftp_cfg,
+            c_ftp_chbg, c_ftp_chfg,
+            c_ftp_cbg, theme->is_dark ? "rgba(255, 255, 255, 0.08)" : "#e8e8e8", c_ftp_cfg,
+            c_ftp_chbg, c_ftp_chfg,
+            theme->is_dark ? "rgba(255, 255, 255, 0.08)" : "#e8e8e8");
+
+        /* Scrollbar styling */
+        char c_sb_bg[64], c_sb_hover[64], c_sb_active[64];
+        rgba_to_css(&theme->scrollbar_bg, c_sb_bg, sizeof(c_sb_bg));
+        rgba_to_css(&theme->scrollbar_hover, c_sb_hover, sizeof(c_sb_hover));
+        rgba_to_css(&theme->scrollbar_active, c_sb_active, sizeof(c_sb_active));
+
+        g_string_append_printf(css,
+            "scrollbar slider {\n"
+            "  background-color: %s;\n"
+            "}\n"
+            "scrollbar slider:hover {\n"
+            "  background-color: %s;\n"
+            "}\n"
+            "scrollbar slider:active {\n"
+            "  background-color: %s;\n"
+            "}\n",
+            c_sb_bg, c_sb_hover, c_sb_active);
+
+        return g_string_free(css, FALSE);
+    }
+
     /* --- Override GTK named colors so tab/tabbar CSS picks them up --- */
     g_string_append_printf(css,
         "@define-color headerbar_bg_color %s;\n"
@@ -1345,23 +1508,23 @@ generate_css(const ViteTheme *theme)
     g_string_append_printf(css,
         ".status-bar {"
         "  background-color: %s; color: %s;"
-        "  border-top: 1px solid %s;"
+        "  border-top: none;"
         "}\n"
         ".status-bar:backdrop {"
         "  background-color: %s; color: %s;"
-        "  border-top: 1px solid %s;"
-        "}\n", c_chrome, c_fg, c_border, c_bd_chrome, c_bd_fg, c_bd_border);
+        "  border-top: none;"
+        "}\n", c_chrome, c_fg, c_bd_chrome, c_bd_fg);
 
     /* --- Find / Replace bar --- */
     g_string_append_printf(css,
         ".find-bar {"
         "  background-color: %s; color: %s;"
-        "  border-top: 1px solid %s;"
+        "  border-top: none;"
         "}\n"
         ".find-bar:backdrop {"
         "  background-color: %s; color: %s;"
-        "  border-top: 1px solid %s;"
-        "}\n", c_chrome, c_fg, c_border, c_bd_chrome, c_bd_fg, c_bd_border);
+        "  border-top: none;"
+        "}\n", c_chrome, c_fg, c_bd_chrome, c_bd_fg);
 
 
 
@@ -1390,30 +1553,142 @@ generate_css(const ViteTheme *theme)
     g_string_append_printf(css,
         "entry, searchentry, .find-bar entry {"
         "  background-color: %s; color: %s;"
-        "  border-color: %s;"
+        "  border: none;"
+        "  box-shadow: none;"
         "}\n"
         "entry:backdrop, searchentry:backdrop, .find-bar entry:backdrop {"
         "  background-color: %s; color: %s;"
-        "  border-color: %s;"
+        "  border: none;"
+        "  box-shadow: none;"
         "}\n"
         "entry:focus, searchentry:focus, .find-bar entry:focus {"
         "  background-color: %s; color: %s;"
-        "  border-color: %s;"
-        "}\n", c_ebg, c_efg, c_eb, c_bd_ebg, c_bd_fg, c_bd_border, c_eabg, c_eafg, c_eab);
+        "  border: none;"
+        "  box-shadow: 0 0 0 1px %s;"
+        "}\n", c_ebg, c_efg, c_bd_ebg, c_bd_fg, c_eabg, c_eafg, c_eab);
 
     /* --- Dim labels --- */
     g_string_append_printf(css,
         ".dim-label { color: %s; }\n", c_dim);
 
-    /* --- Scrollbar --- */
+    /* --- Custom status bar language/encoding popover styling --- */
+    char c_ftp_bg[64], c_ftp_fg[64], c_ftp_cbg[64], c_ftp_cfg[64], c_ftp_chbg[64], c_ftp_chfg[64];
+    if (theme->file_type_popover_bg.alpha >= 0.0) {
+        rgba_to_css(&theme->file_type_popover_bg, c_ftp_bg, sizeof(c_ftp_bg));
+    } else {
+        strcpy(c_ftp_bg, theme->is_dark ? c_surface : "#fbfbfa");
+    }
+    if (theme->file_type_popover_fg.alpha >= 0.0) {
+        rgba_to_css(&theme->file_type_popover_fg, c_ftp_fg, sizeof(c_ftp_fg));
+    } else {
+        strcpy(c_ftp_fg, theme->is_dark ? c_fg : "#24292e");
+    }
+    if (theme->file_type_popover_card_bg.alpha >= 0.0) {
+        rgba_to_css(&theme->file_type_popover_card_bg, c_ftp_cbg, sizeof(c_ftp_cbg));
+    } else {
+        strcpy(c_ftp_cbg, theme->is_dark ? c_bg : "#ffffff");
+    }
+    if (theme->file_type_popover_card_fg.alpha >= 0.0) {
+        rgba_to_css(&theme->file_type_popover_card_fg, c_ftp_cfg, sizeof(c_ftp_cfg));
+    } else {
+        strcpy(c_ftp_cfg, theme->is_dark ? c_fg : "#24292e");
+    }
+    if (theme->file_type_popover_card_hover_bg.alpha >= 0.0) {
+        rgba_to_css(&theme->file_type_popover_card_hover_bg, c_ftp_chbg, sizeof(c_ftp_chbg));
+    } else {
+        strcpy(c_ftp_chbg, theme->is_dark ? c_surface : "#ebebeb");
+    }
+    if (theme->file_type_popover_card_hover_fg.alpha >= 0.0) {
+        rgba_to_css(&theme->file_type_popover_card_hover_fg, c_ftp_chfg, sizeof(c_ftp_chfg));
+    } else {
+        strcpy(c_ftp_chfg, theme->is_dark ? c_fg : "#24292e");
+    }
+
     g_string_append_printf(css,
-        "scrollbar slider {"
-        "  background-color: %s;"
+        ".vite-status-custom-popover contents {\n"
+        "  background-color: %s; color: %s;\n"
         "}\n"
-        "scrollbar slider:hover {"
-        "  background-color: %s;"
+        
+        /* Scrolled window container (for languages list) */
+        ".vite-status-custom-popover scrolledwindow {\n"
+        "  background-color: %s;\n"
+        "  border: 1px solid %s;\n"
+        "  border-radius: 12px;\n"
+        "}\n"
+        ".vite-status-custom-popover scrolledwindow viewport {\n"
+        "  background-color: transparent;\n"
+        "  border-radius: 11px;\n"
+        "}\n"
+        ".vite-status-custom-popover scrolledwindow list {\n"
+        "  background-color: transparent;\n"
+        "  border-radius: 11px;\n"
+        "}\n"
+        ".vite-status-custom-popover scrolledwindow row {\n"
+        "  background-color: transparent; color: %s;\n"
+        "  border: none;\n"
+        "}\n"
+        ".vite-status-custom-popover scrolledwindow row:hover {\n"
+        "  background-color: %s; color: %s;\n"
+        "}\n"
+        ".vite-status-custom-popover scrolledwindow row:first-child {\n"
+        "  border-top-left-radius: 11px;\n"
+        "  border-top-right-radius: 11px;\n"
+        "}\n"
+        ".vite-status-custom-popover scrolledwindow row:last-child {\n"
+        "  border-bottom-left-radius: 11px;\n"
+        "  border-bottom-right-radius: 11px;\n"
+        "}\n"
+        
+        /* Flat and boxed lists (for Plain Text at the bottom) */
+        ".vite-status-custom-popover list.vite-popover-list-boxed {\n"
+        "  background-color: %s;\n"
+        "  border: 1px solid %s;\n"
+        "  border-radius: 12px;\n"
+        "}\n"
+        ".vite-status-custom-popover list.vite-popover-list-boxed row {\n"
+        "  background-color: transparent; color: %s;\n"
+        "  border: none;\n"
+        "}\n"
+        ".vite-status-custom-popover list.vite-popover-list-boxed row:hover {\n"
+        "  background-color: %s; color: %s;\n"
+        "}\n"
+        ".vite-status-custom-popover list.vite-popover-list-boxed row:first-child {\n"
+        "  border-top-left-radius: 12px;\n"
+        "  border-top-right-radius: 12px;\n"
+        "}\n"
+        ".vite-status-custom-popover list.vite-popover-list-boxed row:last-child {\n"
+        "  border-bottom-left-radius: 12px;\n"
+        "  border-bottom-right-radius: 12px;\n"
+        "}\n"
+        
+        /* Shared horizontal separator lines between rows */
+        ".vite-status-custom-popover list > row:not(:first-child) {\n"
+        "  border-top: 1px solid %s;\n"
         "}\n",
-        c_dim, c_fg);
+        c_ftp_bg, c_ftp_fg,
+        c_ftp_cbg, theme->is_dark ? "rgba(255, 255, 255, 0.08)" : "#e8e8e8", c_ftp_cfg,
+        c_ftp_chbg, c_ftp_chfg,
+        c_ftp_cbg, theme->is_dark ? "rgba(255, 255, 255, 0.08)" : "#e8e8e8", c_ftp_cfg,
+        c_ftp_chbg, c_ftp_chfg,
+        theme->is_dark ? "rgba(255, 255, 255, 0.08)" : "#e8e8e8");
+
+    /* --- Scrollbar --- */
+    char c_sb_bg[64], c_sb_hover[64], c_sb_active[64];
+    rgba_to_css(&theme->scrollbar_bg, c_sb_bg, sizeof(c_sb_bg));
+    rgba_to_css(&theme->scrollbar_hover, c_sb_hover, sizeof(c_sb_hover));
+    rgba_to_css(&theme->scrollbar_active, c_sb_active, sizeof(c_sb_active));
+
+    g_string_append_printf(css,
+        "scrollbar slider {\n"
+        "  background-color: %s;\n"
+        "}\n"
+        "scrollbar slider:hover {\n"
+        "  background-color: %s;\n"
+        "}\n"
+        "scrollbar slider:active {\n"
+        "  background-color: %s;\n"
+        "}\n",
+        c_sb_bg, c_sb_hover, c_sb_active);
 
     return g_string_free(css, FALSE);
 }
@@ -1671,38 +1946,25 @@ theme_manager_apply_theme(const char *theme_name)
         current_css_provider = NULL;
     }
 
-    if (is_default_theme(target->name)) {
-        /* Default themes: use native GTK4/Adwaita colors.
-         * Skip generate_css() so @headerbar_bg_color, @window_fg_color, etc.
-         * remain the standard Adwaita values. Only set the color scheme. */
-        if (g_strcmp0(target->name, "ViTE Built-In (Auto)") == 0) {
-            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_DEFAULT);
-        } else if (target->is_dark) {
-            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_DARK);
-        } else {
-            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_LIGHT);
-        }
-    } else {
-        /* Custom themes: generate and apply CSS for widget theming */
-        char *css = generate_css(target);
-        if (css && strlen(css) > 0) {
-            current_css_provider = gtk_css_provider_new();
-            gtk_css_provider_load_from_string(current_css_provider, css);
-            gtk_style_context_add_provider_for_display(
-                gdk_display_get_default(),
-                GTK_STYLE_PROVIDER(current_css_provider),
-                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        }
-        g_free(css);
+    /* Custom themes and default themes: generate and apply CSS for widget theming */
+    char *css = generate_css(target);
+    if (css && strlen(css) > 0) {
+        current_css_provider = gtk_css_provider_new();
+        gtk_css_provider_load_from_string(current_css_provider, css);
+        gtk_style_context_add_provider_for_display(
+            gdk_display_get_default(),
+            GTK_STYLE_PROVIDER(current_css_provider),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+    g_free(css);
 
-        /* Set Adw color scheme based on theme darkness */
-        if (g_strcmp0(target->name, "ViTE Built-In (Auto)") == 0) {
-            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_DEFAULT);
-        } else if (target->is_dark) {
-            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_DARK);
-        } else {
-            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_LIGHT);
-        }
+    /* Set Adw color scheme based on theme darkness */
+    if (g_strcmp0(target->name, "ViTE Built-In (Auto)") == 0) {
+        adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_DEFAULT);
+    } else if (target->is_dark) {
+        adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_DARK);
+    } else {
+        adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_LIGHT);
     }
 
     notify_theme_changed_listeners();
