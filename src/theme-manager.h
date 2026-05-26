@@ -79,6 +79,24 @@ typedef struct {
     GdkRGBA scrollbar_hover;
     GdkRGBA scrollbar_active;
 
+    /* Extended UI Colors (Set alpha = -1.0 to mark as unset) */
+    GdkRGBA window_bg;
+    GdkRGBA window_fg;
+    GdkRGBA popover_bg;
+    GdkRGBA popover_fg;
+    GdkRGBA border_color;
+    GdkRGBA hover_bg;
+    GdkRGBA dim_fg;
+    GdkRGBA accent_bg;
+    
+    /* Edit Entry (Search/Replace input) */
+    GdkRGBA entry_bg;
+    GdkRGBA entry_fg;
+    GdkRGBA entry_border;
+    GdkRGBA entry_active_bg;
+    GdkRGBA entry_active_fg;
+    GdkRGBA entry_active_border;
+
     /* Syntax colors (PangoColor — used directly by add_color_attr) */
     PangoColor syntax[COLOR_SLOT_COUNT];
     guint8 syntax_style[COLOR_SLOT_COUNT];

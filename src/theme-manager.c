@@ -113,6 +113,21 @@ set_default_dark_theme(ViteTheme *theme)
     pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#87cefa");
     pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], "#ff1111");
 
+    theme->window_bg.alpha = -1.0;
+    theme->window_fg.alpha = -1.0;
+    theme->popover_bg.alpha = -1.0;
+    theme->popover_fg.alpha = -1.0;
+    theme->border_color.alpha = -1.0;
+    theme->hover_bg.alpha = -1.0;
+    theme->dim_fg.alpha = -1.0;
+    theme->accent_bg.alpha = -1.0;
+    theme->entry_bg.alpha = -1.0;
+    theme->entry_fg.alpha = -1.0;
+    theme->entry_border.alpha = -1.0;
+    theme->entry_active_bg.alpha = -1.0;
+    theme->entry_active_fg.alpha = -1.0;
+    theme->entry_active_border.alpha = -1.0;
+
     theme->is_dark = TRUE;
 }
 
@@ -223,6 +238,21 @@ set_default_light_theme(ViteTheme *theme)
     pango_color_parse(&theme->syntax[COLOR_BRACKET_5], "#e36209");
     pango_color_parse(&theme->syntax[COLOR_BRACKET_6], "#5a32a3");
     pango_color_parse(&theme->syntax[COLOR_BRACKET_UNMATCHED], "#FF1111");
+
+    theme->window_bg.alpha = -1.0;
+    theme->window_fg.alpha = -1.0;
+    theme->popover_bg.alpha = -1.0;
+    theme->popover_fg.alpha = -1.0;
+    theme->border_color.alpha = -1.0;
+    theme->hover_bg.alpha = -1.0;
+    theme->dim_fg.alpha = -1.0;
+    theme->accent_bg.alpha = -1.0;
+    theme->entry_bg.alpha = -1.0;
+    theme->entry_fg.alpha = -1.0;
+    theme->entry_border.alpha = -1.0;
+    theme->entry_active_bg.alpha = -1.0;
+    theme->entry_active_fg.alpha = -1.0;
+    theme->entry_active_border.alpha = -1.0;
 
     theme->is_dark = FALSE;
 }
@@ -890,7 +920,7 @@ load_theme_from_yaml(const char *path)
                 else if (g_strcmp0(key, "gutter_fg") == 0) parse_hex_color_to_rgba(val, &theme->gutter_fg);
                 else if (g_strcmp0(key, "gutter_active_fg") == 0) parse_hex_color_to_rgba(val, &theme->gutter_active_fg);
                 else if (g_strcmp0(key, "line_highlight") == 0) parse_hex_color_to_rgba(val, &theme->line_highlight);
-                else if (g_strcmp0(key, "selection") == 0 || g_strcmp0(key, "accent") == 0) parse_hex_color_to_rgba(val, &theme->selection);
+                else if (g_strcmp0(key, "selection") == 0) parse_hex_color_to_rgba(val, &theme->selection);
                 else if (g_strcmp0(key, "cursor_color") == 0) parse_hex_color_to_rgba(val, &theme->cursor_color);
                 else if (g_strcmp0(key, "find_match") == 0) parse_hex_color_to_rgba(val, &theme->find_match);
                 else if (g_strcmp0(key, "find_match_highlight") == 0) parse_hex_color_to_rgba(val, &theme->find_match_highlight);
@@ -901,13 +931,29 @@ load_theme_from_yaml(const char *path)
                 else if (g_strcmp0(key, "tab_inactive_fg") == 0) parse_hex_color_to_rgba(val, &theme->tab_inactive_fg);
                 else if (g_strcmp0(key, "tab_border") == 0 || g_strcmp0(key, "tab close button") == 0) parse_hex_color_to_rgba(val, &theme->tab_border);
                 
-                else if (g_strcmp0(key, "window") == 0 || g_strcmp0(key, "titlebar_bg") == 0) parse_hex_color_to_rgba(val, &theme->titlebar_bg);
+                else if (g_strcmp0(key, "titlebar_bg") == 0) parse_hex_color_to_rgba(val, &theme->titlebar_bg);
                 else if (g_strcmp0(key, "titlebar_fg") == 0) parse_hex_color_to_rgba(val, &theme->titlebar_fg);
                 else if (g_strcmp0(key, "statusbar_bg") == 0) parse_hex_color_to_rgba(val, &theme->statusbar_bg);
                 else if (g_strcmp0(key, "statusbar_fg") == 0) parse_hex_color_to_rgba(val, &theme->statusbar_fg);
                 else if (g_strcmp0(key, "scrollbar_bg") == 0) parse_hex_color_to_rgba(val, &theme->scrollbar_bg);
                 else if (g_strcmp0(key, "scrollbar_hover") == 0 || g_strcmp0(key, "hover tab") == 0) parse_hex_color_to_rgba(val, &theme->scrollbar_hover);
                 else if (g_strcmp0(key, "scrollbar_active") == 0) parse_hex_color_to_rgba(val, &theme->scrollbar_active);
+                
+                else if (g_strcmp0(key, "window_bg") == 0 || g_strcmp0(key, "window") == 0) parse_hex_color_to_rgba(val, &theme->window_bg);
+                else if (g_strcmp0(key, "window_fg") == 0) parse_hex_color_to_rgba(val, &theme->window_fg);
+                else if (g_strcmp0(key, "popover_bg") == 0 || g_strcmp0(key, "popover") == 0) parse_hex_color_to_rgba(val, &theme->popover_bg);
+                else if (g_strcmp0(key, "popover_fg") == 0) parse_hex_color_to_rgba(val, &theme->popover_fg);
+                else if (g_strcmp0(key, "border_color") == 0 || g_strcmp0(key, "border") == 0) parse_hex_color_to_rgba(val, &theme->border_color);
+                else if (g_strcmp0(key, "hover_bg") == 0 || g_strcmp0(key, "hover") == 0) parse_hex_color_to_rgba(val, &theme->hover_bg);
+                else if (g_strcmp0(key, "dim_fg") == 0 || g_strcmp0(key, "dim") == 0) parse_hex_color_to_rgba(val, &theme->dim_fg);
+                else if (g_strcmp0(key, "accent_bg") == 0 || g_strcmp0(key, "accent") == 0) parse_hex_color_to_rgba(val, &theme->accent_bg);
+                
+                else if (g_strcmp0(key, "entry_bg") == 0 || g_strcmp0(key, "entry") == 0) parse_hex_color_to_rgba(val, &theme->entry_bg);
+                else if (g_strcmp0(key, "entry_fg") == 0) parse_hex_color_to_rgba(val, &theme->entry_fg);
+                else if (g_strcmp0(key, "entry_border") == 0) parse_hex_color_to_rgba(val, &theme->entry_border);
+                else if (g_strcmp0(key, "entry_active_bg") == 0 || g_strcmp0(key, "entry_active") == 0) parse_hex_color_to_rgba(val, &theme->entry_active_bg);
+                else if (g_strcmp0(key, "entry_active_fg") == 0) parse_hex_color_to_rgba(val, &theme->entry_active_fg);
+                else if (g_strcmp0(key, "entry_active_border") == 0) parse_hex_color_to_rgba(val, &theme->entry_active_border);
             } else if (state >= 2) { /* syntax */
                 PangoColor color;
                 PangoColor *color_ptr = NULL;
@@ -1029,7 +1075,7 @@ generate_css(const ViteTheme *theme)
 
     /* Chrome bg: slightly darker for dark themes, slightly lighter for light */
     double shift = 0.02;
-    GdkRGBA chrome_bg = {
+    GdkRGBA chrome_bg = theme->window_bg.alpha >= 0.0 ? theme->window_bg : (GdkRGBA){
         shift_color(bg.red,   shift, !theme->is_dark),
         shift_color(bg.green, shift, !theme->is_dark),
         shift_color(bg.blue,  shift, !theme->is_dark),
@@ -1038,7 +1084,7 @@ generate_css(const ViteTheme *theme)
 
     /* Surface bg: between chrome and editor (for popovers, dialogs) */
     double shift2 = 0.04;
-    GdkRGBA surface_bg = {
+    GdkRGBA surface_bg = theme->popover_bg.alpha >= 0.0 ? theme->popover_bg : (GdkRGBA){
         shift_color(bg.red,   shift2, !theme->is_dark),
         shift_color(bg.green, shift2, !theme->is_dark),
         shift_color(bg.blue,  shift2, !theme->is_dark),
@@ -1046,7 +1092,7 @@ generate_css(const ViteTheme *theme)
     };
 
     /* Border: subtle separator */
-    GdkRGBA border = {
+    GdkRGBA border = theme->border_color.alpha >= 0.0 ? theme->border_color : (GdkRGBA){
         shift_color(bg.red,   0.10, !theme->is_dark),
         shift_color(bg.green, 0.10, !theme->is_dark),
         shift_color(bg.blue,  0.10, !theme->is_dark),
@@ -1054,7 +1100,7 @@ generate_css(const ViteTheme *theme)
     };
 
     /* Hover: slight brightness change */
-    GdkRGBA hover_bg = {
+    GdkRGBA hover_bg = theme->hover_bg.alpha >= 0.0 ? theme->hover_bg : (GdkRGBA){
         shift_color(bg.red,   0.10, !theme->is_dark),
         shift_color(bg.green, 0.10, !theme->is_dark),
         shift_color(bg.blue,  0.10, !theme->is_dark),
@@ -1062,8 +1108,8 @@ generate_css(const ViteTheme *theme)
     };
 
     /* Dim foreground for secondary text */
-    GdkRGBA dim_fg = fg;
-    dim_fg.alpha = 0.9;
+    GdkRGBA dim_fg = theme->dim_fg.alpha >= 0.0 ? theme->dim_fg : fg;
+    if (theme->dim_fg.alpha < 0.0) dim_fg.alpha = 0.9;
 
     char c_chrome[64], c_surface[64], c_bg[64], c_fg[64], c_border[64], c_hover[64], c_dim[64];
     rgba_to_css(&chrome_bg, c_chrome, sizeof(c_chrome));
@@ -1074,11 +1120,59 @@ generate_css(const ViteTheme *theme)
     rgba_to_css(&hover_bg, c_hover, sizeof(c_hover));
     rgba_to_css(&dim_fg, c_dim, sizeof(c_dim));
 
-    /* Accent Color: Use theme's selection color but fully opaque */
-    GdkRGBA accent_bg = theme->selection;
+    /* Accent Color: Use theme's selection color or explicit accent if provided */
+    GdkRGBA accent_bg = theme->accent_bg.alpha >= 0.0 ? theme->accent_bg : theme->selection;
     accent_bg.alpha = 1.0;
     char c_accent[64];
     rgba_to_css(&accent_bg, c_accent, sizeof(c_accent));
+
+    /* Entry colors */
+    GdkRGBA e_bg = theme->entry_bg.alpha >= 0.0 ? theme->entry_bg : bg;
+    GdkRGBA e_fg = theme->entry_fg.alpha >= 0.0 ? theme->entry_fg : fg;
+    GdkRGBA e_border = theme->entry_border.alpha >= 0.0 ? theme->entry_border : border;
+    GdkRGBA e_a_bg = theme->entry_active_bg.alpha >= 0.0 ? theme->entry_active_bg : e_bg;
+    GdkRGBA e_a_fg = theme->entry_active_fg.alpha >= 0.0 ? theme->entry_active_fg : e_fg;
+    GdkRGBA e_a_border = theme->entry_active_border.alpha >= 0.0 ? theme->entry_active_border : accent_bg;
+
+    char c_ebg[64], c_efg[64], c_eb[64], c_eabg[64], c_eafg[64], c_eab[64];
+    rgba_to_css(&e_bg, c_ebg, sizeof(c_ebg));
+    rgba_to_css(&e_fg, c_efg, sizeof(c_efg));
+    rgba_to_css(&e_border, c_eb, sizeof(c_eb));
+    rgba_to_css(&e_a_bg, c_eabg, sizeof(c_eabg));
+    rgba_to_css(&e_a_fg, c_eafg, sizeof(c_eafg));
+    rgba_to_css(&e_a_border, c_eab, sizeof(c_eab));
+
+    /* Window / Popover explicit overrides if needed, else we rely on GTK defines */
+    char c_wfg[64], c_pfg[64];
+    rgba_to_css(theme->window_fg.alpha >= 0.0 ? &theme->window_fg : &fg, c_wfg, sizeof(c_wfg));
+    rgba_to_css(theme->popover_fg.alpha >= 0.0 ? &theme->popover_fg : &fg, c_pfg, sizeof(c_pfg));
+
+    /* Backdrop colors for unfocused windows */
+    GdkRGBA bd_chrome = chrome_bg;
+    bd_chrome.red = shift_color(bd_chrome.red, 0.03, theme->is_dark);
+    bd_chrome.green = shift_color(bd_chrome.green, 0.03, theme->is_dark);
+    bd_chrome.blue = shift_color(bd_chrome.blue, 0.03, theme->is_dark);
+
+    GdkRGBA bd_ebg = e_bg;
+    bd_ebg.red = shift_color(bd_ebg.red, 0.03, theme->is_dark);
+    bd_ebg.green = shift_color(bd_ebg.green, 0.03, theme->is_dark);
+    bd_ebg.blue = shift_color(bd_ebg.blue, 0.03, theme->is_dark);
+
+    GdkRGBA bd_wfg = theme->window_fg.alpha >= 0.0 ? theme->window_fg : fg;
+    bd_wfg.alpha = 0.45; /* Dim text for backdrop */
+
+    GdkRGBA bd_fg = fg;
+    bd_fg.alpha = 0.45;
+
+    GdkRGBA bd_border = border;
+    bd_border.alpha = 0.25;
+
+    char c_bd_chrome[64], c_bd_ebg[64], c_bd_wfg[64], c_bd_fg[64], c_bd_border[64];
+    rgba_to_css(&bd_chrome, c_bd_chrome, sizeof(c_bd_chrome));
+    rgba_to_css(&bd_ebg, c_bd_ebg, sizeof(c_bd_ebg));
+    rgba_to_css(&bd_wfg, c_bd_wfg, sizeof(c_bd_wfg));
+    rgba_to_css(&bd_fg, c_bd_fg, sizeof(c_bd_fg));
+    rgba_to_css(&bd_border, c_bd_border, sizeof(c_bd_border));
 
     /* --- Override GTK named colors so tab/tabbar CSS picks them up --- */
     g_string_append_printf(css,
@@ -1093,20 +1187,20 @@ generate_css(const ViteTheme *theme)
         "@define-color popover_fg_color %s;\n"
         "@define-color accent_color %s;\n"
         "@define-color accent_bg_color %s;\n",
-        c_chrome, c_fg, c_bg, c_fg, c_bg,
-        c_surface, c_fg, c_surface, c_fg,
+        c_chrome, c_wfg, c_chrome, c_wfg, c_bg,
+        c_surface, c_wfg, c_surface, c_pfg,
         c_accent, c_accent);
 
     /* --- Window / Root --- */
     g_string_append_printf(css,
-        "window, window.background { background-color: %s; color: %s; }\n",
-        c_bg, c_fg);
-
-
+        "window, window.background { background-color: %s; color: %s; }\n"
+        "window:backdrop, window.background:backdrop { background-color: %s; color: %s; }\n",
+        c_chrome, c_wfg, c_bd_chrome, c_bd_wfg);
     /* --- Tab bar container: use chrome bg for consistency --- */
     g_string_append_printf(css,
-        ".vite-tab-bar-container { background-color: %s; }\n",
-        c_chrome);
+        ".vite-tab-bar-container { background-color: %s; }\n"
+        ".vite-tab-bar-container:backdrop { background-color: %s; }\n",
+        c_chrome, c_bd_chrome);
 
     /* --- Headerbar --- */
     g_string_append_printf(css,
@@ -1114,7 +1208,10 @@ generate_css(const ViteTheme *theme)
         "  background-color: %s; color: %s;"
         "  border-bottom: none;"
         "  box-shadow: none;"
-        "}\n", c_chrome, c_fg);
+        "}\n"
+        "headerbar:backdrop, headerbar.titlebar:backdrop {"
+        "  background-color: %s; color: %s;"
+        "}\n", c_chrome, c_fg, c_bd_chrome, c_bd_fg);
 
     /* --- AdwToolbarView top/bottom bars --- */
     g_string_append_printf(css,
@@ -1122,27 +1219,38 @@ generate_css(const ViteTheme *theme)
         "  background-color: %s; color: %s;"
         "  border: none;"
         "  box-shadow: none;"
-        "}\n", c_chrome, c_fg);
+        "}\n"
+        ".toolbar-view .top-bar:backdrop, .toolbar-view .bottom-bar:backdrop {"
+        "  background-color: %s; color: %s;"
+        "}\n", c_chrome, c_fg, c_bd_chrome, c_bd_fg);
 
     /* --- Status bar --- */
     g_string_append_printf(css,
         ".status-bar {"
         "  background-color: %s; color: %s;"
         "  border-top: 1px solid %s;"
-        "}\n", c_chrome, c_fg, c_border);
+        "}\n"
+        ".status-bar:backdrop {"
+        "  background-color: %s; color: %s;"
+        "  border-top: 1px solid %s;"
+        "}\n", c_chrome, c_fg, c_border, c_bd_chrome, c_bd_fg, c_bd_border);
 
     /* --- Find / Replace bar --- */
     g_string_append_printf(css,
         ".find-bar {"
         "  background-color: %s; color: %s;"
         "  border-top: 1px solid %s;"
-        "}\n", c_chrome, c_fg, c_border);
+        "}\n"
+        ".find-bar:backdrop {"
+        "  background-color: %s; color: %s;"
+        "  border-top: 1px solid %s;"
+        "}\n", c_chrome, c_fg, c_border, c_bd_chrome, c_bd_fg, c_bd_border);
 
     /* --- Popovers & Menus --- */
     g_string_append_printf(css,
         "popover > contents, popover.menu > contents {"
         "  background-color: %s; color: %s;"
-        "}\n", c_surface, c_fg);
+        "}\n", c_surface, c_pfg);
 
     g_string_append_printf(css,
         "popover > contents > modelbutton:hover, "
@@ -1162,8 +1270,9 @@ generate_css(const ViteTheme *theme)
 
     /* --- Tab bar area --- */
     g_string_append_printf(css,
-        ".tab-bar { background-color: %s; color: %s; }\n",
-        c_chrome, c_fg);
+        ".tab-bar { background-color: %s; color: %s; }\n"
+        ".tab-bar:backdrop { background-color: %s; color: %s; }\n",
+        c_chrome, c_fg, c_bd_chrome, c_bd_fg);
 
     /* --- Buttons: flat buttons in header, etc. --- */
     g_string_append_printf(css,
@@ -1177,7 +1286,15 @@ generate_css(const ViteTheme *theme)
         "entry, searchentry, .find-bar entry {"
         "  background-color: %s; color: %s;"
         "  border-color: %s;"
-        "}\n", c_bg, c_fg, c_border);
+        "}\n"
+        "entry:backdrop, searchentry:backdrop, .find-bar entry:backdrop {"
+        "  background-color: %s; color: %s;"
+        "  border-color: %s;"
+        "}\n"
+        "entry:focus, searchentry:focus, .find-bar entry:focus {"
+        "  background-color: %s; color: %s;"
+        "  border-color: %s;"
+        "}\n", c_ebg, c_efg, c_eb, c_bd_ebg, c_bd_fg, c_bd_border, c_eabg, c_eafg, c_eab);
 
     /* --- Dim labels --- */
     g_string_append_printf(css,
@@ -1268,12 +1385,7 @@ theme_compare(const void *a, const void *b)
     int score_b = 999;
 
     if (g_strcmp0(theme_a->name, "ViTE Built-In (Auto)") == 0) score_a = 1;
-    else if (g_strcmp0(theme_a->name, "One Dark (Built-in)") == 0) score_a = 2;
-    else if (g_strcmp0(theme_a->name, "One Light (Built-in)") == 0) score_a = 3;
-
     if (g_strcmp0(theme_b->name, "ViTE Built-In (Auto)") == 0) score_b = 1;
-    else if (g_strcmp0(theme_b->name, "One Dark (Built-in)") == 0) score_b = 2;
-    else if (g_strcmp0(theme_b->name, "One Light (Built-in)") == 0) score_b = 3;
 
     if (score_a != score_b) {
         return score_a - score_b;
