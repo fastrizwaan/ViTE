@@ -2974,6 +2974,11 @@ load_css(void)
     ".navigation-sidebar row:hover {"
     "    background-color: alpha(@window_fg_color, 0.08);"
     "}"
+    "/* Custom dropdown popover stable sizing */"
+    ".vite-theme-combo popover contents {"
+    "    min-width: 240px;"
+    "    min-height: 200px;"
+    "}"
     );
 
     GtkCssProvider *provider = gtk_css_provider_new();

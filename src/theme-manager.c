@@ -49,7 +49,10 @@ static gboolean
 is_default_theme(const char *name)
 {
     return (g_strcmp0(name, "Default Dark") == 0 ||
-            g_strcmp0(name, "Default Light") == 0);
+            g_strcmp0(name, "Default Light") == 0 ||
+            g_strcmp0(name, "ViTE Built-In (Auto)") == 0 ||
+            g_strcmp0(name, "One Dark (Built-in)") == 0 ||
+            g_strcmp0(name, "One Light (Built-in)") == 0);
 }
 
 /* --- Built-in Default Palettes --- */
@@ -1049,12 +1052,36 @@ scan_theme_directory(const char *dir_path)
         } else if (g_str_has_suffix(filename, ".json")) {
             ViteTheme *theme = load_theme_from_json(full_path);
             if (theme) {
-                g_ptr_array_add(all_themes, theme);
+                gboolean duplicate = FALSE;
+                for (guint i = 0; i < all_themes->len; i++) {
+                    ViteTheme *existing = g_ptr_array_index(all_themes, i);
+                    if (g_strcmp0(existing->name, theme->name) == 0) {
+                        duplicate = TRUE;
+                        break;
+                    }
+                }
+                if (duplicate) {
+                    theme_free(theme);
+                } else {
+                    g_ptr_array_add(all_themes, theme);
+                }
             }
         } else if (g_str_has_suffix(filename, ".yaml") || g_str_has_suffix(filename, ".yml")) {
             ViteTheme *theme = load_theme_from_yaml(full_path);
             if (theme) {
-                g_ptr_array_add(all_themes, theme);
+                gboolean duplicate = FALSE;
+                for (guint i = 0; i < all_themes->len; i++) {
+                    ViteTheme *existing = g_ptr_array_index(all_themes, i);
+                    if (g_strcmp0(existing->name, theme->name) == 0) {
+                        duplicate = TRUE;
+                        break;
+                    }
+                }
+                if (duplicate) {
+                    theme_free(theme);
+                } else {
+                    g_ptr_array_add(all_themes, theme);
+                }
             }
         }
         g_free(full_path);
@@ -1648,7 +1675,9 @@ theme_manager_apply_theme(const char *theme_name)
         /* Default themes: use native GTK4/Adwaita colors.
          * Skip generate_css() so @headerbar_bg_color, @window_fg_color, etc.
          * remain the standard Adwaita values. Only set the color scheme. */
-        if (target->is_dark) {
+        if (g_strcmp0(target->name, "ViTE Built-In (Auto)") == 0) {
+            adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_DEFAULT);
+        } else if (target->is_dark) {
             adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_DARK);
         } else {
             adw_style_manager_set_color_scheme(style_mgr, ADW_COLOR_SCHEME_FORCE_LIGHT);

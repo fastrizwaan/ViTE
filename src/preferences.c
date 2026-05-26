@@ -138,8 +138,10 @@ static void
 on_theme_changed(GObject *combo, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
 {
     EditorWidget *editor = EDITOR_WIDGET(user_data);
-    guint idx = adw_combo_row_get_selected(ADW_COMBO_ROW(combo));
-    const char *name = theme_manager_get_name((int)idx);
+    gpointer item = adw_combo_row_get_selected_item(ADW_COMBO_ROW(combo));
+    if (!item) return;
+    
+    const char *name = gtk_string_object_get_string(GTK_STRING_OBJECT(item));
     if (!name) return;
     
     theme_manager_apply_theme(name);
@@ -172,6 +174,7 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(group_theme));
     
     GtkWidget *theme_row = adw_combo_row_new();
+    gtk_widget_add_css_class(theme_row, "vite-theme-combo");
     adw_preferences_row_set_title(ADW_PREFERENCES_ROW(theme_row), _("Color Theme"));
     
     int count = theme_manager_get_count();
@@ -190,6 +193,7 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     GtkExpression *expr = gtk_property_expression_new(GTK_TYPE_STRING_OBJECT, NULL, "string");
     adw_combo_row_set_expression(ADW_COMBO_ROW(theme_row), expr);
     adw_combo_row_set_enable_search(ADW_COMBO_ROW(theme_row), TRUE);
+    adw_combo_row_set_search_match_mode(ADW_COMBO_ROW(theme_row), GTK_STRING_FILTER_MATCH_MODE_SUBSTRING);
     g_signal_connect(theme_row, "notify::selected", G_CALLBACK(on_theme_changed), editor);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_theme), theme_row);
     
