@@ -88,6 +88,12 @@ typedef struct {
     GdkRGBA hover_bg;
     GdkRGBA dim_fg;
     GdkRGBA accent_bg;
+    GdkRGBA card_bg;
+    GdkRGBA card_fg;
+    GdkRGBA dialog_bg;
+    GdkRGBA dialog_fg;
+    GdkRGBA dialog_titlebar_bg;
+    GdkRGBA dialog_titlebar_fg;
     
     /* Edit Entry (Search/Replace input) */
     GdkRGBA entry_bg;

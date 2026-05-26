@@ -5048,6 +5048,7 @@ setup_window(AdwApplicationWindow *window)
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), win);
     g_signal_connect(window, "notify::fullscreened", G_CALLBACK(on_window_fullscreen_state_changed), win);
     g_object_set_data(G_OBJECT(window), "vite-window", win);
+    gtk_widget_add_css_class(GTK_WIDGET(window), "vite-main-window");
 
     load_css();
 

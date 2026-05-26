@@ -186,6 +186,10 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     }
     adw_combo_row_set_model(ADW_COMBO_ROW(theme_row), G_LIST_MODEL(theme_list));
     adw_combo_row_set_selected(ADW_COMBO_ROW(theme_row), active_idx);
+    
+    GtkExpression *expr = gtk_property_expression_new(GTK_TYPE_STRING_OBJECT, NULL, "string");
+    adw_combo_row_set_expression(ADW_COMBO_ROW(theme_row), expr);
+    adw_combo_row_set_enable_search(ADW_COMBO_ROW(theme_row), TRUE);
     g_signal_connect(theme_row, "notify::selected", G_CALLBACK(on_theme_changed), editor);
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_theme), theme_row);
     

@@ -121,6 +121,10 @@ set_default_dark_theme(ViteTheme *theme)
     theme->hover_bg.alpha = -1.0;
     theme->dim_fg.alpha = -1.0;
     theme->accent_bg.alpha = -1.0;
+    theme->card_bg.alpha = -1.0;
+    theme->card_fg.alpha = -1.0;
+    theme->dialog_bg.alpha = -1.0;
+    theme->dialog_fg.alpha = -1.0;
     theme->entry_bg.alpha = -1.0;
     theme->entry_fg.alpha = -1.0;
     theme->entry_border.alpha = -1.0;
@@ -247,6 +251,12 @@ set_default_light_theme(ViteTheme *theme)
     theme->hover_bg.alpha = -1.0;
     theme->dim_fg.alpha = -1.0;
     theme->accent_bg.alpha = -1.0;
+    theme->card_bg.alpha = -1.0;
+    theme->card_fg.alpha = -1.0;
+    theme->dialog_bg.alpha = -1.0;
+    theme->dialog_fg.alpha = -1.0;
+    theme->dialog_titlebar_bg.alpha = -1.0;
+    theme->dialog_titlebar_fg.alpha = -1.0;
     theme->entry_bg.alpha = -1.0;
     theme->entry_fg.alpha = -1.0;
     theme->entry_border.alpha = -1.0;
@@ -944,6 +954,12 @@ load_theme_from_yaml(const char *path)
                 else if (g_strcmp0(key, "popover_bg") == 0 || g_strcmp0(key, "popover") == 0) parse_hex_color_to_rgba(val, &theme->popover_bg);
                 else if (g_strcmp0(key, "popover_fg") == 0) parse_hex_color_to_rgba(val, &theme->popover_fg);
                 else if (g_strcmp0(key, "border_color") == 0 || g_strcmp0(key, "border") == 0) parse_hex_color_to_rgba(val, &theme->border_color);
+                else if (g_strcmp0(key, "card_bg") == 0) parse_hex_color_to_rgba(val, &theme->card_bg);
+                else if (g_strcmp0(key, "card_fg") == 0) parse_hex_color_to_rgba(val, &theme->card_fg);
+                else if (g_strcmp0(key, "dialog_bg") == 0 || g_strcmp0(key, "dialog") == 0) parse_hex_color_to_rgba(val, &theme->dialog_bg);
+                else if (g_strcmp0(key, "dialog_fg") == 0) parse_hex_color_to_rgba(val, &theme->dialog_fg);
+                else if (g_strcmp0(key, "dialog_titlebar_bg") == 0 || g_strcmp0(key, "dialog_header_bg") == 0) parse_hex_color_to_rgba(val, &theme->dialog_titlebar_bg);
+                else if (g_strcmp0(key, "dialog_titlebar_fg") == 0 || g_strcmp0(key, "dialog_header_fg") == 0) parse_hex_color_to_rgba(val, &theme->dialog_titlebar_fg);
                 else if (g_strcmp0(key, "hover_bg") == 0 || g_strcmp0(key, "hover") == 0) parse_hex_color_to_rgba(val, &theme->hover_bg);
                 else if (g_strcmp0(key, "dim_fg") == 0 || g_strcmp0(key, "dim") == 0) parse_hex_color_to_rgba(val, &theme->dim_fg);
                 else if (g_strcmp0(key, "accent_bg") == 0 || g_strcmp0(key, "accent") == 0) parse_hex_color_to_rgba(val, &theme->accent_bg);
@@ -1126,6 +1142,19 @@ generate_css(const ViteTheme *theme)
     char c_accent[64];
     rgba_to_css(&accent_bg, c_accent, sizeof(c_accent));
 
+    /* Dialog colors */
+    char c_dialog_bg[64], c_dialog_fg[64];
+    GdkRGBA dialog_bg_rgba = theme->dialog_bg.alpha >= 0.0 ? theme->dialog_bg : surface_bg;
+    GdkRGBA dialog_fg_rgba = theme->dialog_fg.alpha >= 0.0 ? theme->dialog_fg : (theme->popover_fg.alpha >= 0.0 ? theme->popover_fg : fg);
+    rgba_to_css(&dialog_bg_rgba, c_dialog_bg, sizeof(c_dialog_bg));
+    rgba_to_css(&dialog_fg_rgba, c_dialog_fg, sizeof(c_dialog_fg));
+
+    char c_dialog_tbg[64], c_dialog_tfg[64];
+    GdkRGBA dialog_tbg_rgba = theme->dialog_titlebar_bg.alpha >= 0.0 ? theme->dialog_titlebar_bg : chrome_bg;
+    GdkRGBA dialog_tfg_rgba = theme->dialog_titlebar_fg.alpha >= 0.0 ? theme->dialog_titlebar_fg : (theme->titlebar_fg.alpha >= 0.0 ? theme->titlebar_fg : fg);
+    rgba_to_css(&dialog_tbg_rgba, c_dialog_tbg, sizeof(c_dialog_tbg));
+    rgba_to_css(&dialog_tfg_rgba, c_dialog_tfg, sizeof(c_dialog_tfg));
+
     /* Entry colors */
     GdkRGBA e_bg = theme->entry_bg.alpha >= 0.0 ? theme->entry_bg : bg;
     GdkRGBA e_fg = theme->entry_fg.alpha >= 0.0 ? theme->entry_fg : fg;
@@ -1166,13 +1195,42 @@ generate_css(const ViteTheme *theme)
 
     GdkRGBA bd_border = border;
     bd_border.alpha = 0.25;
+    
+    GdkRGBA bd_dialog_bg = dialog_bg_rgba;
+    bd_dialog_bg.red = shift_color(bd_dialog_bg.red, 0.03, theme->is_dark);
+    bd_dialog_bg.green = shift_color(bd_dialog_bg.green, 0.03, theme->is_dark);
+    bd_dialog_bg.blue = shift_color(bd_dialog_bg.blue, 0.03, theme->is_dark);
 
-    char c_bd_chrome[64], c_bd_ebg[64], c_bd_wfg[64], c_bd_fg[64], c_bd_border[64];
+    GdkRGBA bd_dialog_fg = dialog_fg_rgba;
+    bd_dialog_fg.alpha = 0.45;
+
+    GdkRGBA bd_dialog_tbg = dialog_tbg_rgba;
+    bd_dialog_tbg.red = shift_color(bd_dialog_tbg.red, 0.03, theme->is_dark);
+    bd_dialog_tbg.green = shift_color(bd_dialog_tbg.green, 0.03, theme->is_dark);
+    bd_dialog_tbg.blue = shift_color(bd_dialog_tbg.blue, 0.03, theme->is_dark);
+
+    GdkRGBA bd_dialog_tfg = dialog_tfg_rgba;
+    bd_dialog_tfg.alpha = 0.45;
+
+    char c_bd_chrome[64], c_bd_ebg[64], c_bd_wfg[64], c_bd_fg[64], c_bd_border[64], c_bd_dialog_bg[64], c_bd_dialog_fg[64], c_bd_dialog_tbg[64], c_bd_dialog_tfg[64];
     rgba_to_css(&bd_chrome, c_bd_chrome, sizeof(c_bd_chrome));
     rgba_to_css(&bd_ebg, c_bd_ebg, sizeof(c_bd_ebg));
     rgba_to_css(&bd_wfg, c_bd_wfg, sizeof(c_bd_wfg));
     rgba_to_css(&bd_fg, c_bd_fg, sizeof(c_bd_fg));
     rgba_to_css(&bd_border, c_bd_border, sizeof(c_bd_border));
+    rgba_to_css(&bd_dialog_bg, c_bd_dialog_bg, sizeof(c_bd_dialog_bg));
+    rgba_to_css(&bd_dialog_fg, c_bd_dialog_fg, sizeof(c_bd_dialog_fg));
+    rgba_to_css(&bd_dialog_tbg, c_bd_dialog_tbg, sizeof(c_bd_dialog_tbg));
+    rgba_to_css(&bd_dialog_tfg, c_bd_dialog_tfg, sizeof(c_bd_dialog_tfg));
+
+    /* Card colors */
+    char c_card_bg[64], c_card_fg[64];
+    GdkRGBA card_bg_rgba = theme->card_bg.alpha >= 0.0 ? theme->card_bg : chrome_bg;
+    GdkRGBA card_fg_rgba = theme->card_fg.alpha >= 0.0 ? theme->card_fg : (theme->window_fg.alpha >= 0.0 ? theme->window_fg : fg);
+    rgba_to_css(&card_bg_rgba, c_card_bg, sizeof(c_card_bg));
+    rgba_to_css(&card_fg_rgba, c_card_fg, sizeof(c_card_fg));
+
+    /* (Dialog colors moved earlier to resolve compilation order) */
 
     /* --- Override GTK named colors so tab/tabbar CSS picks them up --- */
     g_string_append_printf(css,
@@ -1185,17 +1243,49 @@ generate_css(const ViteTheme *theme)
         "@define-color dialog_fg_color %s;\n"
         "@define-color popover_bg_color %s;\n"
         "@define-color popover_fg_color %s;\n"
+        "@define-color card_bg_color %s;\n"
+        "@define-color card_fg_color %s;\n"
         "@define-color accent_color %s;\n"
         "@define-color accent_bg_color %s;\n",
         c_chrome, c_wfg, c_chrome, c_wfg, c_bg,
-        c_surface, c_wfg, c_surface, c_pfg,
+        c_dialog_bg, c_dialog_fg, c_surface, c_pfg,
+        c_card_bg, c_card_fg,
         c_accent, c_accent);
 
     /* --- Window / Root --- */
     g_string_append_printf(css,
-        "window, window.background { background-color: %s; color: %s; }\n"
-        "window:backdrop, window.background:backdrop { background-color: %s; color: %s; }\n",
+        "window.vite-main-window, window.vite-main-window.background { background-color: %s; color: %s; }\n"
+        "window.vite-main-window:backdrop, window.vite-main-window.background:backdrop { background-color: %s; color: %s; }\n",
         c_chrome, c_wfg, c_bd_chrome, c_bd_wfg);
+    
+    /* --- Dialog --- */
+    g_string_append_printf(css,
+        "dialog, .vite-preferences-dialog, .vite-about-dialog {\n"
+        "    --dialog-bg-color: %s;\n"
+        "    --dialog-fg-color: %s;\n"
+        "    --window-bg-color: %s;\n"
+        "    --window-fg-color: %s;\n"
+        "}\n"
+        "dialog:backdrop, .vite-preferences-dialog:backdrop, .vite-about-dialog:backdrop {\n"
+        "    --dialog-bg-color: %s;\n"
+        "    --dialog-fg-color: %s;\n"
+        "    --window-bg-color: %s;\n"
+        "    --window-fg-color: %s;\n"
+        "}\n"
+        "dialog headerbar, dialog .titlebar, dialog headerbar.titlebar, dialog .titlebar-box {\n"
+        "    background-color: %s;\n"
+        "    background: %s;\n"
+        "    color: %s;\n"
+        "}\n"
+        "dialog:backdrop headerbar, dialog:backdrop .titlebar, dialog:backdrop headerbar.titlebar, dialog:backdrop .titlebar-box {\n"
+        "    background-color: %s;\n"
+        "    background: %s;\n"
+        "    color: %s;\n"
+        "}\n",
+        c_dialog_bg, c_dialog_fg, c_dialog_bg, c_dialog_fg,
+        c_bd_dialog_bg, c_bd_dialog_fg, c_bd_dialog_bg, c_bd_dialog_fg,
+        c_dialog_tbg, c_dialog_tbg, c_dialog_tfg,
+        c_bd_dialog_tbg, c_bd_dialog_tbg, c_bd_dialog_tfg);
     /* --- Tab bar container: use chrome bg for consistency --- */
     g_string_append_printf(css,
         ".vite-tab-bar-container { background-color: %s; }\n"
@@ -1246,19 +1336,7 @@ generate_css(const ViteTheme *theme)
         "  border-top: 1px solid %s;"
         "}\n", c_chrome, c_fg, c_border, c_bd_chrome, c_bd_fg, c_bd_border);
 
-    /* --- Popovers & Menus --- */
-    g_string_append_printf(css,
-        "popover > contents, popover.menu > contents {"
-        "  background-color: %s; color: %s;"
-        "}\n", c_surface, c_pfg);
 
-    g_string_append_printf(css,
-        "popover > contents > modelbutton:hover, "
-        "popover > contents > .item:hover, "
-        "popover > contents modelbutton:hover, "
-        "popover modelbutton:hover {"
-        "  background-color: %s;"
-        "}\n", c_hover);
 
     /* List row hover (file list, language selector, etc.) */
     g_string_append_printf(css,
@@ -1309,15 +1387,6 @@ generate_css(const ViteTheme *theme)
         "  background-color: %s;"
         "}\n",
         c_dim, c_fg);
-
-    /* --- Preferences dialog --- */
-    g_string_append_printf(css,
-        "preferenceswindow, preferencespage, preferencesgroup, row {"
-        "  background-color: transparent;"
-        "}\n"
-        "list { background-color: %s; }\n"
-        ".navigation-sidebar { background-color: %s; }\n",
-        c_surface, c_chrome);
 
     return g_string_free(css, FALSE);
 }
