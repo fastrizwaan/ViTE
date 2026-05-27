@@ -43,7 +43,10 @@ editor_widget_update_bracket_match(EditorWidget *self)
         return;
     }
 
-    size_t off = self->cursor_offset;
+    EditorCursor *primary = editor_widget_get_primary_cursor(self);
+    if (!primary) return;
+    
+    size_t off = primary->cursor_offset;
     size_t total = document_get_length(self->doc);
     
     char c = 0, c_prev = 0;

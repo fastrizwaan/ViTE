@@ -176,25 +176,25 @@ create_encoding_menu(ViteStatusBar *self)
     gtk_popover_set_autohide(GTK_POPOVER(popover), TRUE);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->encoding_btn), popover);
 
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 240);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 240);
+    gtk_popover_set_child(GTK_POPOVER(popover), scrolled);
+
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_popover_set_child(GTK_POPOVER(popover), box);
+    gtk_widget_set_margin_start(box, 6);
+    gtk_widget_set_margin_end(box, 6);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), box);
 
     GtkWidget *entry = gtk_search_entry_new();
     gtk_widget_set_margin_top(entry, 6);
     gtk_widget_set_margin_bottom(entry, 6);
-    gtk_widget_set_margin_start(entry, 6);
-    gtk_widget_set_margin_end(entry, 6);
     gtk_box_append(GTK_BOX(box), entry);
-
-    GtkWidget *scrolled = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 240);
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 240);
-    gtk_widget_set_vexpand(scrolled, TRUE);
-    gtk_box_append(GTK_BOX(box), scrolled);
 
     self->encoding_listbox = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(self->encoding_listbox), GTK_SELECTION_SINGLE);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), self->encoding_listbox);
+    gtk_widget_set_margin_bottom(self->encoding_listbox, 6);
+    gtk_box_append(GTK_BOX(box), self->encoding_listbox);
 
     for (int i = 0; i < file_encoding_get_count(); i++) {
         const char *disp = file_encoding_get_display_name_at(i);
@@ -205,8 +205,8 @@ create_encoding_menu(ViteStatusBar *self)
         GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
         gtk_widget_set_margin_start(row_box, 12);
         gtk_widget_set_margin_end(row_box, 12);
-        gtk_widget_set_margin_top(row_box, 8);
-        gtk_widget_set_margin_bottom(row_box, 8);
+        gtk_widget_set_margin_top(row_box, 0);
+        gtk_widget_set_margin_bottom(row_box, 0);
 
         GtkWidget *lbl = gtk_label_new(disp);
         gtk_widget_set_halign(lbl, GTK_ALIGN_START);
@@ -457,27 +457,26 @@ create_file_type_menu(ViteStatusBar *self)
     gtk_popover_set_autohide(GTK_POPOVER(popover), TRUE);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->file_type_btn), popover);
     
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 260);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 220);
+    gtk_popover_set_child(GTK_POPOVER(popover), scrolled);
+    
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_popover_set_child(GTK_POPOVER(popover), box);
+    gtk_widget_set_margin_start(box, 6);
+    gtk_widget_set_margin_end(box, 6);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), box);
     
     /* Search Entry */
     GtkWidget *entry = gtk_search_entry_new();
     gtk_widget_set_margin_top(entry, 6);
     gtk_widget_set_margin_bottom(entry, 6);
-    gtk_widget_set_margin_start(entry, 6);
-    gtk_widget_set_margin_end(entry, 6);
     gtk_box_append(GTK_BOX(box), entry);
-    
-    /* Scrolled Window for all document types (including Plain Text) */
-    GtkWidget *scrolled = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 260);
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 220);
-    gtk_widget_set_vexpand(scrolled, TRUE);
-    gtk_box_append(GTK_BOX(box), scrolled);
     
     self->file_type_listbox = gtk_list_box_new();
     gtk_list_box_set_selection_mode(GTK_LIST_BOX(self->file_type_listbox), GTK_SELECTION_SINGLE);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), self->file_type_listbox);
+    gtk_widget_set_margin_bottom(self->file_type_listbox, 6);
+    gtk_box_append(GTK_BOX(box), self->file_type_listbox);
     
     /* Set Plain Text as NULL, and others to NULL etc. */
     self->plain_text_listbox = NULL;
@@ -489,8 +488,8 @@ create_file_type_menu(ViteStatusBar *self)
         GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
         gtk_widget_set_margin_start(row_box, 12);
         gtk_widget_set_margin_end(row_box, 12);
-        gtk_widget_set_margin_top(row_box, 8);
-        gtk_widget_set_margin_bottom(row_box, 8);
+        gtk_widget_set_margin_top(row_box, 0);
+        gtk_widget_set_margin_bottom(row_box, 0);
         
         GtkWidget *lbl = gtk_label_new(_(file_types[i].name));
         gtk_widget_set_halign(lbl, GTK_ALIGN_START);
