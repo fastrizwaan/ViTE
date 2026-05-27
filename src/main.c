@@ -1168,6 +1168,7 @@ on_about_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_
     AdwAboutDialog *about = ADW_ABOUT_DIALOG(adw_about_dialog_new());
     gtk_widget_add_css_class(GTK_WIDGET(about), "vite-about-dialog");
     adw_about_dialog_set_application_name(about, "ViTE");
+    adw_about_dialog_set_application_icon(about, "io.github.fastrizwaan.ViTE");
     adw_about_dialog_set_version(about, "0.1");
     adw_about_dialog_set_developer_name(about, "Mohammed Asif Ali Rizvan");
     adw_about_dialog_set_license_type(about, GTK_LICENSE_GPL_3_0);
