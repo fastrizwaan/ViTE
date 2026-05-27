@@ -850,6 +850,10 @@ editor_widget_init(EditorWidget *self)
     self->cursors = g_array_new(FALSE, FALSE, sizeof(EditorCursor));
     self->line_y_offsets = g_array_new(FALSE, FALSE, sizeof(double));
     
+    self->has_bracket_match = FALSE;
+    self->bracket_match_start = 0;
+    self->bracket_match_end = 0;
+    
     gtk_widget_set_focusable(GTK_WIDGET(self), TRUE);
     
     /* Initialize Animation State */
@@ -919,6 +923,8 @@ editor_widget_init(EditorWidget *self)
 
     /* Initialize input controllers */
     editor_input_init_controllers(self);
+    
+    g_signal_connect(self, "cursor-moved", G_CALLBACK(editor_widget_update_bracket_match), NULL);
     
     self->syntax_ctx = syntax_context_new();
     
@@ -1222,4 +1228,10 @@ void
 editor_widget_zoom_reset(EditorWidget *self)
 {
     editor_widget_apply_zoom(self, 0, TRUE);
+}
+
+int
+editor_widget_get_zoom_steps(EditorWidget *self)
+{
+    return self->font_zoom_steps;
 }

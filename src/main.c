@@ -4900,12 +4900,34 @@ on_select_all_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *value G_GNUC
 }
 
 static void
+update_zoom_label(ViteWindow *win)
+{
+    GtkWidget *zoom_label = GTK_WIDGET(g_object_get_data(G_OBJECT(win->window), "active_zoom_label"));
+    if (!zoom_label) return;
+    
+    GtkWidget *editor = get_active_editor(win);
+    if (editor && EDITOR_IS_WIDGET(editor)) {
+        int percent = 100 + (editor_widget_get_zoom_steps(EDITOR_WIDGET(editor)) * 10);
+        char buf[32];
+        g_snprintf(buf, sizeof(buf), "%d%%", percent);
+        gtk_button_set_label(GTK_BUTTON(zoom_label), buf);
+    }
+}
+
+static void
+update_zoom_label_on_show(GtkWidget *popover G_GNUC_UNUSED, ViteWindow *win)
+{
+    update_zoom_label(win);
+}
+
+static void
 on_zoom_in_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNUC_UNUSED, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
         editor_widget_zoom_in(EDITOR_WIDGET(editor));
+        update_zoom_label(win);
         gtk_widget_grab_focus(editor);
     }
 }
@@ -4917,6 +4939,7 @@ on_zoom_out_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GN
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
         editor_widget_zoom_out(EDITOR_WIDGET(editor));
+        update_zoom_label(win);
         gtk_widget_grab_focus(editor);
     }
 }
@@ -4928,6 +4951,7 @@ on_zoom_reset_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_
     GtkWidget *editor = get_active_editor(win);
     if (editor && EDITOR_IS_WIDGET(editor)) {
         editor_widget_zoom_reset(EDITOR_WIDGET(editor));
+        update_zoom_label(win);
         gtk_widget_grab_focus(editor);
     }
 }
@@ -5435,8 +5459,20 @@ setup_window(AdwApplicationWindow *window)
     /* Main Menu Construction */
     GMenu *main_menu = g_menu_new();
     
+    /* Zoom controls section */
+    GMenu *s_zoom = g_menu_new();
+    GMenuItem *zoom_item = g_menu_item_new(NULL, NULL);
+    g_menu_item_set_attribute(zoom_item, "custom", "s", "zoom-controls");
+    g_menu_append_item(s_zoom, zoom_item);
+    g_object_unref(zoom_item);
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_zoom));
+    g_object_unref(s_zoom);
+    
     /* Group 1: New Window, etc. */
-    g_menu_append(main_menu, _("New Window"), "win.new-window");
+    GMenu *s_new = g_menu_new();
+    g_menu_append(s_new, _("New Window"), "win.new-window");
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_new));
+    g_object_unref(s_new);
     
     /* Group 2: File Actions */
     GMenu *s_file = g_menu_new();
@@ -5541,6 +5577,7 @@ setup_window(AdwApplicationWindow *window)
     
     /* Group 6: App Info */
     GMenu *s_app = g_menu_new();
+    
     g_menu_append(s_app, _("Keyboard Shortcuts"), "win.shortcuts");
     g_menu_append(s_app, _("About Virtual Text Editor"), "win.about");
     g_menu_append(s_app, _("Preferences"), "win.preferences");
@@ -5549,8 +5586,37 @@ setup_window(AdwApplicationWindow *window)
     
     GtkWidget *btn_menu = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(btn_menu), "open-menu-symbolic");
-    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(btn_menu), G_MENU_MODEL(main_menu));
     gtk_widget_set_tooltip_text(btn_menu, _("Main Menu"));
+    
+    GtkWidget *main_menu_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(main_menu));
+    gtk_menu_button_set_popover(GTK_MENU_BUTTON(btn_menu), main_menu_popover);
+    
+    GtkWidget *zoom_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class(zoom_box, "linked");
+    gtk_widget_set_halign(zoom_box, GTK_ALIGN_FILL);
+    gtk_widget_set_opacity(zoom_box, 0.8);
+    
+    GtkWidget *zoom_out_btn = gtk_button_new_from_icon_name("minus-symbolic");
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(zoom_out_btn), "win.zoom-out");
+    gtk_widget_set_tooltip_text(zoom_out_btn, _("Zoom Out"));
+    
+    GtkWidget *zoom_label = gtk_button_new_with_label("100%");
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(zoom_label), "win.zoom-reset");
+    gtk_widget_set_tooltip_text(zoom_label, _("Reset Zoom"));
+    gtk_widget_set_hexpand(zoom_label, TRUE);
+    
+    GtkWidget *zoom_in_btn = gtk_button_new_from_icon_name("plus-symbolic");
+    gtk_actionable_set_action_name(GTK_ACTIONABLE(zoom_in_btn), "win.zoom-in");
+    gtk_widget_set_tooltip_text(zoom_in_btn, _("Zoom In"));
+    
+    gtk_box_append(GTK_BOX(zoom_box), zoom_out_btn);
+    gtk_box_append(GTK_BOX(zoom_box), zoom_label);
+    gtk_box_append(GTK_BOX(zoom_box), zoom_in_btn);
+    
+    gtk_popover_menu_add_child(GTK_POPOVER_MENU(main_menu_popover), zoom_box, "zoom-controls");
+    g_object_set_data(G_OBJECT(win->window), "active_zoom_label", zoom_label);
+    g_signal_connect(main_menu_popover, "show", G_CALLBACK(update_zoom_label_on_show), win);
+    
     adw_header_bar_pack_end(ADW_HEADER_BAR(header), btn_menu);
     g_object_unref(main_menu);
     /* Save Button */

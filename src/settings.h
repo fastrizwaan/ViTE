@@ -10,6 +10,7 @@ typedef struct {
     gboolean enable_folding;
     gboolean minimap_enabled;
     gboolean highlight_current_line;
+    gboolean highlight_matching_brackets;
     gboolean show_save_button;
     
     char *font_name;

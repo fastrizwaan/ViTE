@@ -3,6 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include "syntax.h"
+#include "settings.h"
 #include "theme-manager.h"
 #include "editor-minimap.h"
 
@@ -528,6 +529,39 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
             } while (pango_attr_iterator_next(ai));
             pango_attr_iterator_destroy(ai);
             g_array_free(fr, TRUE);
+        }
+    }
+    
+    /* Bracket Match Highlight */
+    if (self->has_bracket_match && settings_get()->highlight_matching_brackets) {
+        size_t b_start = self->bracket_match_start;
+        size_t b_end = self->bracket_match_end;
+        
+        if (b_start >= line_start_off + chunk_padding && b_start < line_start_off + chunk_padding + len) {
+            int p = (int)(b_start - (line_start_off + chunk_padding));
+            PangoRectangle pr; pango_layout_index_to_pos(layout, p, &pr);
+            double py = pango_units_to_double(pr.y) + centering_offset;
+            double ph = pango_units_to_double(pr.height);
+            if (ph < self->line_height) ph = self->line_height;
+            double px = pango_units_to_double(pr.x);
+            double pw = pango_units_to_double(pr.width);
+            if (pw <= 0) pw = self->cached_char_width;
+            
+            GdkRGBA bc = self->color_text; bc.alpha = 0.2;
+            gtk_snapshot_append_border(snapshot, &GSK_ROUNDED_RECT_INIT((float)px - 1, (float)py, (float)pw + 2, (float)ph), (float[4]){1,1,1,1}, (GdkRGBA[4]){bc,bc,bc,bc});
+        }
+        if (b_end >= line_start_off + chunk_padding && b_end < line_start_off + chunk_padding + len) {
+            int p = (int)(b_end - (line_start_off + chunk_padding));
+            PangoRectangle pr; pango_layout_index_to_pos(layout, p, &pr);
+            double py = pango_units_to_double(pr.y) + centering_offset;
+            double ph = pango_units_to_double(pr.height);
+            if (ph < self->line_height) ph = self->line_height;
+            double px = pango_units_to_double(pr.x);
+            double pw = pango_units_to_double(pr.width);
+            if (pw <= 0) pw = self->cached_char_width;
+            
+            GdkRGBA bc = self->color_text; bc.alpha = 0.2;
+            gtk_snapshot_append_border(snapshot, &GSK_ROUNDED_RECT_INIT((float)px - 1, (float)py, (float)pw + 2, (float)ph), (float[4]){1,1,1,1}, (GdkRGBA[4]){bc,bc,bc,bc});
         }
     }
 

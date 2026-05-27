@@ -67,7 +67,12 @@ static void on_save_button_visibility_toggled(GObject *object, GParamSpec *pspec
 static void on_switch_toggled(GObject *object, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
 {
     const char *key = (const char *)user_data;
-    gboolean active = adw_switch_row_get_active(ADW_SWITCH_ROW(object));
+    gboolean active = FALSE;
+    if (ADW_IS_SWITCH_ROW(object)) {
+        active = adw_switch_row_get_active(ADW_SWITCH_ROW(object));
+    } else if (ADW_IS_EXPANDER_ROW(object)) {
+        active = adw_expander_row_get_enable_expansion(ADW_EXPANDER_ROW(object));
+    }
     ViteSettings *settings = settings_get();
     
     if (g_strcmp0(key, "show-line-numbers") == 0) settings->show_line_numbers = active;
@@ -78,6 +83,8 @@ static void on_switch_toggled(GObject *object, GParamSpec *pspec G_GNUC_UNUSED, 
     else if (g_strcmp0(key, "wrap-lines") == 0) settings->wrap_lines = active;
     else if (g_strcmp0(key, "auto-indent") == 0) settings->auto_indent = active;
     else if (g_strcmp0(key, "use-custom-font") == 0) settings->use_custom_font = active;
+    else if (g_strcmp0(key, "indent-style") == 0) settings->indent_style = active ? 1 : 0;
+    else if (g_strcmp0(key, "highlight-matching-brackets") == 0) settings->highlight_matching_brackets = active;
     
     settings_save();
     settings_apply_to_all_editors();
@@ -98,6 +105,8 @@ create_switch_row(const char *title, const char *key)
     else if (g_strcmp0(key, "show-right-margin") == 0) active = settings->show_right_margin;
     else if (g_strcmp0(key, "wrap-lines") == 0) active = settings->wrap_lines;
     else if (g_strcmp0(key, "auto-indent") == 0) active = settings->auto_indent;
+    else if (g_strcmp0(key, "indent-style") == 0) active = (settings->indent_style == 1);
+    else if (g_strcmp0(key, "highlight-matching-brackets") == 0) active = settings->highlight_matching_brackets;
     
     adw_switch_row_set_active(ADW_SWITCH_ROW(row), active);
     g_signal_connect(row, "notify::active", G_CALLBACK(on_switch_toggled), (gpointer)key);
@@ -105,7 +114,7 @@ create_switch_row(const char *title, const char *key)
 }
 
 static void
-on_font_chosen(GtkFontDialog *dialog, GAsyncResult *result, EditorWidget *editor G_GNUC_UNUSED)
+on_font_chosen(GtkFontDialog *dialog, GAsyncResult *result, GtkWidget *row)
 {
     GError *error = NULL;
     PangoFontDescription *desc = gtk_font_dialog_choose_font_finish(dialog, result, &error);
@@ -117,7 +126,6 @@ on_font_chosen(GtkFontDialog *dialog, GAsyncResult *result, EditorWidget *editor
         settings_save();
         settings_apply_to_all_editors();
         
-        GtkWidget *row = GTK_WIDGET(g_object_get_data(G_OBJECT(dialog), "font_row"));
         if (row) adw_action_row_set_subtitle(ADW_ACTION_ROW(row), font_name);
         
         g_free(font_name);
@@ -145,7 +153,8 @@ on_font_button_clicked(GtkButton *btn, EditorWidget *editor)
         g_free(current_font);
     }
     
-    gtk_font_dialog_choose_font(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(btn))), desc, NULL, (GAsyncReadyCallback)on_font_chosen, editor);
+    GtkWidget *row = GTK_WIDGET(g_object_get_data(G_OBJECT(btn), "font_row"));
+    gtk_font_dialog_choose_font(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(btn))), desc, NULL, (GAsyncReadyCallback)on_font_chosen, row);
     
     if (desc) pango_font_description_free(desc);
     g_object_unref(dialog);
@@ -186,11 +195,27 @@ static void on_indent_style_changed(GObject *combo, GParamSpec *pspec G_GNUC_UNU
     settings_apply_to_all_editors();
 }
 
+static void on_font_size_changed(GtkSpinButton *spin, gpointer user_data)
+{
+    int size = gtk_spin_button_get_value_as_int(spin);
+    ViteSettings *settings = settings_get();
+    if (settings->font_name) {
+        PangoFontDescription *desc = pango_font_description_from_string(settings->font_name);
+        pango_font_description_set_size(desc, size * PANGO_SCALE);
+        char *new_font = pango_font_description_to_string(desc);
+        g_free(settings->font_name);
+        settings->font_name = new_font;
+        pango_font_description_free(desc);
+        settings_save();
+        settings_apply_to_all_editors();
+    }
+}
+
 static GtkWidget*
 create_indent_style_row(void)
 {
     GtkWidget *row = adw_combo_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), _("Indentation"));
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), _("Character"));
     
     const char *items[] = { "Space", "Tab", NULL };
     adw_combo_row_set_model(ADW_COMBO_ROW(row), G_LIST_MODEL(gtk_string_list_new(items)));
@@ -230,20 +255,42 @@ on_theme_changed(GObject *combo, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_
 
 void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
 {
-    AdwDialog *dialog = adw_preferences_dialog_new();
+    AdwPreferencesDialog *dialog = ADW_PREFERENCES_DIALOG(adw_preferences_dialog_new());
     gtk_widget_add_css_class(GTK_WIDGET(dialog), "vite-preferences-dialog");
     
-    GtkWidget *page = adw_preferences_page_new();
-    adw_preferences_dialog_add(ADW_PREFERENCES_DIALOG(dialog), ADW_PREFERENCES_PAGE(page));
+    ViteSettings *settings = settings_get();
+
+    /* --- PAGE 1: Appearance --- */
+    AdwPreferencesPage *page_appearance = ADW_PREFERENCES_PAGE(adw_preferences_page_new());
+    adw_preferences_page_set_title(page_appearance, _("Appearance"));
+    adw_preferences_page_set_icon_name(page_appearance, "computer-symbolic");
+    adw_preferences_dialog_add(dialog, page_appearance);
     
-    /* Group: Theme */
-    GtkWidget *group_theme = adw_preferences_group_new();
-    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_theme), _("Theme"));
-    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(group_theme));
+    /* Display Group */
+    GtkWidget *group_display = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_display), _("Display"));
+    adw_preferences_page_add(page_appearance, ADW_PREFERENCES_GROUP(group_display));
     
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row(_("Show Line Numbers"), "show-line-numbers"));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row(_("Word Wrap"), "wrap-lines"));
+    
+    /* Interface Group */
+    GtkWidget *group_interface = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_interface), _("Interface"));
+    adw_preferences_page_add(page_appearance, ADW_PREFERENCES_GROUP(group_interface));
+    
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_interface), create_switch_row(_("Show Overview Map"), "minimap-enabled"));
+    
+    GtkWidget *save_btn_row = adw_switch_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(save_btn_row), _("Show Save Button"));
+    adw_switch_row_set_active(ADW_SWITCH_ROW(save_btn_row), settings->show_save_button);
+    g_signal_connect(save_btn_row, "notify::active", G_CALLBACK(on_save_button_visibility_toggled), editor);
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_interface), save_btn_row);
+    
+    /* Theme Combo */
     GtkWidget *theme_row = adw_combo_row_new();
     gtk_widget_add_css_class(theme_row, "vite-theme-combo");
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(theme_row), _("Color Theme"));
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(theme_row), _("Theme"));
     
     int count = theme_manager_get_count();
     GtkStringList *theme_list = gtk_string_list_new(NULL);
@@ -252,8 +299,7 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     for (int i = 0; i < count; i++) {
         const char *n = theme_manager_get_name(i);
         gtk_string_list_append(theme_list, n);
-        if (current && g_strcmp0(n, current->name) == 0)
-            active_idx = (guint)i;
+        if (current && g_strcmp0(n, current->name) == 0) active_idx = (guint)i;
     }
     adw_combo_row_set_model(ADW_COMBO_ROW(theme_row), G_LIST_MODEL(theme_list));
     adw_combo_row_set_selected(ADW_COMBO_ROW(theme_row), active_idx);
@@ -263,53 +309,53 @@ void show_preferences_dialog(GtkWindow *parent, EditorWidget *editor)
     adw_combo_row_set_enable_search(ADW_COMBO_ROW(theme_row), TRUE);
     adw_combo_row_set_search_match_mode(ADW_COMBO_ROW(theme_row), GTK_STRING_FILTER_MATCH_MODE_SUBSTRING);
     g_signal_connect(theme_row, "notify::selected", G_CALLBACK(on_theme_changed), editor);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_theme), theme_row);
-    
-    /* Group: Display */
-    GtkWidget *group_display = adw_preferences_group_new();
-    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_display), _("Display"));
-    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(group_display));
-    
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row(_("Display Line Numbers"), "show-line-numbers"));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row(_("Enable Code Folding"), "enable-folding"));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row(_("Show Overview Map"), "minimap-enabled"));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), create_switch_row(_("Highlight Current Line"), "highlight-current-line"));
-    
-    /* Add a new switch for save button visibility */
-    GtkWidget *save_btn_row = adw_switch_row_new();
-    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(save_btn_row), _("Show Save Button"));
-    adw_switch_row_set_active(ADW_SWITCH_ROW(save_btn_row), settings_get()->show_save_button);
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), save_btn_row);
-    
-    /* Connect the switch to update the save button visibility */
-    g_signal_connect(save_btn_row, "notify::active", G_CALLBACK(on_save_button_visibility_toggled), editor);
-    
-    /* Group: Typography/Font */
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_display), theme_row);
+
+    /* --- PAGE 2: Editor --- */
+    AdwPreferencesPage *page_editor = ADW_PREFERENCES_PAGE(adw_preferences_page_new());
+    adw_preferences_page_set_title(page_editor, _("Editor"));
+    adw_preferences_page_set_icon_name(page_editor, "text-editor-symbolic");
+    adw_preferences_dialog_add(dialog, page_editor);
+
+    /* Font Group */
     GtkWidget *group_font = adw_preferences_group_new();
-    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_font), _("Typography"));
-    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(group_font));
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_font), _("Font"));
+    adw_preferences_page_add(page_editor, ADW_PREFERENCES_GROUP(group_font));
     
     adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_font), create_font_expander(editor));
-    
-    /* Group: Line Wrap */
-    GtkWidget *group_wrap = adw_preferences_group_new();
-    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_wrap), _("Line Wrap"));
-    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(group_wrap));
-    
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_wrap), create_switch_row(_("Display Right Margin"), "show-right-margin"));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_wrap), create_spin_row(_("Right Margin Position"), "right-margin-position", 1, 200, 1));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_wrap), create_switch_row(_("Text Wrapping"), "wrap-lines"));
-    
-    /* Group: Indentation */
+
+    /* Indentation Group */
     GtkWidget *group_indent = adw_preferences_group_new();
     adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_indent), _("Indentation"));
-    adw_preferences_page_add(ADW_PREFERENCES_PAGE(page), ADW_PREFERENCES_GROUP(group_indent));
+    adw_preferences_page_add(page_editor, ADW_PREFERENCES_GROUP(group_indent));
     
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_switch_row(_("Automatic Indentation"), "auto-indent"));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_indent_style_row());
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_spin_row(_("Tab Width"), "tab-width", 1, 16, 1));
-    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_spin_row(_("Indent Width"), "indent-width", 1, 16, 1));
+    GtkWidget *auto_indent_row = adw_switch_row_new();
+    adw_preferences_row_set_title(ADW_PREFERENCES_ROW(auto_indent_row), _("Auto Indentation"));
+    adw_switch_row_set_active(ADW_SWITCH_ROW(auto_indent_row), settings->auto_indent);
+    g_signal_connect(auto_indent_row, "notify::active", G_CALLBACK(on_switch_toggled), "auto-indent");
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), auto_indent_row);
 
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_indent_style_row());
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_spin_row(_("Spaces Per Tab"), "tab-width", 1, 16, 1));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_indent), create_spin_row(_("Spaces Per Indent"), "indent-width", 1, 16, 1));
+
+    /* Behavior Group */
+    GtkWidget *group_behavior = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_behavior), _("Behavior"));
+    adw_preferences_page_add(page_editor, ADW_PREFERENCES_GROUP(group_behavior));
+    
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_behavior), create_switch_row(_("Enable Code Folding"), "enable-folding"));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_behavior), create_switch_row(_("Display Right Margin"), "show-right-margin"));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_behavior), create_spin_row(_("Right Margin Position"), "right-margin-position", 1, 200, 1));
+
+    /* Highlighting Group */
+    GtkWidget *group_highlighting = adw_preferences_group_new();
+    adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(group_highlighting), _("Highlighting"));
+    adw_preferences_page_add(page_editor, ADW_PREFERENCES_GROUP(group_highlighting));
+
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_highlighting), create_switch_row(_("Highlight Current Line"), "highlight-current-line"));
+    adw_preferences_group_add(ADW_PREFERENCES_GROUP(group_highlighting), create_switch_row(_("Highlight Matching Brackets"), "highlight-matching-brackets"));
+    
     g_signal_connect_swapped(dialog, "closed", G_CALLBACK(gtk_widget_grab_focus), editor);
-    adw_dialog_present(dialog, GTK_WIDGET(parent));
+    adw_dialog_present(ADW_DIALOG(dialog), GTK_WIDGET(parent));
 }

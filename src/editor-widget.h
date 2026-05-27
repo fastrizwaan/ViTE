@@ -50,6 +50,7 @@ gboolean editor_widget_get_word_wrap(EditorWidget *self);
 void editor_widget_zoom_in(EditorWidget *self);
 void editor_widget_zoom_out(EditorWidget *self);
 void editor_widget_zoom_reset(EditorWidget *self);
+int editor_widget_get_zoom_steps(EditorWidget *self);
 
 void editor_widget_select_all(EditorWidget *self);
 

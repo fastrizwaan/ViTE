@@ -23,6 +23,7 @@ settings_init(void)
     global_settings.enable_folding = FALSE;
     global_settings.minimap_enabled = FALSE;
     global_settings.highlight_current_line = TRUE;
+    global_settings.highlight_matching_brackets = TRUE;
     global_settings.show_save_button = FALSE;
     global_settings.font_name = g_strdup("Monospace 11");
     global_settings.use_custom_font = FALSE;
@@ -48,6 +49,8 @@ settings_init(void)
             global_settings.minimap_enabled = g_key_file_get_boolean(kf, "Display", "minimap_enabled", NULL);
         if (g_key_file_has_key(kf, "Display", "highlight_current_line", NULL))
             global_settings.highlight_current_line = g_key_file_get_boolean(kf, "Display", "highlight_current_line", NULL);
+        if (g_key_file_has_key(kf, "Display", "highlight_matching_brackets", NULL))
+            global_settings.highlight_matching_brackets = g_key_file_get_boolean(kf, "Display", "highlight_matching_brackets", NULL);
         if (g_key_file_has_key(kf, "Display", "show_save_button", NULL))
             global_settings.show_save_button = g_key_file_get_boolean(kf, "Display", "show_save_button", NULL);
 
@@ -117,6 +120,7 @@ settings_save(void)
     g_key_file_set_boolean(kf, "Display", "enable_folding", global_settings.enable_folding);
     g_key_file_set_boolean(kf, "Display", "minimap_enabled", global_settings.minimap_enabled);
     g_key_file_set_boolean(kf, "Display", "highlight_current_line", global_settings.highlight_current_line);
+    g_key_file_set_boolean(kf, "Display", "highlight_matching_brackets", global_settings.highlight_matching_brackets);
     g_key_file_set_boolean(kf, "Display", "show_save_button", global_settings.show_save_button);
 
     g_key_file_set_boolean(kf, "Typography", "use_custom_font", global_settings.use_custom_font);

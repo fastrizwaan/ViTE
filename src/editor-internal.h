@@ -142,6 +142,11 @@ struct _EditorWidget {
     int tab_width;
     int indent_width;
 
+    /* Bracket Matching State */
+    gboolean has_bracket_match;
+    size_t bracket_match_start;
+    size_t bracket_match_end;
+
     /* Minimap */
     gboolean minimap_enabled;
     double minimap_width;
@@ -245,6 +250,7 @@ size_t get_visual_line_count(EditorWidget *self);
 size_t get_physical_line_index(EditorWidget *self, size_t visual_line_idx);
 
 /* Helpers */
+void editor_widget_update_bracket_match(EditorWidget *self);
 size_t utf8_next_grapheme(EditorWidget *self, size_t offset);
 size_t utf8_prev_grapheme(EditorWidget *self, size_t offset);
 void editor_widget_ensure_syntax_state_up_to(EditorWidget *self, size_t target_line);

@@ -1,4 +1,5 @@
 #include "editor-internal.h"
+#include "settings.h"
 #include <math.h>
 
 double
@@ -14,6 +15,145 @@ editor_widget_get_fold_gutter_width(EditorWidget *self)
 
     /* Fixed width for fold column */
     return 20.0;
+}
+
+static inline gboolean is_open_bracket(char c) { return c == '(' || c == '[' || c == '{' || c == '<'; }
+static inline gboolean is_close_bracket(char c) { return c == ')' || c == ']' || c == '}' || c == '>'; }
+static inline char get_matching_bracket(char c) {
+    if (c == '(') return ')';
+    if (c == ')') return '(';
+    if (c == '[') return ']';
+    if (c == ']') return '[';
+    if (c == '{') return '}';
+    if (c == '}') return '{';
+    if (c == '<') return '>';
+    if (c == '>') return '<';
+    if (c == '"') return '"';
+    if (c == '\'') return '\'';
+    return 0;
+}
+
+void
+editor_widget_update_bracket_match(EditorWidget *self)
+{
+    self->has_bracket_match = FALSE;
+    if (!self->doc || !settings_get()->highlight_matching_brackets) return;
+
+    size_t off = self->cursor_offset;
+    size_t total = document_get_length(self->doc);
+    
+    char c = 0, c_prev = 0;
+    if (off < total) {
+        char *text = document_get_text_range(self->doc, off, 1);
+        if (text) { c = text[0]; g_free(text); }
+    }
+    if (off > 0) {
+        char *text = document_get_text_range(self->doc, off - 1, 1);
+        if (text) { c_prev = text[0]; g_free(text); }
+    }
+
+    size_t start_off = total;
+    char target = 0;
+    gboolean search_forward = TRUE;
+    
+    /* Check character adjacent to cursor */
+    if (is_open_bracket(c) || is_close_bracket(c) || c == '"' || c == '\'') {
+        start_off = off;
+        target = c;
+    } else if (is_open_bracket(c_prev) || is_close_bracket(c_prev) || c_prev == '"' || c_prev == '\'') {
+        start_off = off - 1;
+        target = c_prev;
+    }
+
+    if (start_off == total) return; /* No bracket adjacent */
+
+    char match = get_matching_bracket(target);
+    if (!match) return;
+
+    if (is_open_bracket(target)) search_forward = TRUE;
+    else if (is_close_bracket(target)) search_forward = FALSE;
+    else {
+        /* Quote: parse line to find pairs */
+        size_t line_start, line_end;
+        find_line_at_offset(self->doc, start_off, &line_start, &line_end);
+        
+        size_t open_pos = (size_t)-1;
+        
+        for (size_t i = line_start; i < line_end; i++) {
+            char *ct = document_get_text_range(self->doc, i, 1);
+            if (ct) {
+                if (ct[0] == target) {
+                    gboolean escaped = FALSE;
+                    if (i > line_start) {
+                        char *prev = document_get_text_range(self->doc, i - 1, 1);
+                        if (prev && prev[0] == '\\') escaped = TRUE;
+                        g_free(prev);
+                    }
+                    if (!escaped) {
+                        if (open_pos == (size_t)-1) {
+                            open_pos = i;
+                        } else {
+                            /* We found a pair: (open_pos, i) */
+                            if (open_pos == start_off || i == start_off) {
+                                self->has_bracket_match = TRUE;
+                                self->bracket_match_start = open_pos;
+                                self->bracket_match_end = i;
+                                g_free(ct);
+                                return;
+                            }
+                            open_pos = (size_t)-1;
+                        }
+                    }
+                }
+                g_free(ct);
+            }
+        }
+        return; /* Quote matching done */
+    }
+
+    /* Bracket matching */
+    int depth = 1;
+    size_t limit = 50000; /* Prevent scanning huge files forever */
+    
+    if (search_forward) {
+        size_t i = start_off + 1;
+        while (i < total && limit > 0) {
+            char *ct = document_get_text_range(self->doc, i, 1);
+            if (ct) {
+                if (ct[0] == target) depth++;
+                else if (ct[0] == match) depth--;
+                
+                if (depth == 0) {
+                    self->has_bracket_match = TRUE;
+                    self->bracket_match_start = start_off;
+                    self->bracket_match_end = i;
+                    g_free(ct);
+                    return;
+                }
+                g_free(ct);
+            }
+            i++; limit--;
+        }
+    } else {
+        size_t i = start_off;
+        while (i > 0 && limit > 0) {
+            i--; limit--;
+            char *ct = document_get_text_range(self->doc, i, 1);
+            if (ct) {
+                if (ct[0] == target) depth++;
+                else if (ct[0] == match) depth--;
+                
+                if (depth == 0) {
+                    self->has_bracket_match = TRUE;
+                    self->bracket_match_start = i;
+                    self->bracket_match_end = start_off;
+                    g_free(ct);
+                    return;
+                }
+                g_free(ct);
+            }
+        }
+    }
 }
 
 /* Helper to get gutter width based on settings */
