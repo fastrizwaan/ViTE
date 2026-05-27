@@ -35,6 +35,7 @@ sources = files(
   'src/document.c',
   'src/undo.c',
   'src/preferences.c',
+  'src/settings.c',
   'src/syntax.c',
   'src/editor-actions.c',
   'src/editor-input.c',

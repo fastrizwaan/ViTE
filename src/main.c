@@ -12,6 +12,7 @@
 #include "editor-print.h"
 #include "status-bar.h"
 #include "theme-manager.h"
+#include "settings.h"
 
 #ifdef HAVE_VTE
 #include <vte/vte.h>
@@ -5667,6 +5668,10 @@ setup_window(AdwApplicationWindow *window)
        Checking activate...
     */
     
+    /* Initialize window state from settings */
+    ViteSettings *settings = settings_get();
+    update_save_button_visibility_from_preferences(GTK_WINDOW(window), settings->show_save_button);
+    
     return win;
 }
 
@@ -6293,6 +6298,7 @@ on_app_startup(GApplication *app, gpointer user_data)
 {
     (void)app;
     (void)user_data;
+    settings_init();
     theme_manager_init();
 }
 
@@ -6324,6 +6330,7 @@ main(int argc, char **argv)
     }
 #endif
     theme_manager_cleanup();
+    settings_cleanup();
     g_object_unref(app);
     return status;
 }

@@ -6,6 +6,7 @@
 #include "syntax-internal.h"
 #include <math.h>
 #include <adwaita.h>
+#include "settings.h"
 
 #define MAX_PANGO_LINE_LEN 10485760 /* 10MB limit for single line rendering to avoid int overflow/crash */
 
@@ -833,14 +834,15 @@ editor_widget_ensure_syntax_state_up_to(EditorWidget *self, size_t target_line)
 static void
 editor_widget_init(EditorWidget *self)
 {
+    ViteSettings *settings = settings_get();
     /* Initialize custom font name to default (used when custom font is enabled) */
-    self->font_name = g_strdup("Monospace 11");
-    self->use_custom_font = FALSE;
+    self->font_name = g_strdup(settings->font_name ? settings->font_name : "Monospace 11");
+    self->use_custom_font = settings->use_custom_font;
     self->font_zoom_steps = 0;
     self->insert_mode = TRUE;
-    self->enable_folding = FALSE; /* Default Disabled */
+    self->enable_folding = settings->enable_folding;
     
-    self->minimap_enabled = FALSE;
+    self->minimap_enabled = settings->minimap_enabled;
     self->minimap_width = 100.0;
     self->minimap_block_height = 2;
     self->minimap_active = FALSE;
@@ -903,15 +905,15 @@ editor_widget_init(EditorWidget *self)
     self->padding_top = 8;
     
     /* Config defaults */
-    self->show_line_numbers = TRUE;
-    self->highlight_current_line = TRUE;
-    self->show_right_margin = FALSE;
-    self->right_margin_position = 80;
-    self->wrap_lines = TRUE;
-    self->auto_indent = TRUE;
-    self->indent_style = 0; /* Space */
-    self->tab_width = 4;
-    self->indent_width = 4;
+    self->show_line_numbers = settings->show_line_numbers;
+    self->highlight_current_line = settings->highlight_current_line;
+    self->show_right_margin = settings->show_right_margin;
+    self->right_margin_position = settings->right_margin_position;
+    self->wrap_lines = settings->wrap_lines;
+    self->auto_indent = settings->auto_indent;
+    self->indent_style = settings->indent_style; /* Space */
+    self->tab_width = settings->tab_width;
+    self->indent_width = settings->indent_width;
     
     gtk_widget_set_cursor_from_name(GTK_WIDGET(self), "text");
 
