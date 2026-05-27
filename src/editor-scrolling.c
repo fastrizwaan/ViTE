@@ -330,28 +330,43 @@ scroll_to_cursor(EditorWidget *self)
 
     /* If wrapping, adjust y to the cursor's visual row within the line. */
     if (self->wrap_lines) {
-        int widget_width = get_stable_width(self);
-        double text_start_x = get_effective_gutter_width(self) + self->padding_left;
-        double minimap_w = 0;
-        if (self->minimap_enabled) {
-            minimap_w = self->minimap_width;
-            if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
+        size_t full_len = document_get_line_length(self->doc, phys_line_idx);
+        if (full_len <= 1048576) {
+            char *text = NULL; size_t len;
+            PangoLayout *layout = create_pango_layout_for_line(self, phys_line_idx, &text, &len);
+            if (layout) {
+                PangoRectangle strong_pos;
+                size_t effective_len = strlen(pango_layout_get_text(layout));
+                size_t safe_idx = MIN(offset_in_line, effective_len);
+                pango_layout_get_cursor_pos(layout, (int)safe_idx, &strong_pos, NULL);
+                y += pango_units_to_double(strong_pos.y);
+                g_object_unref(layout);
+                g_free(text);
+            }
+        } else {
+            int widget_width = get_stable_width(self);
+            double text_start_x = get_effective_gutter_width(self) + self->padding_left;
+            double minimap_w = 0;
+            if (self->minimap_enabled) {
+                minimap_w = self->minimap_width;
+                if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
+            }
+            double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
+            if (wrap_width < 1.0) wrap_width = 1.0;
+            double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
+            int chars_per_line = (int)(wrap_width / cw);
+            if (chars_per_line < 1) chars_per_line = 1;
+            
+            size_t bytes_per_char = 1;
+            FileEncoding enc = document_get_encoding(self->doc);
+            if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+            else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+            
+            size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
+            size_t row = offset_in_line / bytes_per_line;
+            
+            y += (double)row * self->line_height;
         }
-        double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
-        if (wrap_width < 1.0) wrap_width = 1.0;
-        double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
-        int chars_per_line = (int)(wrap_width / cw);
-        if (chars_per_line < 1) chars_per_line = 1;
-        
-        size_t bytes_per_char = 1;
-        FileEncoding enc = document_get_encoding(self->doc);
-        if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
-        else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
-        
-        size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
-        size_t row = offset_in_line / bytes_per_line;
-        
-        y += (double)row * self->line_height;
     }
     
     double page_size = gtk_adjustment_get_page_size(self->vadjustment);
@@ -397,28 +412,43 @@ scroll_to_cursor_centered(EditorWidget *self)
 
     /* If wrapping, adjust y to the cursor's visual row within the line. */
     if (self->wrap_lines) {
-        int widget_width = get_stable_width(self);
-        double text_start_x = get_effective_gutter_width(self) + self->padding_left;
-        double minimap_w = 0;
-        if (self->minimap_enabled) {
-            minimap_w = self->minimap_width;
-            if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
+        size_t full_len = document_get_line_length(self->doc, phys_line_idx);
+        if (full_len <= 1048576) {
+            char *text = NULL; size_t len;
+            PangoLayout *layout = create_pango_layout_for_line(self, phys_line_idx, &text, &len);
+            if (layout) {
+                PangoRectangle strong_pos;
+                size_t effective_len = strlen(pango_layout_get_text(layout));
+                size_t safe_idx = MIN(offset_in_line, effective_len);
+                pango_layout_get_cursor_pos(layout, (int)safe_idx, &strong_pos, NULL);
+                y += pango_units_to_double(strong_pos.y);
+                g_object_unref(layout);
+                g_free(text);
+            }
+        } else {
+            int widget_width = get_stable_width(self);
+            double text_start_x = get_effective_gutter_width(self) + self->padding_left;
+            double minimap_w = 0;
+            if (self->minimap_enabled) {
+                minimap_w = self->minimap_width;
+                if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
+            }
+            double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
+            if (wrap_width < 1.0) wrap_width = 1.0;
+            double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
+            int chars_per_line = (int)(wrap_width / cw);
+            if (chars_per_line < 1) chars_per_line = 1;
+            
+            size_t bytes_per_char = 1;
+            FileEncoding enc = document_get_encoding(self->doc);
+            if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
+            else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
+            
+            size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
+            size_t row = offset_in_line / bytes_per_line;
+            
+            y += (double)row * self->line_height;
         }
-        double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
-        if (wrap_width < 1.0) wrap_width = 1.0;
-        double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
-        int chars_per_line = (int)(wrap_width / cw);
-        if (chars_per_line < 1) chars_per_line = 1;
-        
-        size_t bytes_per_char = 1;
-        FileEncoding enc = document_get_encoding(self->doc);
-        if (enc == ENCODING_UTF16LE || enc == ENCODING_UTF16BE) bytes_per_char = 2;
-        else if (enc == ENCODING_UTF32LE || enc == ENCODING_UTF32BE) bytes_per_char = 4;
-        
-        size_t bytes_per_line = (size_t)chars_per_line * bytes_per_char;
-        size_t row = offset_in_line / bytes_per_line;
-        
-        y += (double)row * self->line_height;
     }
     
     double page_size = gtk_adjustment_get_page_size(self->vadjustment);
