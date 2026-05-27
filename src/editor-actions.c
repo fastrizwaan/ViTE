@@ -37,7 +37,7 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
         g_printerr("[DEBUG] Cursor %d Initial: offset=%zu, line=%zu, char_idx=%zu\n", c, cur->cursor_offset, line_idx, char_idx);
         
         size_t full_len = document_get_line_length(self->doc, line_idx);
-        if (full_len > 4096 && self->wrap_lines) {
+        if (full_len > 1048576 && self->wrap_lines) {
             int width = gtk_widget_get_width(GTK_WIDGET(self));
             double minimap_w = 0;
             if (self->minimap_enabled) {
@@ -91,7 +91,7 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
                         if (editor_widget_get_next_visible_line(self, current_line_idx, &next_line)) {
                             current_line_idx = next_line;
                             current_char_idx = 0;
-                            if (document_get_line_length(self->doc, current_line_idx) <= 4096) {
+                            if (document_get_line_length(self->doc, current_line_idx) <= 1048576) {
                                 // Pango will handle the rest, just snap to start
                                 cur->cursor_offset = document_get_offset_of_line(self->doc, current_line_idx);
                                 break;
@@ -116,7 +116,7 @@ move_cursor(EditorWidget *self, int visual_lines_delta)
                             size_t prev_full_len = document_get_line_length(self->doc, current_line_idx);
                             current_char_idx = prev_full_len > bytes_per_char ? prev_full_len - bytes_per_char : 0;
                             local_delta = remaining_delta;
-                            if (prev_full_len <= 4096) {
+                            if (prev_full_len <= 1048576) {
                                 // Pango will handle the rest, snap to end
                                 cur->cursor_offset = document_get_offset_of_line(self->doc, current_line_idx) + current_char_idx;
                                 break;
