@@ -115,7 +115,7 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
 
         char *orig_text = NULL; /* To keep track if we swapped text for virtualization */
 
-        if (full_len > 4096) {
+        if (full_len > 1048576) {
              is_virtualized = TRUE;
              if (!self->wrap_lines) {
                  double cw = self->cached_char_width > 1.0 ? self->cached_char_width : 8.0; 
@@ -266,9 +266,13 @@ editor_widget_get_offset_at_point(EditorWidget *self, double x, double y, size_t
 
                 /* Compute viewport chunk start row (same logic as renderer) */
                 double line_doc_y = current_y + scroll_y;
+                if (self->line_y_offsets && phys_line < self->line_y_offsets->len) {
+                    line_doc_y = g_array_index(self->line_y_offsets, double, phys_line);
+                }
                 size_t start_row = 0;
-                if (scroll_y > line_doc_y) {
-                    start_row = (size_t)((scroll_y - line_doc_y) / self->line_height);
+                double relative_start = scroll_y - line_doc_y;
+                if (relative_start > 0) {
+                    start_row = (size_t)(relative_start / self->line_height);
                 }
 
                 size_t row_in_chunk = 0;

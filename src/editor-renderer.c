@@ -265,11 +265,18 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
             size_t start_char_idx = start_row * bytes_per_line;
             if (start_char_idx > full_len) start_char_idx = full_len;
             
+            size_t line_start = document_get_offset_of_line(self->doc, phys_line);
+            size_t start_off = line_start + start_char_idx;
+            if (start_off > line_start) {
+                start_off = utf8_prev_grapheme(self, start_off);
+            }
+            start_char_idx = start_off - line_start;
+            
             size_t visible_rows = (size_t)(height / self->line_height) + 2; 
             size_t safe_len = visible_rows * bytes_per_line + (100 * bytes_per_char);
             if (start_char_idx + safe_len > full_len) safe_len = full_len - start_char_idx;
             
-            text = document_get_text_range(self->doc, document_get_offset_of_line(self->doc, phys_line) + start_char_idx, safe_len);
+            text = document_get_text_range(self->doc, start_off, safe_len);
             len = safe_len;
             chunk_padding = start_char_idx;
             render_y_offset = (double)start_row * self->line_height;
@@ -277,10 +284,17 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
             double start_char_visual = (scroll_x / cw) - 100.0;
             size_t start_byte_approx = (start_char_visual > 0) ? (size_t)start_char_visual : 0;
             if (start_byte_approx > full_len) start_byte_approx = full_len;
+            
+            size_t line_start = document_get_offset_of_line(self->doc, phys_line);
+            size_t start_off = line_start + start_byte_approx;
+            if (start_off > line_start) {
+                start_off = utf8_prev_grapheme(self, start_off);
+            }
+            start_byte_approx = start_off - line_start;
             size_t visible_chars = (size_t)(width / cw) + 300; 
             size_t safe_len = visible_chars;
             if (start_byte_approx + safe_len > full_len) safe_len = full_len - start_byte_approx;
-            text = document_get_text_range(self->doc, document_get_offset_of_line(self->doc, phys_line) + start_byte_approx, safe_len);
+            text = document_get_text_range(self->doc, start_off, safe_len);
             len = safe_len;
             chunk_padding = start_byte_approx;
             render_x_offset = start_byte_approx * cw;
