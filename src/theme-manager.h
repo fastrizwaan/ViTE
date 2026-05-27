@@ -96,12 +96,7 @@ typedef struct {
     GdkRGBA dialog_titlebar_fg;
     
     /* File type popover specific styling */
-    GdkRGBA file_type_popover_bg;
-    GdkRGBA file_type_popover_fg;
-    GdkRGBA file_type_popover_card_bg;
-    GdkRGBA file_type_popover_card_fg;
-    GdkRGBA file_type_popover_card_hover_bg;
-    GdkRGBA file_type_popover_card_hover_fg;
+
     
     /* Edit Entry (Search/Replace input) */
     GdkRGBA entry_bg;
