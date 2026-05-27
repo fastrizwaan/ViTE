@@ -545,8 +545,8 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     char *text = document_get_line_truncated(self->doc, line_idx, &len, MAX_PANGO_LINE_LEN + 1024, NULL);
     if (!text) return NULL;
     
-    if (len > 4096) {
-        len = 4096;
+    if (len > 1048576) {
+        len = 1048576;
         /* Ensure valid UTF-8 cut if it happens to be UTF-8 */
         FileEncoding enc = document_get_encoding(self->doc);
         if (enc == ENCODING_UTF8) {
@@ -612,7 +612,7 @@ update_target_x(EditorWidget *self)
         char *text; size_t len;
         
         /* Optimization for long lines: Estimate target_x instead of full layout */
-        if (document_get_line_length(self->doc, line_idx) > 4096) {
+        if (document_get_line_length(self->doc, line_idx) > 1048576) {
              double cw = self->cached_char_width > 1.0 ? self->cached_char_width : 8.0;
              cur->target_x = (double)index_in_line * cw;
              continue;

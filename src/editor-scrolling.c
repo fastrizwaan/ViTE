@@ -87,7 +87,7 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
                 
                 size_t line_len_bytes = document_get_line_length(self->doc, phys_idx);
                 
-                if (line_len_bytes > 4096) {
+                if (line_len_bytes > 1048576) {
                     size_t visual_lines = 1;
                     if (chars_per_line > 0) {
                         size_t bytes_per_char = 1;
@@ -100,7 +100,7 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
                     current_y += (double)(visual_lines > 0 ? visual_lines : 1) * self->line_height;
                 } else {
                     size_t fetched_len = 0;
-                    char *text = document_get_line_truncated(self->doc, phys_idx, &fetched_len, 4096, NULL);
+                    char *text = document_get_line_truncated(self->doc, phys_idx, &fetched_len, 1048576, NULL);
                     if (text) {
                         if (fetched_len > 0 && !g_utf8_validate(text, fetched_len, NULL)) {
                             char *safe_text = g_utf8_make_valid(text, fetched_len);
@@ -178,7 +178,7 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
                 size_t phys_idx = top_lines[i].idx;
                 size_t line_len_bytes = top_lines[i].len;
                 
-                if (line_len_bytes > 4096) {
+                if (line_len_bytes > 1048576) {
                     size_t visual_lines = 1;
                     if (chars_per_line > 0) {
                         size_t bytes_per_char = 1;
@@ -192,7 +192,7 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
                     actual_samples++;
                 } else {
                     size_t fetched_len = 0;
-                    char *text = document_get_line_truncated(self->doc, phys_idx, &fetched_len, 4096, NULL);
+                    char *text = document_get_line_truncated(self->doc, phys_idx, &fetched_len, 1048576, NULL);
                     if (text) {
                         if (fetched_len > 0 && !g_utf8_validate(text, fetched_len, NULL)) {
                             char *safe_text = g_utf8_make_valid(text, fetched_len);

@@ -231,9 +231,9 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
 
     size_t fetched_len = 0;
     size_t full_len = 0;
-    char *pre_fetched_text = document_get_line_truncated(self->doc, phys_line, &fetched_len, 4096, &full_len);
+    char *pre_fetched_text = document_get_line_truncated(self->doc, phys_line, &fetched_len, 1048576, &full_len);
     
-    if (full_len <= 4096) {
+    if (full_len <= 1048576) {
         text = pre_fetched_text;
         len = fetched_len;
     } else {
