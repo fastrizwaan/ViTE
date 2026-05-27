@@ -4595,7 +4595,11 @@ on_status_bar_indent_style_changed(ViteStatusBar *bar, int style, gpointer user_
             if (editors->len > 0) {
                  GtkWidget *ed0 = g_ptr_array_index(editors, 0);
                  int width = 4;
-                 g_object_get(ed0, "tab-width", &width, NULL);
+                 if (style == 1) {
+                     g_object_get(ed0, "tab-width", &width, NULL);
+                 } else {
+                     g_object_get(ed0, "indent-width", &width, NULL);
+                 }
                  
                  gpointer orig_w_ptr = g_object_get_data(G_OBJECT(ed0), "original-indent-width");
                  gpointer orig_style_ptr = g_object_get_data(G_OBJECT(ed0), "original-indent-style");
@@ -4622,16 +4626,19 @@ update_status_bar_from_editor(ViteWindow *win, GtkWidget *editor)
     if (!win || !win->status_bar || !editor || !EDITOR_IS_WIDGET(editor)) return;
     
     int tab_w = 4;
+    int indent_w = 4;
     int indent_s = 0;
-    g_object_get(G_OBJECT(editor), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
+    g_object_get(G_OBJECT(editor), "tab-width", &tab_w, "indent-width", &indent_w, "indent-style", &indent_s, NULL);
+    
+    int display_width = (indent_s == 1) ? tab_w : indent_w;
     
     gpointer orig_w_ptr = g_object_get_data(G_OBJECT(editor), "original-indent-width");
     gpointer orig_style_ptr = g_object_get_data(G_OBJECT(editor), "original-indent-style");
     int orig_w = orig_w_ptr ? GPOINTER_TO_INT(orig_w_ptr) : 4;
     int orig_style = orig_style_ptr ? GPOINTER_TO_INT(orig_style_ptr) : 0;
     
-    gboolean indent_changed = (tab_w != orig_w || indent_s != orig_style);
-    vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), tab_w, indent_s == 1, indent_changed);
+    gboolean indent_changed = (display_width != orig_w || indent_s != orig_style);
+    vite_status_bar_set_indentation(VITE_STATUS_BAR(win->status_bar), display_width, indent_s == 1, indent_changed);
 }
 
 static void

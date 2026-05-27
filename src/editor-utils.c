@@ -38,6 +38,10 @@ editor_widget_update_bracket_match(EditorWidget *self)
 {
     self->has_bracket_match = FALSE;
     if (!self->doc || !settings_get()->highlight_matching_brackets) return;
+    
+    if (!self->syntax_ctx || syntax_context_get_language(self->syntax_ctx) == LANG_NONE) {
+        return;
+    }
 
     size_t off = self->cursor_offset;
     size_t total = document_get_length(self->doc);
