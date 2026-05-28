@@ -5585,9 +5585,9 @@ setup_window(AdwApplicationWindow *window)
     /* Group 6: App Info */
     GMenu *s_app = g_menu_new();
     
-    g_menu_append(s_app, _("Keyboard Shortcuts"), "win.shortcuts");
-    g_menu_append(s_app, _("About Virtual Text Editor"), "win.about");
     g_menu_append(s_app, _("Preferences"), "win.preferences");
+    g_menu_append(s_app, _("Keyboard Shortcuts"), "win.shortcuts");
+    g_menu_append(s_app, _("About ViTE"), "win.about");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_app));
     g_object_unref(s_app);
     

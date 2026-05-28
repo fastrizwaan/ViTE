@@ -98,6 +98,13 @@ install_data(
   install_dir: join_paths(get_option('datadir'), 'pixmaps')
 )
 
+# Install symbolic icons
+install_data(
+  'data/icons/hicolor/scalable/actions/minus-symbolic.svg',
+  'data/icons/hicolor/scalable/actions/plus-symbolic.svg',
+  install_dir: join_paths(get_option('datadir'), 'icons', 'hicolor', 'scalable', 'actions')
+)
+
 # Reproduction Test (disabled - test file doesn't exist)
 # test_sources = files(
 #   'tests/reproduce_crash.c',

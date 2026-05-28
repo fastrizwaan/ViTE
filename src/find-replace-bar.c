@@ -1072,6 +1072,7 @@ void vite_find_replace_bar_show(ViteFindReplaceBar *bar) {
     set_filter_mode(bar, FALSE);
     gtk_widget_set_visible(GTK_WIDGET(bar), TRUE);
     gtk_widget_grab_focus(bar->find_entry);
+    gtk_editable_select_region(GTK_EDITABLE(bar->find_entry), 0, -1);
     
     /* Ensure we listen to doc if it changed (e.g. new file) */
     /* Re-fetch doc just in case */
@@ -1090,6 +1091,7 @@ void vite_find_replace_bar_show_filter(ViteFindReplaceBar *bar) {
     set_filter_mode(bar, TRUE);
     gtk_widget_set_visible(GTK_WIDGET(bar), TRUE);
     gtk_widget_grab_focus(bar->find_entry);
+    gtk_editable_select_region(GTK_EDITABLE(bar->find_entry), 0, -1);
 }
 
 void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
@@ -1164,7 +1166,9 @@ void vite_find_replace_bar_show_replace(ViteFindReplaceBar *bar, gboolean has_se
     /* Focus replace entry only if there's search text, otherwise focus find entry */
     if (has_search_text) {
         gtk_widget_grab_focus(bar->replace_entry);
+        gtk_editable_select_region(GTK_EDITABLE(bar->replace_entry), 0, -1);
     } else {
         gtk_widget_grab_focus(bar->find_entry);
+        gtk_editable_select_region(GTK_EDITABLE(bar->find_entry), 0, -1);
     }
 }
