@@ -436,21 +436,60 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
                         if (l_idx == l_cnt - 1) rh = layout_h - ry;
                         if (i_end >= ls && i_start <= le) {
                             int *rs, nrs; pango_layout_line_get_x_ranges(pl, MAX(i_start, ls), MIN(i_end, le), &rs, &nrs);
-                            for (int r = 0; r < nrs; r++) {
-                                double rx = pango_units_to_double(rs[2*r]), rw = pango_units_to_double(rs[2*r+1]-rs[2*r]);
+                            if (rs && nrs > 0) {
+                                double min_x = pango_units_to_double(rs[0]);
+                                double max_x = pango_units_to_double(rs[1]);
+                                for (int r = 1; r < nrs; r++) {
+                                    double x0 = pango_units_to_double(rs[2*r]);
+                                    double x1 = pango_units_to_double(rs[2*r+1]);
+                                    if (x0 < min_x) min_x = x0;
+                                    if (x1 > max_x) max_x = x1;
+                                }
+                                g_free(rs);
+                                
+                                size_t abs_ls = line_start_off + chunk_padding + ls;
+                                size_t abs_le = line_start_off + chunk_padding + le;
+                                double screen_w = width + scroll_x;
+                                
+                                if (match.end > abs_le) {
+                                    max_x = screen_w;
+                                }
+                                
+                                double rx = min_x;
+                                double rw = max_x - min_x;
+                                
                                 if (rw > 0) {
                                     if (match.start == self->current_match_offset) {
                                         gtk_snapshot_append_color(snapshot, &self->color_find_match, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
-                                        GdkRGBA b = {1.0, 0.6, 0.0, 1.0}; /* Keep border orange for visibility, or remove it */
-                                        gtk_snapshot_append_border(snapshot, &GSK_ROUNDED_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh), (float[4]){1,1,1,1}, (GdkRGBA[4]){b,b,b,b});
+                                        
+                                        float top_b = (match.start >= abs_ls) ? 1.0f : 0.0f;
+                                        float bot_b = (match.end <= abs_le) ? 1.0f : 0.0f;
+                                        
+                                        float b_widths[4] = { top_b, 1.0f, bot_b, 1.0f };
+                                        GdkRGBA b = {1.0, 0.6, 0.0, 1.0};
+                                        GdkRGBA bc[4] = {b, b, b, b};
+                                        
+                                        gtk_snapshot_append_border(snapshot, &GSK_ROUNDED_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh), b_widths, bc);
+                                        
+                                        /* Connectors for perfect polygon tracing */
+                                        if (match.end > abs_le && rx > 0) {
+                                            /* Bottom-left horizontal connector */
+                                            gtk_snapshot_append_color(snapshot, &b, &GRAPHENE_RECT_INIT(0, (float)(ry + rh - 1.0), (float)rx, 1.0f));
+                                        }
+                                        if (match.start < abs_ls && screen_w > rx + rw) {
+                                            /* Top-right horizontal connector */
+                                            gtk_snapshot_append_color(snapshot, &b, &GRAPHENE_RECT_INIT((float)(rx + rw), (float)ry, (float)(screen_w - (rx + rw)), 1.0f));
+                                        }
                                     } else {
                                         gtk_snapshot_append_color(snapshot, &self->color_find_match_highlight, &GRAPHENE_RECT_INIT((float)rx, (float)ry, (float)rw, (float)rh));
-                                        GdkRGBA u = ctx->is_dark ? (GdkRGBA){0.7, 0.7, 0.7, 0.4} : (GdkRGBA){0.5, 0.5, 0.5, 0.5};
-                                        gtk_snapshot_append_color(snapshot, &u, &GRAPHENE_RECT_INIT((float)rx, (float)(ry+rh-1), (float)rw, 1.0f));
+                                        
+                                        if (match.end <= abs_le) {
+                                            GdkRGBA u = ctx->is_dark ? (GdkRGBA){0.7, 0.7, 0.7, 0.4} : (GdkRGBA){0.5, 0.5, 0.5, 0.5};
+                                            gtk_snapshot_append_color(snapshot, &u, &GRAPHENE_RECT_INIT((float)rx, (float)(ry+rh-1), (float)rw, 1.0f));
+                                        }
                                     }
                                 }
                             }
-                            g_free(rs);
                         }
                         l_idx++;
                     } while (pango_layout_iter_next_line(iter));
