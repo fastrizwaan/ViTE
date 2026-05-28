@@ -518,6 +518,22 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
     GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
     if (!text) return;
+    
+    /* Translate ↵ back to \n */
+    GString *norm_text = g_string_new("");
+    char *p = text;
+    while (*p) {
+        if (strncmp(p, "\xE2\x86\xB5", 3) == 0) {
+            g_string_append_c(norm_text, '\n');
+            p += 3;
+        } else {
+            g_string_append_c(norm_text, *p);
+            p++;
+        }
+    }
+    g_free(text);
+    text = g_string_free(norm_text, FALSE);
+    
     size_t len = strlen(text);
     if (len > 0) {
         document_begin_undo_group(self->doc);
@@ -613,6 +629,21 @@ on_primary_paste_received(GObject *source_object, GAsyncResult *res, gpointer us
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
     
     if (text) {
+        /* Translate ↵ back to \n */
+        GString *norm_text = g_string_new("");
+        char *p = text;
+        while (*p) {
+            if (strncmp(p, "\xE2\x86\xB5", 3) == 0) {
+                g_string_append_c(norm_text, '\n');
+                p += 3;
+            } else {
+                g_string_append_c(norm_text, *p);
+                p++;
+            }
+        }
+        g_free(text);
+        text = g_string_free(norm_text, FALSE);
+        
         size_t len = strlen(text);
         if (len > 0) {
             EditorCursor *primary = editor_widget_get_primary_cursor(self);

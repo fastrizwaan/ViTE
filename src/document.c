@@ -1647,6 +1647,8 @@ struct _SearchTask {
     gboolean case_sensitive;
     gboolean whole_word;
     gboolean is_regex;
+    gboolean is_multiline;
+    char *full_text;
     
     PieceTableIter iter;
     GString *line_buf;
@@ -1685,6 +1687,45 @@ search_idle_step(gpointer user_data)
     gint64 start_time = g_get_monotonic_time(); /* microseconds */
     gint64 budget = 12000; /* 12ms time budget per idle iteration */
 
+    if (task->is_multiline && task->full_text) {
+        if (task->is_literal) {
+            char *haystack = task->full_text;
+            char *found = NULL;
+            while (haystack && *haystack) {
+                if (task->case_sensitive) {
+                    found = strstr(haystack, task->query);
+                } else {
+                    found = strcasestr(haystack, task->query);
+                }
+                
+                if (!found) break;
+                size_t start_idx = found - task->full_text;
+                
+                SearchMatch m = {start_idx, start_idx + task->match_length};
+                g_array_append_val(task->matches, m);
+                
+                haystack = found + 1;
+            }
+        } else {
+            GMatchInfo *match_info;
+            if (g_regex_match(task->pattern, task->full_text, 0, &match_info)) {
+                while (g_match_info_matches(match_info)) {
+                    gint start_pos, end_pos;
+                    g_match_info_fetch_pos(match_info, 0, &start_pos, &end_pos);
+                    
+                    SearchMatch m = { (size_t)start_pos, (size_t)end_pos };
+                    g_array_append_val(task->matches, m);
+                    
+                    g_match_info_next(match_info, NULL);
+                }
+            }
+            g_match_info_free(match_info);
+        }
+        
+        if (task->callback) task->callback(task->matches, TRUE, task->user_data);
+        task->idle_id = 0;
+        return G_SOURCE_REMOVE;
+    }
 
     
     if (task->is_literal && task->query) {
@@ -1803,8 +1844,17 @@ document_search_async_start(Document *doc, const char *raw_query, gboolean regex
     task->whole_word = whole_word;
     task->is_regex = regex;
 
+    task->is_multiline = (strchr(raw_query, '\n') != NULL || strchr(raw_query, '\r') != NULL);
+    if (regex && (strstr(raw_query, "\\n") != NULL || strstr(raw_query, "\\r") != NULL)) {
+        task->is_multiline = TRUE;
+    }
+    
+    if (task->is_multiline) {
+        task->full_text = document_get_text_range(doc, 0, document_get_length(doc));
+    }
+
     /* Determine if we can use Fast Literal Path */
-    if (!regex && !whole_word) {
+    if (!regex && !whole_word && !task->is_multiline) {
         task->is_literal = TRUE;
         task->query = g_strdup(raw_query);
         task->pattern = NULL;
@@ -1812,8 +1862,13 @@ document_search_async_start(Document *doc, const char *raw_query, gboolean regex
         /* Use compact storage for literal search - ~8x memory reduction */
         task->compact_matches = compact_matches_new(task->match_length);
     } else {
-        task->is_literal = FALSE;
-        /* For regex, use GArray since match lengths vary */
+        task->is_literal = (!regex && !whole_word);
+        if (task->is_literal && task->is_multiline) {
+             task->query = g_strdup(raw_query);
+             task->match_length = strlen(raw_query);
+        }
+        
+        /* For regex or multiline literal, use GArray since match lengths vary or compact is unsupported */
         task->matches = g_array_new(FALSE, FALSE, sizeof(SearchMatch));
         
         /* Prepare regex */
@@ -1883,6 +1938,10 @@ document_search_async_cancel(SearchTask *task)
     
     if (task->line_buf) {
         g_string_free(task->line_buf, TRUE);
+    }
+    
+    if (task->full_text) {
+        g_free(task->full_text);
     }
     
     g_free(task);
@@ -2482,6 +2541,8 @@ struct _StreamingReplaceTask {
     
     gboolean regex;
     gboolean case_sensitive;
+    gboolean is_multiline;
+    char *full_text;
     
     /* Line-by-line processing */
     PieceTableIter iter;
@@ -2510,6 +2571,7 @@ static void streaming_replace_task_free(StreamingReplaceTask *task) {
     if (task->replacement) g_free(task->replacement);
     if (task->pattern) g_regex_unref(task->pattern);
     if (task->line_buf) g_string_free(task->line_buf, TRUE);
+    if (task->full_text) g_free(task->full_text);
     if (task->output_file) fclose(task->output_file);
     if (task->output_path) {
         unlink(task->output_path);
@@ -2542,6 +2604,52 @@ static gboolean streaming_replace_idle_step(gpointer user_data) {
     
     size_t repl_len = task->replacement_len;
     size_t query_len = task->query_len;
+    
+    if (task->is_multiline && task->full_text) {
+        /* Full in-memory replace for multiline blocks */
+        char *new_text = NULL;
+        
+        if (task->regex && task->pattern) {
+            new_text = g_regex_replace(task->pattern, task->full_text, -1, 0, task->replacement, 0, NULL);
+        } else {
+            /* Literal string replace */
+            GString *res = g_string_sized_new(strlen(task->full_text));
+            char *haystack = task->full_text;
+            char *found = NULL;
+            while (haystack && *haystack) {
+                if (task->case_sensitive) found = strstr(haystack, task->query);
+                else found = strcasestr(haystack, task->query);
+                
+                if (!found) {
+                    g_string_append(res, haystack);
+                    break;
+                }
+                
+                g_string_append_len(res, haystack, found - haystack);
+                g_string_append_len(res, task->replacement, task->replacement_len);
+                task->replace_count++;
+                haystack = found + task->query_len;
+            }
+            new_text = g_string_free(res, FALSE);
+        }
+        
+        if (new_text) {
+            size_t new_len = strlen(new_text);
+            fwrite(new_text, 1, new_len, task->output_file);
+            task->output_size += new_len;
+            task->lf_count += count_lf(new_text, new_len);
+            g_free(new_text);
+        } else {
+            /* Fallback if replace fails - just write original text */
+            size_t len = strlen(task->full_text);
+            fwrite(task->full_text, 1, len, task->output_file);
+            task->output_size += len;
+            task->lf_count += count_lf(task->full_text, len);
+        }
+        
+        /* Jump to end logic to finalize file and replace */
+        task->current_line = task->total_lines; 
+    }
     
     /* Process lines - write to temp file */
     while (task->current_line < task->total_lines) {
@@ -2777,6 +2885,15 @@ document_replace_streaming_start(Document *doc, const char *raw_query, const cha
         char *unescaped = unescape_string(raw_query);
         task->query = unescaped;
         task->query_len = strlen(unescaped);
+    }
+    
+    task->is_multiline = (strchr(raw_query, '\n') != NULL || strchr(raw_query, '\r') != NULL);
+    if (regex && (strstr(raw_query, "\\n") != NULL || strstr(raw_query, "\\r") != NULL)) {
+        task->is_multiline = TRUE;
+    }
+    
+    if (task->is_multiline) {
+        task->full_text = document_get_text_range(doc, 0, document_get_length(doc));
     }
     
     /* Create temp file for output */
@@ -3034,6 +3151,8 @@ struct _DocumentFilterTask {
     char *pattern;
     GRegex *regex_pattern;
     gboolean is_regex;
+    gboolean is_multiline;
+    char *full_text;
     gboolean case_sensitive;
     
     char *lower_pattern; /* For case-insensitive string search */

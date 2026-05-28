@@ -44,6 +44,9 @@ struct _ViteFindReplaceBar {
     GList *replace_history;
     GtkWidget *find_history_btn;
     GtkWidget *replace_history_btn;
+    
+    char *last_find_text;
+    char *last_replace_text;
 };
 
 enum {
@@ -54,6 +57,9 @@ enum {
 static guint signals[N_SIGNALS] = {0};
 
 static void save_history_to_disk(GList *find_history, GList *replace_history);
+
+static const char *get_entry_real_text(GtkEditable *editable, char **cache);
+static void set_entry_display_text(GtkEditable *editable, const char *text);
 
 static void add_to_history(GList **history, const char *text) {
     if (!text || !*text) return;
@@ -140,7 +146,7 @@ static void load_history_from_disk(GList **find_history, GList **replace_history
 static void on_history_item_clicked(GtkButton *btn, gpointer user_data) {
     GtkWidget *entry = GTK_WIDGET(user_data);
     const char *text = gtk_button_get_label(btn);
-    gtk_editable_set_text(GTK_EDITABLE(entry), text);
+    set_entry_display_text(GTK_EDITABLE(entry), text);
     
     GtkWidget *p = gtk_widget_get_parent(GTK_WIDGET(btn));
     while (p && !GTK_IS_POPOVER(p)) p = gtk_widget_get_parent(p);
@@ -263,7 +269,50 @@ static void vite_find_replace_bar_dispose(GObject *object) {
     g_list_free_full(self->replace_history, g_free);
     self->replace_history = NULL;
     
+    g_free(self->last_find_text);
+    self->last_find_text = NULL;
+    g_free(self->last_replace_text);
+    self->last_replace_text = NULL;
+    
     G_OBJECT_CLASS(vite_find_replace_bar_parent_class)->dispose(object);
+}
+
+static const char *get_entry_real_text(GtkEditable *editable, char **cache) {
+    if (!editable) return "";
+    const char *raw = gtk_editable_get_text(editable);
+    if (!raw) return "";
+    
+    GString *res = g_string_new("");
+    const char *p = raw;
+    while (*p) {
+        if (strncmp(p, "\xE2\x86\xB5", 3) == 0) {
+            g_string_append_c(res, '\n');
+            p += 3;
+        } else {
+            g_string_append_c(res, *p);
+            p++;
+        }
+    }
+    if (*cache) g_free(*cache);
+    *cache = g_string_free(res, FALSE);
+    return *cache ? *cache : "";
+}
+
+static void set_entry_display_text(GtkEditable *editable, const char *text) {
+    if (!editable || !text) return;
+    GString *res = g_string_new("");
+    const char *p = text;
+    while (*p) {
+        if (*p == '\n' || *p == '\r') {
+            g_string_append(res, "\xE2\x86\xB5");
+            if (*p == '\r' && *(p+1) == '\n') p++; /* skip \n of \r\n */
+        } else {
+            g_string_append_c(res, *p);
+        }
+        p++;
+    }
+    gtk_editable_set_text(editable, res->str);
+    g_string_free(res, TRUE);
 }
 
 static void
@@ -486,7 +535,7 @@ static gboolean filter_async_step(gpointer user_data) {
         self->current_filter_result = res;
         
         /* Update Editor */
-        const char *pattern = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
+    const char *pattern = get_entry_real_text(GTK_EDITABLE(self->find_entry), &self->last_find_text);
         gboolean regex = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->regex_check));
         gboolean case_sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->case_check));
         
@@ -513,7 +562,7 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
     Document *doc = editor_widget_get_document(self->editor);
     if (!doc) return G_SOURCE_REMOVE;
 
-    const char *text = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
+    const char *text = get_entry_real_text(GTK_EDITABLE(self->find_entry), &self->last_find_text);
     
     /* --- FILTER MODE BRANCH --- */
     if (self->filter_mode) {
@@ -633,11 +682,11 @@ static void on_prev_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data) {
 
 static void on_replace_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
-    const char *repl = gtk_editable_get_text(GTK_EDITABLE(self->replace_entry));
+    const char *repl = get_entry_real_text(GTK_EDITABLE(self->replace_entry), &self->last_replace_text);
     
     gboolean regex = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->regex_check));
     /* We need the Pattern text! Find entry has it. */
-    const char *pattern_text = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
+    const char *pattern_text = get_entry_real_text(GTK_EDITABLE(self->find_entry), &self->last_find_text);
     
     editor_widget_replace_current(self->editor, repl, regex, pattern_text);
     
@@ -713,8 +762,8 @@ static void on_replace_all_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_d
     Document *doc = editor_widget_get_document(self->editor);
     if (!doc) return;
     
-    const char *query = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
-    const char *repl = gtk_editable_get_text(GTK_EDITABLE(self->replace_entry));
+    const char *query = get_entry_real_text(GTK_EDITABLE(self->find_entry), &self->last_find_text);
+    const char *repl = get_entry_real_text(GTK_EDITABLE(self->replace_entry), &self->last_replace_text);
     
     /* Early return if query is empty - prevents UI freeze */
     if (!query || !*query) {
@@ -766,18 +815,25 @@ static gboolean on_key_pressed(GtkEventControllerKey *controller G_GNUC_UNUSED, 
         return TRUE;
     }
     if (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) {
-        /* Add to history on Enter */
-        const char *find_text = gtk_editable_get_text(GTK_EDITABLE(self->find_entry));
+        if ((state & GDK_SHIFT_MASK) != 0) {
+            /* Shift+Enter inserts the ↵ symbol */
+            GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(self))));
+            if (GTK_IS_EDITABLE(focus)) {
+                int pos = gtk_editable_get_position(GTK_EDITABLE(focus));
+                gtk_editable_insert_text(GTK_EDITABLE(focus), "\xE2\x86\xB5", -1, &pos);
+                gtk_editable_set_position(GTK_EDITABLE(focus), pos);
+            }
+            return TRUE; /* Handled */
+        }
+        
+        /* Add to history on plain Enter */
+        const char *find_text = get_entry_real_text(GTK_EDITABLE(self->find_entry), &self->last_find_text);
         add_to_history(&self->find_history, find_text);
         save_history_to_disk(self->find_history, self->replace_history);
         update_history_popovers(self);
         
-        if (state & GDK_SHIFT_MASK) {
-             editor_widget_prev_match(self->editor);
-        } else {
-             editor_widget_next_match(self->editor);
-        }
-        return TRUE;
+        editor_widget_next_match(self->editor);
+        return TRUE; /* Prevent default newline insertion */
     }
     return FALSE;
 }
@@ -803,6 +859,35 @@ on_editor_undo_redo_progress(EditorWidget *editor, double progress, gboolean fin
     }
 }
 
+
+static void on_insert_text(GtkEditable *editable, const gchar *text, gint length, gint *position, gpointer data G_GNUC_UNUSED) {
+    if (!text || length == 0) return;
+    
+    gboolean has_newline = FALSE;
+    for (int i = 0; i < length && text[i] != '\0'; i++) {
+        if (text[i] == '\n' || text[i] == '\r') {
+            has_newline = TRUE;
+            break;
+        }
+    }
+    
+    if (has_newline) {
+        g_signal_handlers_block_by_func(editable, G_CALLBACK(on_insert_text), data);
+        GString *res = g_string_new("");
+        for (int i = 0; i < length && text[i] != '\0'; i++) {
+            if (text[i] == '\n' || text[i] == '\r') {
+                g_string_append(res, "\xE2\x86\xB5");
+                if (text[i] == '\r' && text[i+1] == '\n') i++;
+            } else {
+                g_string_append_c(res, text[i]);
+            }
+        }
+        gtk_editable_insert_text(editable, res->str, res->len, position);
+        g_string_free(res, TRUE);
+        g_signal_handlers_unblock_by_func(editable, G_CALLBACK(on_insert_text), data);
+        g_signal_stop_emission_by_name(editable, "insert-text");
+    }
+}
 
 static void vite_find_replace_bar_class_init(ViteFindReplaceBarClass *klass) {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
@@ -867,7 +952,10 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     self->find_entry = gtk_search_entry_new();
     gtk_widget_set_hexpand(self->find_entry, TRUE);
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(self->find_entry), _("Find"));
+    gtk_widget_set_tooltip_text(self->find_entry, _("Find (Shift+Enter for newline)"));
+    
     g_signal_connect(self->find_entry, "search-changed", G_CALLBACK(on_search_changed), self);
+    g_signal_connect(self->find_entry, "insert-text", G_CALLBACK(on_insert_text), self);
     
     GtkEventController *key_ctrl = gtk_event_controller_key_new();
     g_signal_connect(key_ctrl, "key-pressed", G_CALLBACK(on_key_pressed), self);
@@ -966,10 +1054,18 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
        So text alignment should be roughly similar if icon sizing matches.
     */
     
+    /* Replace Entry */
     self->replace_entry = gtk_entry_new();
     gtk_widget_set_hexpand(self->replace_entry, TRUE);
     gtk_entry_set_placeholder_text(GTK_ENTRY(self->replace_entry), _("Replace"));
     gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self->replace_entry), GTK_ENTRY_ICON_PRIMARY, "edit-find-replace-symbolic");
+    gtk_widget_set_tooltip_text(self->replace_entry, _("Replace (Shift+Enter for newline)"));
+    g_signal_connect(self->replace_entry, "insert-text", G_CALLBACK(on_insert_text), self);
+    
+    GtkEventController *repl_key_ctrl = gtk_event_controller_key_new();
+    g_signal_connect(repl_key_ctrl, "key-pressed", G_CALLBACK(on_key_pressed), self);
+    gtk_widget_add_controller(self->replace_entry, repl_key_ctrl);
+    
     gtk_box_append(GTK_BOX(self->replace_box), self->replace_entry);
     
     /* Replace Status Label */
@@ -1154,7 +1250,7 @@ void vite_find_replace_bar_close(ViteFindReplaceBar *bar) {
 
 void vite_find_replace_bar_set_search_text(ViteFindReplaceBar *bar, const char *text) {
     if (!bar || !text) return;
-    gtk_editable_set_text(GTK_EDITABLE(bar->find_entry), text);
+    set_entry_display_text(GTK_EDITABLE(bar->find_entry), text);
 }
 
 void vite_find_replace_bar_show_replace(ViteFindReplaceBar *bar, gboolean has_search_text) {
