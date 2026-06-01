@@ -1587,6 +1587,11 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
     
     gtk_revealer_set_child(GTK_REVEALER(revealer), info_box);
     
+    /* Store internal widgets for dynamic reuse (like 'File Not Found' errors) */
+    g_object_set_data(G_OBJECT(revealer), "title_label", title_label);
+    g_object_set_data(G_OBJECT(revealer), "subtitle_label", subtitle_label);
+    g_object_set_data(G_OBJECT(revealer), "btn_reload", btn_reload);
+    
     /* Insert at the top of the root box (index 0) */
     gtk_box_prepend(GTK_BOX(root_box), revealer);
     
@@ -3225,6 +3230,15 @@ on_action_row_activated(GtkListBox *list, GtkListBoxRow *row, gpointer user_data
 }
 #endif
 
+static gboolean
+hide_revealer_timeout(gpointer data)
+{
+    if (data && GTK_IS_REVEALER(data)) {
+        gtk_revealer_set_reveal_child(GTK_REVEALER(data), FALSE);
+    }
+    return G_SOURCE_REMOVE;
+}
+
 static void
 on_recent_item_activated(GtkListBox *list_box, GtkListBoxRow *row, gpointer user_data)
 {
@@ -3239,7 +3253,37 @@ on_recent_item_activated(GtkListBox *list_box, GtkListBoxRow *row, gpointer user
     const char *uri = g_object_get_data(G_OBJECT(row), "uri");
     if (uri) {
         GFile *file = g_file_new_for_uri(uri);
-        queue_open_file(app, target_win, file, TRUE);
+        
+        if (!g_file_query_exists(file, NULL)) {
+            char *basename = g_file_get_basename(file);
+            char *msg = g_strdup_printf(_("The file '%s' could not be found. It may have been moved or deleted."), basename);
+            
+            GtkWidget *revealer = NULL;
+            if (target_win && target_win->window) {
+                revealer = g_object_get_data(G_OBJECT(target_win->window), "global_error_revealer");
+            } else if (GTK_IS_WINDOW(root)) {
+                revealer = g_object_get_data(G_OBJECT(root), "global_error_revealer");
+            }
+            
+            if (revealer) {
+                GtkWidget *title_lbl = g_object_get_data(G_OBJECT(revealer), "title_label");
+                GtkWidget *sub_lbl = g_object_get_data(G_OBJECT(revealer), "subtitle_label");
+                
+                if (title_lbl) gtk_label_set_text(GTK_LABEL(title_lbl), _("File Not Found"));
+                if (sub_lbl) gtk_label_set_text(GTK_LABEL(sub_lbl), msg);
+                
+                gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), TRUE);
+                
+                /* Auto-hide after 5 seconds */
+                g_timeout_add_seconds(5, hide_revealer_timeout, revealer);
+            }
+            
+            g_free(msg);
+            g_free(basename);
+        } else {
+            queue_open_file(app, target_win, file, TRUE);
+        }
+        
         g_object_unref(file);
     }
     
@@ -3978,6 +4022,14 @@ on_document_changed_externally(Document *doc G_GNUC_UNUSED, void *user_data)
     
     GtkWidget *revealer = g_object_get_data(G_OBJECT(page_root), "external_change_revealer");
     if (revealer && GTK_IS_REVEALER(revealer)) {
+        GtkWidget *title_lbl = g_object_get_data(G_OBJECT(revealer), "title_label");
+        GtkWidget *sub_lbl = g_object_get_data(G_OBJECT(revealer), "subtitle_label");
+        GtkWidget *btn_reload = g_object_get_data(G_OBJECT(revealer), "btn_reload");
+        
+        if (title_lbl) gtk_label_set_text(GTK_LABEL(title_lbl), _("File Has Changed on Disk"));
+        if (sub_lbl) gtk_label_set_text(GTK_LABEL(sub_lbl), _("The file has been changed by another program."));
+        if (btn_reload) gtk_widget_set_visible(btn_reload, TRUE);
+        
         gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), TRUE);
     }
 }
@@ -5754,6 +5806,45 @@ setup_window(AdwApplicationWindow *window)
     
     /* Progress bar at the top */
     gtk_box_append(GTK_BOX(main_box), GTK_WIDGET(win->header_progress));
+    
+    /* Global Error Revealer for application-wide notifications (e.g. File Not Found) */
+    GtkWidget *global_error_revealer = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(global_error_revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
+    
+    GtkWidget *err_info_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_add_css_class(err_info_box, "external-change-banner");
+    
+    GtkWidget *err_text_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_hexpand(err_text_box, TRUE);
+    gtk_widget_set_valign(err_text_box, GTK_ALIGN_CENTER);
+    
+    GtkWidget *err_title_label = gtk_label_new("");
+    gtk_widget_set_halign(err_title_label, GTK_ALIGN_START);
+    gtk_widget_add_css_class(err_title_label, "heading");
+    
+    GtkWidget *err_subtitle_label = gtk_label_new("");
+    gtk_widget_set_halign(err_subtitle_label, GTK_ALIGN_START);
+    
+    gtk_box_append(GTK_BOX(err_text_box), err_title_label);
+    gtk_box_append(GTK_BOX(err_text_box), err_subtitle_label);
+    
+    GtkWidget *err_btn_ignore = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_set_valign(err_btn_ignore, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class(err_btn_ignore, "flat");
+    gtk_widget_add_css_class(err_btn_ignore, "close-btn");
+    
+    gtk_box_append(GTK_BOX(err_info_box), err_text_box);
+    gtk_box_append(GTK_BOX(err_info_box), err_btn_ignore);
+    gtk_revealer_set_child(GTK_REVEALER(global_error_revealer), err_info_box);
+    
+    g_object_set_data(G_OBJECT(err_btn_ignore), "revealer", global_error_revealer);
+    g_signal_connect(err_btn_ignore, "clicked", G_CALLBACK(on_ignore_external_change), NULL);
+    
+    gtk_box_append(GTK_BOX(main_box), global_error_revealer);
+    
+    g_object_set_data(G_OBJECT(window), "global_error_revealer", global_error_revealer);
+    g_object_set_data(G_OBJECT(global_error_revealer), "title_label", err_title_label);
+    g_object_set_data(G_OBJECT(global_error_revealer), "subtitle_label", err_subtitle_label);
     
     /* Initialize Stack */
     win->stack = GTK_STACK(gtk_stack_new());

@@ -17,4 +17,6 @@ typing at the end freezes with syntax highlighting. plain text would allow it. s
 
 Also selection right-click menu->Syntax highlight->C,C++, html, etc. should higlight only the selected lines.
 
-open opening from recent, if file not found, inform the user and do not move it top
+discard and discard all ; if one file then discard, if more than 1 files discard all
+
+open opening from recent, if file not found, inform the user and do not move it top in recent; and do not load/create an empty file.
