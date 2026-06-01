@@ -4470,6 +4470,8 @@ on_status_bar_line_ending_changed(ViteStatusBar *bar G_GNUC_UNUSED, const char *
     ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
     GtkWidget *active_editor = get_active_editor(win);
     
+    g_print("STATUS BAR line ending changed to: '%s'\n", line_ending_id);
+    
     if (tab) {
         GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
         if (page) {
@@ -5901,6 +5903,19 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
                 g_object_set_data_full(G_OBJECT(ed), "original-file-type", g_strdup(lang_name), g_free);
                 g_object_set_data(G_OBJECT(ed), "original-indent-width", GINT_TO_POINTER(tab_w));
                 g_object_set_data(G_OBJECT(ed), "original-indent-style", GINT_TO_POINTER(indent_s));
+            } else if (err && (g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_NOENT) || g_error_matches(err, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))) {
+                const char *lang_name = editor_widget_get_language_name(EDITOR_WIDGET(ed));
+                if (!lang_name) lang_name = "Plain Text";
+
+                int tab_w = 4;
+                int indent_s = 0;
+                g_object_get(G_OBJECT(ed), "tab-width", &tab_w, "indent-style", &indent_s, NULL);
+
+                g_object_set_data_full(G_OBJECT(ed), "original-encoding", g_strdup("utf-8"), g_free);
+                g_object_set_data_full(G_OBJECT(ed), "original-newline", g_strdup("lf"), g_free);
+                g_object_set_data_full(G_OBJECT(ed), "original-file-type", g_strdup(lang_name), g_free);
+                g_object_set_data(G_OBJECT(ed), "original-indent-width", GINT_TO_POINTER(tab_w));
+                g_object_set_data(G_OBJECT(ed), "original-indent-style", GINT_TO_POINTER(indent_s));
             }
         }
         g_ptr_array_unref(editors);
@@ -5948,6 +5963,25 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
 
                 if (vite_tab_is_active(ctx->tab)) {
                     on_tab_clicked(ctx->tab, NULL);
+                }
+            } else if (g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_NOENT) || g_error_matches(err, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
+                /* File doesn't exist yet, treat it as a new empty file with the given path */
+                if (ctx->tab) {
+                    if (ctx->filename) {
+                        char *basename = g_path_get_basename(ctx->filename);
+                        vite_tab_set_title(ctx->tab, basename);
+                        g_free(basename);
+                        g_object_set_data_full(G_OBJECT(ctx->tab), "file_path", g_strdup(ctx->filename), g_free);
+                    }
+                    update_window_title_for_tab(ctx->tab);
+                    if (ctx->doc && ctx->filename) {
+                        document_set_file_path(ctx->doc, ctx->filename);
+                        document_set_encoding(ctx->doc, ENCODING_UTF8);
+                        document_set_newline_type(ctx->doc, NEWLINE_LF);
+                    }
+                    if (vite_tab_is_active(ctx->tab)) {
+                        on_tab_clicked(ctx->tab, NULL);
+                    }
                 }
             } else {
                 /* Show error dialog */
@@ -6926,7 +6960,13 @@ on_save_as_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer
 {
     ViteWindow *win = (ViteWindow *)user_data;
     
+#if GTK_CHECK_VERSION(4, 18, 0)
+    const char *encoding = NULL;
+    const char *line_ending = NULL;
+    GFile *file = gtk_file_dialog_save_text_file_finish(dialog, result, &encoding, &line_ending, NULL);
+#else
     GFile *file = gtk_file_dialog_save_finish(dialog, result, NULL);
+#endif
     if (file) {
         char *path = g_file_get_path(file);
         if (path) {
@@ -6935,6 +6975,32 @@ on_save_as_dialog_response(GtkFileDialog *dialog, GAsyncResult *result, gpointer
             if (EDITOR_IS_WIDGET(editor)) {
                 Document *doc = editor_widget_get_document(EDITOR_WIDGET(editor));
                 
+#if GTK_CHECK_VERSION(4, 18, 0)
+                g_print("SAVE DIALOG RET: encoding='%s', line_ending='%s'\n",
+                        encoding ? encoding : "NULL",
+                        line_ending ? line_ending : "NULL");
+                if (encoding && encoding[0]) {
+                    document_set_encoding(doc, file_encoding_from_id(encoding));
+                    if (win->status_bar) {
+                        vite_status_bar_set_encoding(VITE_STATUS_BAR(win->status_bar), encoding, FALSE);
+                    }
+                }
+                if (line_ending && line_ending[0]) {
+                    if (g_strcmp0(line_ending, "\r\n") == 0) {
+                        g_print("Setting NEWLINE_CRLF\n");
+                        document_set_newline_type(doc, NEWLINE_CRLF);
+                        if (win->status_bar) vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), "crlf", FALSE);
+                    } else if (g_strcmp0(line_ending, "\r") == 0) {
+                        g_print("Setting NEWLINE_CR\n");
+                        document_set_newline_type(doc, NEWLINE_CR);
+                        if (win->status_bar) vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), "cr", FALSE);
+                    } else {
+                        g_print("Setting NEWLINE_LF\n");
+                        document_set_newline_type(doc, NEWLINE_LF);
+                        if (win->status_bar) vite_status_bar_set_line_ending(VITE_STATUS_BAR(win->status_bar), "lf", FALSE);
+                    }
+                }
+#endif
                 ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
                 save_async_with_progress(win, tab, doc, path);
             }
@@ -6981,8 +7047,13 @@ on_save_as_action(GSimpleAction *action G_GNUC_UNUSED, GVariant *parameter G_GNU
         }
     }
     
+#if GTK_CHECK_VERSION(4, 18, 0)
+    gtk_file_dialog_save_text_file(dialog, GTK_WINDOW(win->window), NULL, 
+                        (GAsyncReadyCallback)on_save_as_dialog_response, win);
+#else
     gtk_file_dialog_save(dialog, GTK_WINDOW(win->window), NULL, 
                         (GAsyncReadyCallback)on_save_as_dialog_response, win);
+#endif
     g_object_unref(dialog);
 }
 
