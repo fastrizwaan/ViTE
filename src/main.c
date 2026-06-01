@@ -2807,7 +2807,7 @@ load_css(void)
     "}"
     "popover.editor-context-menu > contents {"
     "    min-width: 220px;"
-    "    min-height: 295px;"
+    "    min-height: 326px;"
     "    padding: 0px;"
     "}"
     "popover.terminal-menu > contents {"

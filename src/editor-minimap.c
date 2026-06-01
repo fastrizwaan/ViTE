@@ -216,7 +216,8 @@ editor_minimap_draw(EditorWidget *self, GtkSnapshot *snapshot, double x, double 
         while (len > 0 && (text[len-1] == '\n' || text[len-1] == '\r')) len--;
 
         if (len > 0) {
-            PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, physical_line_idx, text);
+            size_t line_start_off = document_get_offset_of_line(self->doc, physical_line_idx);
+            PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, physical_line_idx, line_start_off, text);
             PangoAttrIterator *iter = pango_attr_list_get_iterator(attrs);
 
             do {

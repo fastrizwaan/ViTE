@@ -27,6 +27,22 @@ static void on_ctx_redo(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_G
 static void on_ctx_select_all(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_select_all(EDITOR_WIDGET(user_data)); }
 static void on_ctx_change_case(GSimpleAction *action G_GNUC_UNUSED, GVariant *param, gpointer user_data) { editor_widget_change_case(EDITOR_WIDGET(user_data), g_variant_get_int32(param)); }
 
+static void on_ctx_set_syntax(GSimpleAction *action G_GNUC_UNUSED, GVariant *param, gpointer user_data) {
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    const char *lang = g_variant_get_string(param, NULL);
+    if (!lang || !self->syntax_ctx || !self->cursors) return;
+    
+    for (guint i = 0; i < self->cursors->len; i++) {
+        EditorCursor *c = &g_array_index(self->cursors, EditorCursor, i);
+        size_t min_off = MIN(c->cursor_offset, c->selection_anchor);
+        size_t max_off = MAX(c->cursor_offset, c->selection_anchor);
+        if (min_off != max_off) {
+            syntax_context_set_language_for_byte_range(self->syntax_ctx, min_off, max_off, lang);
+        }
+    }
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+}
+
 /* Undo/Redo Progress Callback */
 void
 editor_widget_on_undo_redo_progress(double progress, gboolean finished, UndoInfo *info, gpointer user_data)
@@ -258,6 +274,24 @@ static void right_click(GtkGestureClick *gesture G_GNUC_UNUSED,
     g_menu_append_submenu(s3, "Change Case", G_MENU_MODEL(case_menu));
     g_object_unref(case_menu);
 
+    /* Syntax Highlighting Override */
+    GMenu *syntax_menu = g_menu_new();
+    g_menu_append(syntax_menu, "Plain Text", "ctx.set-syntax::plain");
+    g_menu_append(syntax_menu, "C", "ctx.set-syntax::c");
+    g_menu_append(syntax_menu, "C++", "ctx.set-syntax::cpp");
+    g_menu_append(syntax_menu, "Python", "ctx.set-syntax::python");
+    g_menu_append(syntax_menu, "Bash", "ctx.set-syntax::bash");
+    g_menu_append(syntax_menu, "Rust", "ctx.set-syntax::rust");
+    g_menu_append(syntax_menu, "Header", "ctx.set-syntax::h");
+    g_menu_append(syntax_menu, "YAML", "ctx.set-syntax::yaml");
+    g_menu_append(syntax_menu, "JSON", "ctx.set-syntax::json");
+    g_menu_append(syntax_menu, "XML/HTML", "ctx.set-syntax::xml");
+    g_menu_append(syntax_menu, "JavaScript", "ctx.set-syntax::javascript");
+    g_menu_append(syntax_menu, "Markdown", "ctx.set-syntax::markdown");
+    g_menu_append(syntax_menu, "Desktop Entry", "ctx.set-syntax::desktop");
+    g_menu_append_submenu(s3, "Syntax Highlight", G_MENU_MODEL(syntax_menu));
+    g_object_unref(syntax_menu);
+
     g_menu_append_section(menu, NULL, G_MENU_MODEL(s3));
     g_object_unref(s3);
 
@@ -270,7 +304,8 @@ static void right_click(GtkGestureClick *gesture G_GNUC_UNUSED,
         { "undo", on_ctx_undo, NULL, NULL, NULL, { 0 } },
         { "redo", on_ctx_redo, NULL, NULL, NULL, { 0 } },
         { "select-all", on_ctx_select_all, NULL, NULL, NULL, { 0 } },
-        { "change-case", on_ctx_change_case, "i", NULL, NULL, { 0 } }
+        { "change-case", on_ctx_change_case, "i", NULL, NULL, { 0 } },
+        { "set-syntax", on_ctx_set_syntax, "s", NULL, NULL, { 0 } }
     };
     g_action_map_add_action_entries(G_ACTION_MAP(group), ctx_entries, G_N_ELEMENTS(ctx_entries), self);
 
@@ -287,6 +322,9 @@ static void right_click(GtkGestureClick *gesture G_GNUC_UNUSED,
     g_simple_action_set_enabled(G_SIMPLE_ACTION(act), has_selection);
     
     act = g_action_map_lookup_action(G_ACTION_MAP(group), "change-case");
+    g_simple_action_set_enabled(G_SIMPLE_ACTION(act), has_selection);
+    
+    act = g_action_map_lookup_action(G_ACTION_MAP(group), "set-syntax");
     g_simple_action_set_enabled(G_SIMPLE_ACTION(act), has_selection);
     
     act = g_action_map_lookup_action(G_ACTION_MAP(group), "undo");
@@ -681,68 +719,6 @@ on_click_pressed(GtkGestureClick *gesture, int n_press, double x, double y, gpoi
         
         if (gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 2) {
             editor_widget_paste_primary(self);
-        } else if (gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)) == 3) {
-            /* Right Click - Context Menu */
-            GMenu *menu = g_menu_new();
-            GSimpleActionGroup *group = g_simple_action_group_new();
-
-            /* Section 1: Clipboard */
-            GMenu *s1 = g_menu_new();
-            g_menu_append(s1, "Cut", "ctx.cut");
-            g_menu_append(s1, "Copy", "ctx.copy");
-            g_menu_append(s1, "Paste", "ctx.paste");
-            g_menu_append(s1, "Delete", "ctx.delete");
-            g_menu_append_section(menu, NULL, G_MENU_MODEL(s1));
-            g_object_unref(s1);
-
-            /* Section 2: Undo/Redo */
-            GMenu *s2 = g_menu_new();
-            g_menu_append(s2, "Undo", "ctx.undo");
-            g_menu_append(s2, "Redo", "ctx.redo");
-            g_menu_append_section(menu, NULL, G_MENU_MODEL(s2));
-            g_object_unref(s2);
-
-            /* Section 3: Selection */
-            GMenu *s3 = g_menu_new();
-            g_menu_append(s3, "Select All", "ctx.select-all");
-
-            /* Change Case Submenu */
-            GMenu *case_menu = g_menu_new();
-            g_menu_append(case_menu, "lower case", "ctx.change-case(0)");
-            g_menu_append(case_menu, "UPPER CASE", "ctx.change-case(1)");
-            g_menu_append(case_menu, "Title Case", "ctx.change-case(2)");
-            g_menu_append(case_menu, "iNVERT cASE", "ctx.change-case(3)");
-            g_menu_append_submenu(s3, "Change Case", G_MENU_MODEL(case_menu));
-            g_object_unref(case_menu);
-
-            g_menu_append_section(menu, NULL, G_MENU_MODEL(s3));
-            g_object_unref(s3);
-
-            /* Actions */
-            const GActionEntry ctx_entries[] = {
-                { "cut", on_ctx_cut, NULL, NULL, NULL, {0} },
-                { "copy", on_ctx_copy, NULL, NULL, NULL, {0} },
-                { "paste", on_ctx_paste, NULL, NULL, NULL, {0} },
-                { "delete", on_ctx_delete, NULL, NULL, NULL, {0} },
-                { "undo", on_ctx_undo, NULL, NULL, NULL, {0} },
-                { "redo", on_ctx_redo, NULL, NULL, NULL, {0} },
-                { "select-all", on_ctx_select_all, NULL, NULL, NULL, {0} },
-                { "change-case", on_ctx_change_case, "i", NULL, NULL, {0} }
-            };
-            g_action_map_add_action_entries(G_ACTION_MAP(group), ctx_entries, G_N_ELEMENTS(ctx_entries), self);
-
-            GtkWidget *popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
-            gtk_widget_set_parent(popover, GTK_WIDGET(self));
-            gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
-
-            GdkRectangle rect = { (int)x, (int)y, 1, 1 };
-            gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
-
-            gtk_widget_insert_action_group(popover, "ctx", G_ACTION_GROUP(group));
-            gtk_popover_popup(GTK_POPOVER(popover));
-
-            g_object_unref(menu);
-            g_object_unref(group);
         }
     }
     

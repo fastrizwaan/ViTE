@@ -714,7 +714,8 @@ create_pango_layout_for_line(EditorWidget *self, size_t line_idx, char **out_tex
     
     /* Apply Syntax Highlighting for correct metrics (bold, etc) */
     if (self->syntax_ctx) {
-        PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, line_idx, text);
+        size_t line_start_off = document_get_offset_of_line(self->doc, line_idx);
+        PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, line_idx, line_start_off, text);
         if (attrs) {
             pango_layout_set_attributes(layout, attrs);
             pango_attr_list_unref(attrs);

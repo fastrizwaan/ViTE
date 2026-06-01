@@ -6,12 +6,21 @@
 
 /* --- Internal Structures --- */
 
+typedef struct {
+    size_t start_off;
+    size_t end_off;
+    SyntaxLanguage language;
+} SyntaxRangeOverride;
+
 struct _SyntaxContext {
     int ref_count;
     SyntaxLanguage lang;
     
     /* State tracking: index i = state AFTER line i */
     GByteArray *state_chain;
+
+    /* Absolute byte-range regional language overrides */
+    GArray *range_overrides;
 
     /* Cache: maps line_index -> SyntaxCacheEntry* */
     GPtrArray *line_cache;

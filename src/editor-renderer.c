@@ -323,7 +323,8 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
         pango_layout_set_wrap(layout, is_virtualized ? PANGO_WRAP_CHAR : PANGO_WRAP_WORD_CHAR);
     }
 
-    PangoAttrList *cached_attrs = is_virtualized ? NULL : syntax_highlight_line(self->syntax_ctx, phys_line, text);
+    size_t phys_line_start_off = document_get_offset_of_line(self->doc, phys_line);
+    PangoAttrList *cached_attrs = is_virtualized ? NULL : syntax_highlight_line(self->syntax_ctx, phys_line, phys_line_start_off, text);
     PangoAttrList *attrs = cached_attrs ? pango_attr_list_copy(cached_attrs) : pango_attr_list_new();
     pango_layout_set_attributes(layout, attrs);
     if (cached_attrs) pango_attr_list_unref(cached_attrs);

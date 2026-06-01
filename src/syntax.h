@@ -54,7 +54,9 @@ void syntax_context_unref(SyntaxContext *ctx);
 void syntax_context_free(SyntaxContext *ctx); /* deprecated in favor of unref */
 
 void syntax_context_set_language(SyntaxContext *ctx, const char *lang_name);
+void syntax_context_set_language_for_byte_range(SyntaxContext *ctx, size_t start_off, size_t end_off, const char *lang_name);
 void syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta);
+void syntax_context_apply_byte_edit(SyntaxContext *ctx, size_t offset, int64_t delta_len);
 void syntax_context_invalidate_all(SyntaxContext *ctx);  /* Clear all cached highlights */
 void syntax_context_invalidate_cache(SyntaxContext *ctx); /* Clear attributes but keep state */
 const char *syntax_context_get_language_name(SyntaxContext *ctx);
@@ -68,9 +70,9 @@ const char *syntax_detect_language(const char *content);
 */
 /* Process a line to update state, optionally computing attributes. 
    If compute_attributes is FALSE, returns NULL. */
-PangoAttrList *syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text);
-PangoAttrList *syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gboolean compute_attributes);
-PangoAttrList *syntax_process_line_len(SyntaxContext *ctx, size_t line_index, const char *text, size_t len, gboolean compute_attributes);
+PangoAttrList *syntax_highlight_line(SyntaxContext *ctx, size_t line_index, size_t line_start_off, const char *text);
+PangoAttrList *syntax_process_line(SyntaxContext *ctx, size_t line_index, size_t line_start_off, const char *text, gboolean compute_attributes);
+PangoAttrList *syntax_process_line_len(SyntaxContext *ctx, size_t line_index, size_t line_start_off, const char *text, size_t len, gboolean compute_attributes);
 
 /* Get the number of lines that have been processed for state so far */
 size_t syntax_get_processed_line_count(SyntaxContext *ctx);

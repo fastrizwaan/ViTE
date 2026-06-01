@@ -102,6 +102,7 @@ syntax_context_new(void)
     ctx->ref_count = 1;
     ctx->lang = LANG_NONE;
     ctx->state_chain = g_byte_array_new();
+    ctx->range_overrides = g_array_new(FALSE, FALSE, sizeof(SyntaxRangeOverride));
     ctx->valid_up_to = 0;
     
     /* Compile Regexes */
@@ -155,6 +156,7 @@ syntax_context_unref(SyntaxContext *ctx)
     if (!g_atomic_int_dec_and_test(&ctx->ref_count)) return;
 
     if (ctx->state_chain) g_byte_array_unref(ctx->state_chain);
+    if (ctx->range_overrides) g_array_unref(ctx->range_overrides);
     
     if (ctx->sh_keywords) g_regex_unref(ctx->sh_keywords);
     if (ctx->sh_builtins) g_regex_unref(ctx->sh_builtins);
@@ -183,39 +185,52 @@ syntax_context_unref(SyntaxContext *ctx)
     g_free(ctx);
 }
 
+static SyntaxLanguage
+syntax_language_from_string(const char *lang_name)
+{
+    if (!lang_name) return LANG_NONE;
+    if (strcmp(lang_name, "c") == 0 || strcmp(lang_name, "cpp") == 0 || strcmp(lang_name, "h") == 0) return LANG_C;
+    if (strcmp(lang_name, "python") == 0 || strcmp(lang_name, "py") == 0) return LANG_PYTHON;
+    if (strcmp(lang_name, "bash") == 0 || strcmp(lang_name, "sh") == 0 || strcmp(lang_name, "zsh") == 0) return LANG_BASH;
+    if (strcmp(lang_name, "javascript") == 0 || strcmp(lang_name, "js") == 0 || strcmp(lang_name, "ts") == 0) return LANG_JAVASCRIPT;
+    if (strcmp(lang_name, "json") == 0) return LANG_JSON;
+    if (strcmp(lang_name, "yaml") == 0 || strcmp(lang_name, "yml") == 0) return LANG_YAML;
+    if (strcmp(lang_name, "xml") == 0 || strcmp(lang_name, "html") == 0 || strcmp(lang_name, "xsl") == 0 || strcmp(lang_name, "svg") == 0) return LANG_XML;
+    if (strcmp(lang_name, "desktop") == 0) return LANG_DESKTOP;
+    if (strcmp(lang_name, "rust") == 0 || strcmp(lang_name, "rs") == 0 || strcmp(lang_name, "rst") == 0) return LANG_RUST;
+    if (strcmp(lang_name, "markdown") == 0 || strcmp(lang_name, "md") == 0 || strcmp(lang_name, "mkd") == 0) return LANG_MARKDOWN;
+    return LANG_NONE;
+}
+
 void
 syntax_context_set_language(SyntaxContext *ctx, const char *lang_name)
 {
-    if (!lang_name) {
-        ctx->lang = LANG_NONE;
-    } else if (strcmp(lang_name, "c") == 0 || strcmp(lang_name, "cpp") == 0 || strcmp(lang_name, "h") == 0) {
-        ctx->lang = LANG_C;
-    } else if (strcmp(lang_name, "python") == 0 || strcmp(lang_name, "py") == 0) {
-        ctx->lang = LANG_PYTHON;
-    } else if (strcmp(lang_name, "bash") == 0 || strcmp(lang_name, "sh") == 0 || strcmp(lang_name, "zsh") == 0) {
-        ctx->lang = LANG_BASH;
-    } else if (strcmp(lang_name, "javascript") == 0 || strcmp(lang_name, "js") == 0 || strcmp(lang_name, "ts") == 0) {
-        ctx->lang = LANG_JAVASCRIPT;
-    } else if (strcmp(lang_name, "json") == 0) {
-        ctx->lang = LANG_JSON;
-    } else if (strcmp(lang_name, "yaml") == 0 || strcmp(lang_name, "yml") == 0) {
-        ctx->lang = LANG_YAML;
-    } else if (strcmp(lang_name, "xml") == 0 || strcmp(lang_name, "html") == 0 || strcmp(lang_name, "xsl") == 0 || strcmp(lang_name, "svg") == 0) {
-        ctx->lang = LANG_XML;
-    } else if (strcmp(lang_name, "desktop") == 0) {
-        ctx->lang = LANG_DESKTOP;
-    } else if (strcmp(lang_name, "rust") == 0 || strcmp(lang_name, "rs") == 0 || strcmp(lang_name, "rst") == 0) {
-        ctx->lang = LANG_RUST;
-    } else if (strcmp(lang_name, "markdown") == 0 || strcmp(lang_name, "md") == 0 || strcmp(lang_name, "mkd") == 0) {
-        ctx->lang = LANG_MARKDOWN;
-    } else {
-        ctx->lang = LANG_NONE;
-    }
+    ctx->lang = syntax_language_from_string(lang_name);
     
-    /* Clear states and cache */
+    /* Clear states, cache, and byte overrides */
     g_byte_array_set_size(ctx->state_chain, 0);
+    if (ctx->range_overrides) g_array_set_size(ctx->range_overrides, 0);
     ctx->valid_up_to = 0;
     if (ctx->line_cache) g_ptr_array_set_size(ctx->line_cache, 0);
+}
+
+void
+syntax_context_set_language_for_byte_range(SyntaxContext *ctx, size_t start_off, size_t end_off, const char *lang_name)
+{
+    if (!ctx || start_off >= end_off) return;
+    
+    SyntaxLanguage new_lang = syntax_language_from_string(lang_name);
+    if (new_lang == LANG_NONE) return;
+    
+    SyntaxRangeOverride override = { start_off, end_off, new_lang };
+    g_array_append_val(ctx->range_overrides, override);
+    
+    /* We invalidate everything so it forces a redraw and re-parse. 
+       We could be smarter but byte ranges can span anywhere. */
+    ctx->valid_up_to = 0;
+    if (ctx->line_cache) {
+        g_ptr_array_set_size(ctx->line_cache, 0);
+    }
 }
 
 SyntaxLanguage
@@ -347,6 +362,8 @@ syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta)
             }
         }
     }
+
+
     if (ctx->valid_up_to > start_line) {
         ctx->valid_up_to = start_line;
     }
@@ -372,6 +389,47 @@ syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta)
                  g_ptr_array_remove_index(ctx->line_cache, start_line);
                  g_ptr_array_insert(ctx->line_cache, start_line, NULL);
              }
+        }
+    }
+}
+void
+syntax_context_apply_byte_edit(SyntaxContext *ctx, size_t offset, int64_t delta_len)
+{
+    if (!ctx || !ctx->range_overrides) return;
+    
+    for (guint i = 0; i < ctx->range_overrides->len; i++) {
+        SyntaxRangeOverride *range = &g_array_index(ctx->range_overrides, SyntaxRangeOverride, i);
+        
+        if (delta_len > 0) { // insertion
+            if (offset <= range->start_off) {
+                range->start_off += delta_len;
+                range->end_off += delta_len;
+            } else if (offset < range->end_off) {
+                range->end_off += delta_len;
+            }
+        } else if (delta_len < 0) { // deletion
+            size_t del_len = -delta_len;
+            if (offset + del_len <= range->start_off) {
+                // deletion is entirely before the range
+                range->start_off -= del_len;
+                range->end_off -= del_len;
+            } else if (offset <= range->start_off && offset + del_len >= range->end_off) {
+                // range is entirely deleted
+                g_array_remove_index(ctx->range_overrides, i);
+                i--; // adjust index
+                continue;
+            } else if (offset <= range->start_off) {
+                // overlaps start of range
+                range->start_off = offset;
+                range->end_off -= del_len;
+            } else if (offset < range->end_off) {
+                // overlaps end of range or inside range
+                if (offset + del_len >= range->end_off) {
+                    range->end_off = offset;
+                } else {
+                    range->end_off -= del_len;
+                }
+            }
         }
     }
 }
@@ -469,72 +527,94 @@ syntax_get_processed_line_count(SyntaxContext *ctx)
 }
 
 PangoAttrList *
-syntax_process_line_len(SyntaxContext *ctx, size_t line_index, const char *text, size_t len, gboolean compute_attributes)
+syntax_process_line_len(SyntaxContext *ctx, size_t line_index, size_t line_start_off, const char *text, size_t len, gboolean compute_attributes)
 {
-    if (ctx->lang == LANG_NONE) return compute_attributes ? pango_attr_list_new() : NULL;
+    SyntaxLanguage current_lang = ctx->lang;
+    if (current_lang == LANG_NONE && (!ctx->range_overrides || ctx->range_overrides->len == 0)) {
+        return compute_attributes ? pango_attr_list_new() : NULL;
+    }
     
     SyntaxState start_state = get_line_start_state(ctx, line_index);
     guint content_hash = 0;
     
-    /* Cache lookup - Only if we need attributes */
-    /* Optimization: Don't compute hash if not computing attributes! */
     if (compute_attributes) {
         content_hash = g_str_hash(text); 
         
         if (ctx->line_cache && line_index < ctx->line_cache->len) {
             SyntaxCacheEntry *cached = g_ptr_array_index(ctx->line_cache, line_index);
             if (cached && cached->content_hash == content_hash && cached->start_state == start_state) {
-                /* Cache hit - return a copy of the cached attrs */
                 return pango_attr_list_ref(cached->attrs);
             }
         }
     }
     
     PangoAttrList *attrs = compute_attributes ? pango_attr_list_new() : NULL;
-    /* len is provided, no strlen needed */
 
-    /* PERF: Disable syntax highlighting for extremely long lines (minified files)
-       to avoid freezing the UI with massive regex scans. */
     if (len > 4096) {
         return NULL;
     }
     
-    /* Dispatch to language handlers */
-    switch (ctx->lang) {
-        case LANG_C:
-            syntax_highlight_c(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_PYTHON:
-            syntax_highlight_python(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_BASH:
-            syntax_highlight_bash(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_JAVASCRIPT:
-            syntax_highlight_js(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_JSON:
-            syntax_highlight_json(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_YAML:
-            syntax_highlight_yaml(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_XML:
-            syntax_highlight_xml(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_DESKTOP:
-            syntax_highlight_desktop(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_RUST:
-            syntax_highlight_rust(ctx, attrs, text, len, start_state, line_index);
-            break;
-        case LANG_MARKDOWN:
-            syntax_highlight_markdown(ctx, attrs, text, len, start_state, line_index);
-            break;
-        default:
-             /* Just save state if we don't have a handler (shouldn't happen if lang!=NONE) */
-             set_line_end_state(ctx, line_index, start_state);
-             break;
+    /* Default processing */
+    if (current_lang != LANG_NONE) {
+        switch (current_lang) {
+            case LANG_C: syntax_highlight_c(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_PYTHON: syntax_highlight_python(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_BASH: syntax_highlight_bash(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_JAVASCRIPT: syntax_highlight_js(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_JSON: syntax_highlight_json(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_YAML: syntax_highlight_yaml(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_XML: syntax_highlight_xml(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_DESKTOP: syntax_highlight_desktop(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_RUST: syntax_highlight_rust(ctx, attrs, text, len, start_state, line_index); break;
+            case LANG_MARKDOWN: syntax_highlight_markdown(ctx, attrs, text, len, start_state, line_index); break;
+            default: set_line_end_state(ctx, line_index, start_state); break;
+        }
+    } else {
+        set_line_end_state(ctx, line_index, start_state);
+    }
+    
+    /* Apply regional overrides */
+    if (compute_attributes && ctx->range_overrides) {
+        size_t line_end_off = line_start_off + len;
+        
+        for (guint i = 0; i < ctx->range_overrides->len; i++) {
+            SyntaxRangeOverride *range = &g_array_index(ctx->range_overrides, SyntaxRangeOverride, i);
+            
+            /* Check intersection */
+            if (range->start_off < line_end_off && range->end_off > line_start_off) {
+                size_t intersect_start = MAX(range->start_off, line_start_off) - line_start_off;
+                size_t intersect_end = MIN(range->end_off, line_end_off) - line_start_off;
+                size_t intersect_len = intersect_end - intersect_start;
+                
+                if (intersect_len == 0) continue;
+                
+                /* Substring to parse */
+                char *sub_text = g_strndup(text + intersect_start, intersect_len);
+                PangoAttrList *sub_attrs = pango_attr_list_new();
+                
+                /* Pass ROOT state for substring parsing */
+                SyntaxState sub_state = STATE_ROOT;
+                
+                switch (range->language) {
+                    case LANG_C: syntax_highlight_c(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_PYTHON: syntax_highlight_python(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_BASH: syntax_highlight_bash(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_JAVASCRIPT: syntax_highlight_js(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_JSON: syntax_highlight_json(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_YAML: syntax_highlight_yaml(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_XML: syntax_highlight_xml(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_DESKTOP: syntax_highlight_desktop(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_RUST: syntax_highlight_rust(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_MARKDOWN: syntax_highlight_markdown(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    default: break;
+                }
+                
+                /* Splice sub_attrs into attrs shifted by intersect_start */
+                pango_attr_list_splice(attrs, sub_attrs, intersect_start, intersect_len);
+                pango_attr_list_unref(sub_attrs);
+                g_free(sub_text);
+            }
+        }
     }
 
     /* Store in cache */
@@ -558,13 +638,13 @@ syntax_process_line_len(SyntaxContext *ctx, size_t line_index, const char *text,
 }
 
 PangoAttrList *
-syntax_process_line(SyntaxContext *ctx, size_t line_index, const char *text, gboolean compute_attributes)
+syntax_process_line(SyntaxContext *ctx, size_t line_index, size_t line_start_off, const char *text, gboolean compute_attributes)
 {
-    return syntax_process_line_len(ctx, line_index, text, strlen(text), compute_attributes);
+    return syntax_process_line_len(ctx, line_index, line_start_off, text, strlen(text), compute_attributes);
 }
 
 PangoAttrList *
-syntax_highlight_line(SyntaxContext *ctx, size_t line_index, const char *text)
+syntax_highlight_line(SyntaxContext *ctx, size_t line_index, size_t line_start_off, const char *text)
 {
-    return syntax_process_line(ctx, line_index, text, TRUE);
+    return syntax_process_line(ctx, line_index, line_start_off, text, TRUE);
 }

@@ -223,7 +223,8 @@ draw_page(GtkPrintOperation *operation G_GNUC_UNUSED, GtkPrintContext *context, 
         
         /* Syntax Highlighting */
         if (self->syntax_ctx) {
-            PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, i, text);
+            size_t line_start_off = document_get_offset_of_line(self->doc, i);
+            PangoAttrList *attrs = syntax_highlight_line(self->syntax_ctx, i, line_start_off, text);
             if (attrs) {
                 pango_layout_set_attributes(layout, attrs);
                 pango_attr_list_unref(attrs);

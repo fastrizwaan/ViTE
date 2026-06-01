@@ -164,44 +164,50 @@ syntax_scan_step(gpointer user_data)
     size_t batch = 50000;
     size_t limit = MIN(total, processed + batch);
     
+    #define SCAN_BUF_SIZE 65536
+    char *buf = g_malloc(SCAN_BUF_SIZE + 1);
+    
+    DocumentIter iter;
+    document_iter_init(self->doc, &iter, processed);
+    
+    size_t current_offset = document_get_offset_of_line(self->doc, processed);
+    
     for (size_t i = processed; i < limit; i++) {
-        size_t len;
-        char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN, NULL);
-        if (text) {
-             size_t tlen = len;
-             while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;
-             text[tlen] = '\0';
-             
-             /* Optimization: Check for state convergence */
-             SyntaxState old_state = STATE_ROOT;
-             if (i < self->syntax_ctx->state_chain->len) {
-                 old_state = self->syntax_ctx->state_chain->data[i];
-             }
-             
-             syntax_process_line(self->syntax_ctx, i, text, FALSE);
+        size_t len = document_iter_next_line(&iter, buf, SCAN_BUF_SIZE);
+        size_t orig_len = len;
+        
+        buf[MIN(len, SCAN_BUF_SIZE)] = '\0';
+        
+        while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) len--;
+        buf[len] = '\0';
+        
+        SyntaxState old_state = STATE_ROOT;
+        if (i < self->syntax_ctx->state_chain->len) {
+            old_state = self->syntax_ctx->state_chain->data[i];
+        }
+        
+        syntax_process_line(self->syntax_ctx, i, current_offset, buf, FALSE);
+        current_offset += orig_len;
              
              /* Mark this line as valid */
              self->syntax_ctx->valid_up_to = i + 1;
 
-             SyntaxState new_state = STATE_ROOT;
-             if (i < self->syntax_ctx->state_chain->len) {
-                 new_state = self->syntax_ctx->state_chain->data[i];
-             }
-             
-             g_free(text);
+        SyntaxState new_state = STATE_ROOT;
+        if (i < self->syntax_ctx->state_chain->len) {
+            new_state = self->syntax_ctx->state_chain->data[i];
+        }
              
              /* If state hasn't changed, and we have valid states ahead, we can stop early! */
-             if (old_state == new_state && i < self->syntax_ctx->state_chain->len - 1) {
-                 /* Converged! The rest of the file state is valid (shifted correctly). */
-                 /* Only stop if we are sure (maybe check if we are past the initial edit line?)
-                    Actually, if output matches, and next line content is static, it propagates. */
-                 self->syntax_ctx->valid_up_to = total; /* Mark all as valid */
-                 self->syntax_scan_idle_id = 0;
-                 gtk_widget_queue_draw(GTK_WIDGET(self));
-                 return G_SOURCE_REMOVE;
-             }
+        if (old_state == new_state && i < self->syntax_ctx->state_chain->len - 1) {
+            self->syntax_ctx->valid_up_to = total;
+            self->syntax_scan_idle_id = 0;
+            gtk_widget_queue_draw(GTK_WIDGET(self));
+            g_free(buf);
+            return G_SOURCE_REMOVE;
         }
     }
+    
+    g_free(buf);
     
     /* Continue idle loop */
     gtk_widget_queue_draw(GTK_WIDGET(self));
@@ -212,6 +218,10 @@ static void
 on_document_edit(Document *doc G_GNUC_UNUSED, size_t offset, int64_t delta_len, gpointer user_data)
 {
     EditorWidget *self = EDITOR_WIDGET(user_data);
+    
+    if (self->syntax_ctx) {
+        syntax_context_apply_byte_edit(self->syntax_ctx, offset, delta_len);
+    }
     
     if (self->active_search) {
         document_search_task_apply_edit(self->active_search, offset, delta_len);
@@ -809,13 +819,16 @@ editor_widget_ensure_syntax_state_up_to(EditorWidget *self, size_t target_line)
     
     DocumentIter iter;
     document_iter_init(self->doc, &iter, valid_up_to);
+    
+    size_t current_offset = document_get_offset_of_line(self->doc, valid_up_to);
 
     for (size_t i = valid_up_to; i < limit; i++) {
         /* Zero-Allocation fetch via Iterator (O(1) amortized) */
         size_t len = document_iter_next_line(&iter, buf, SCAN_BUF_SIZE);
+        size_t orig_len = len;
         
         /* If line was longer than buffer, it's truncated. */
-        buf[len] = '\0';
+        buf[MIN(len, SCAN_BUF_SIZE)] = '\0';
         
         /* Strip newline chars for the scanner (it expects clean line) */
         while (len > 0 && (buf[len-1] == '\n' || buf[len-1] == '\r')) {
@@ -824,7 +837,8 @@ editor_widget_ensure_syntax_state_up_to(EditorWidget *self, size_t target_line)
         }
 
         /* FALSE = State Only (Fast Path). Pass len to avoid strlen. */
-        syntax_process_line_len(self->syntax_ctx, i, buf, len, FALSE);
+        syntax_process_line_len(self->syntax_ctx, i, current_offset, buf, len, FALSE);
+        current_offset += orig_len;
     }
     g_free(buf);
     
@@ -1027,21 +1041,7 @@ editor_widget_set_document(EditorWidget *self, Document *doc)
         size_t total = document_get_line_count(self->doc);
         
         /* Scan everything for state correctness (separate loop from rendering) */
-        for (size_t i = 0; i < total; i++) {
-             size_t len;
-             char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN, NULL);
-             if (text) {
-                 size_t tlen = len;
-                 while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;
-                 text[tlen] = '\0';
-                 /* FALSE = State Only (Fast Path) */
-                 syntax_process_line(self->syntax_ctx, i, text, FALSE);
-                 g_free(text);
-             }
-        }
-        
-        /* Mark valid up to total so renderer knows state is ready */
-        self->syntax_ctx->valid_up_to = total;
+        editor_widget_ensure_syntax_state_up_to(self, total - 1);
         
         /* No need for background scanner for state anymore, 
            unless we want to re-scan for very huge files (e.g. > 1M lines) strictly? 
@@ -1070,20 +1070,7 @@ editor_widget_set_language(EditorWidget *self, const char *lang)
             size_t total = document_get_line_count(self->doc);
             
             /* Scan ENTIRE file for state */
-            for (size_t i = 0; i < total; i++) {
-                 size_t len;
-                 char *text = document_get_line_truncated(self->doc, i, &len, MAX_PANGO_LINE_LEN, NULL);
-                 if (text) {
-                     size_t tlen = len;
-                     while (tlen > 0 && (text[tlen-1] == '\n' || text[tlen-1] == '\r')) tlen--;
-                     text[tlen] = '\0';
-                     /* FALSE = State Only (Fast Path) */
-                     syntax_process_line(self->syntax_ctx, i, text, FALSE);
-                     g_free(text);
-                 }
-            }
-            
-            self->syntax_ctx->valid_up_to = total;
+            editor_widget_ensure_syntax_state_up_to(self, total - 1);
 
             /* Disable background scanner as state is fully valid now */
             if (self->syntax_scan_idle_id) {
