@@ -529,7 +529,12 @@ show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCall
     gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(header), title);
 
-    GtkWidget *body = gtk_label_new(_("Open documents contain unsaved changes.\nChanges which are not saved will be permanently lost."));
+    GtkWidget *body = gtk_label_new(NULL);
+    if (tabs->len == 1) {
+        gtk_label_set_text(GTK_LABEL(body), _("Open document contains unsaved changes.\nChanges which are not saved will be permanently lost."));
+    } else {
+        gtk_label_set_text(GTK_LABEL(body), _("Open documents contain unsaved changes.\nChanges which are not saved will be permanently lost."));
+    }
     gtk_widget_add_css_class(body, "dim-label");
     gtk_label_set_wrap(GTK_LABEL(body), TRUE);
     gtk_label_set_justify(GTK_LABEL(body), GTK_JUSTIFY_CENTER);
@@ -607,7 +612,7 @@ show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCall
     gtk_box_append(GTK_BOX(main_box), button_box);
 
     GtkWidget *cancel_btn = gtk_button_new_with_label(_("Cancel"));
-    GtkWidget *discard_btn = gtk_button_new_with_label(_("Discard All"));
+    GtkWidget *discard_btn = gtk_button_new_with_label(tabs->len == 1 ? _("Discard") : _("Discard All"));
     GtkWidget *save_btn = gtk_button_new_with_label(_("Save"));
     
     gtk_widget_add_css_class(discard_btn, "destructive-action");
@@ -5138,6 +5143,7 @@ on_unsaved_window_close_response(const char *response, SaveChangesDialogData *di
             return;
         }
 
+        win->force_close_once = TRUE;
         win->close_when_done = TRUE;
         check_close_when_done(win);
     }
