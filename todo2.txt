@@ -1,0 +1,20 @@
+i love my text editor because it is fun to use. <=Example title it is cutting at edito (r missing)
+
+file name/titlebar should have 25-30 characters with '.' or ' ' (up to 40)
+
+###
+2 windows with modified files (opened file modified) and in new window unsaved document casues freezing.
+
+find replace is not setting 'modified state' or now showing dot before file
+
+split view is not having wordwrap working properly perhaps fixed split editor area is used which won't readjust with the split resize
+
+split view not showing 'close button' for the view
+
+huge 2 million lines html/xml file on loading takes are lot of time for syntax highlighting, improve.
+
+typing at the end freezes with syntax highlighting. plain text would allow it. so files > 20k lines disable syntax highlighting.
+
+Also selection right-click menu->Syntax highlight->C,C++, html, etc. should higlight only the selected lines.
+
+open opening from recent, if file not found, inform the user and do not move it top

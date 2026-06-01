@@ -1549,26 +1549,41 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
     GtkWidget *revealer = gtk_revealer_new();
     gtk_revealer_set_transition_type(GTK_REVEALER(revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
     
-    GtkWidget *info_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
-    gtk_widget_add_css_class(info_box, "view-split"); /* gives it a nice background/border */
-    gtk_widget_set_margin_start(info_box, 12);
-    gtk_widget_set_margin_end(info_box, 12);
-    gtk_widget_set_margin_top(info_box, 6);
-    gtk_widget_set_margin_bottom(info_box, 6);
+    GtkWidget *info_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_add_css_class(info_box, "external-change-banner");
+    gtk_widget_set_margin_start(info_box, 0);
+    gtk_widget_set_margin_end(info_box, 0);
+    gtk_widget_set_margin_top(info_box, 0);
+    gtk_widget_set_margin_bottom(info_box, 0);
     
-    GtkWidget *icon = gtk_image_new_from_icon_name("dialog-warning-symbolic");
-    GtkWidget *label = gtk_label_new(_("This file has been modified by another program."));
-    gtk_widget_set_hexpand(label, TRUE);
-    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    /* Left side: Title and Subtitle */
+    GtkWidget *text_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_hexpand(text_box, TRUE);
+    gtk_widget_set_valign(text_box, GTK_ALIGN_CENTER);
     
-    GtkWidget *btn_reload = gtk_button_new_with_label(_("Reload"));
-    GtkWidget *btn_ignore = gtk_button_new_with_label(_("Ignore"));
-    gtk_widget_add_css_class(btn_reload, "suggested-action");
+    GtkWidget *title_label = gtk_label_new(_("File Has Changed on Disk"));
+    gtk_widget_set_halign(title_label, GTK_ALIGN_START);
+    gtk_widget_add_css_class(title_label, "heading");
     
-    gtk_box_append(GTK_BOX(info_box), icon);
-    gtk_box_append(GTK_BOX(info_box), label);
-    gtk_box_append(GTK_BOX(info_box), btn_ignore);
+    GtkWidget *subtitle_label = gtk_label_new(_("The file has been changed by another program."));
+    gtk_widget_set_halign(subtitle_label, GTK_ALIGN_START);
+    
+    gtk_box_append(GTK_BOX(text_box), title_label);
+    gtk_box_append(GTK_BOX(text_box), subtitle_label);
+    
+    /* Right side: Reload Button and Close Button */
+    GtkWidget *btn_reload = gtk_button_new_with_label(_("Discard Changes and Reload"));
+    gtk_widget_set_valign(btn_reload, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class(btn_reload, "reload-btn");
+    
+    GtkWidget *btn_ignore = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_set_valign(btn_ignore, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class(btn_ignore, "flat");
+    gtk_widget_add_css_class(btn_ignore, "close-btn");
+    
+    gtk_box_append(GTK_BOX(info_box), text_box);
     gtk_box_append(GTK_BOX(info_box), btn_reload);
+    gtk_box_append(GTK_BOX(info_box), btn_ignore);
     
     gtk_revealer_set_child(GTK_REVEALER(revealer), info_box);
     
@@ -2904,11 +2919,39 @@ load_css(void)
     "    border: none;"
     "    box-shadow: none;"
     "    margin-bottom: -4px;"
-    "    padding-top: 0px;"
     "    padding-bottom: 0px;"
     "    min-height: 0px;"
     "}"
+    ".external-change-banner {"
+    "    background-color: mix(@theme_bg_color, #e6b840, 0.35);"
+    "    color: @theme_fg_color;"
+    "    border-bottom: 1px solid alpha(currentColor, 0.15);"
+    "    padding: 8px 6px 8px 12px;"
+    "}"
+    ".external-change-banner .heading {"
+    "    font-weight: bold;"
+    "}"
+    ".external-change-banner .reload-btn {"
+    "    background-color: mix(@theme_bg_color, #e6b840, 0.5);"
+    "    color: @theme_fg_color;"
+    "    border: 1px solid alpha(currentColor, 0.1);"
+    "    box-shadow: none;"
+    "    font-weight: bold;"
+    "    border-radius: 6px;"
+    "    padding: 4px 12px;"
+    "}"
+    ".external-change-banner .reload-btn:hover {"
+    "    background-color: mix(@theme_bg_color, #e6b840, 0.65);"
+    "}"
+    ".external-change-banner .close-btn {"
+    "    color: @theme_fg_color;"
+    "    margin-left: 4px;"
+    "}"
+    ".external-change-banner .close-btn:hover {"
+    "    background-color: alpha(currentColor, 0.1);"
+    "}"
     );
+
 
     /* Part 4: Recent list, Scrollbars and Header Buttons (inc. Save) */
     g_string_append(css,

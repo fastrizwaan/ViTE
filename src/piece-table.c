@@ -3658,6 +3658,8 @@ piece_table_save_async_start(PieceTable *pt, int fd)
     task->bytes_written = 0;
     task->need_crlf = (pt->newline_style == NEWLINE_CRLF);
     
+    g_print("SAVE START: newline_style = %d, need_crlf = %d\n", pt->newline_style, task->need_crlf);
+    
     /* Calculate if BOM write is needed */
     gboolean needs_bom = (file_encoding_is_utf16(pt->encoding) || file_encoding_is_utf32(pt->encoding) || pt->has_bom);
     

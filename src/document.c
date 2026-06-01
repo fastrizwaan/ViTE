@@ -259,7 +259,19 @@ on_file_changed (GFileMonitor *monitor G_GNUC_UNUSED,
 
     mtime = g_file_info_get_modification_date_time(info);
     if (mtime) {
-        if (!doc->last_mtime || g_date_time_compare(mtime, doc->last_mtime) != 0) {
+        gboolean changed = TRUE;
+        if (doc->last_mtime) {
+            GTimeSpan diff = g_date_time_difference(mtime, doc->last_mtime);
+            if (diff < 0) diff = -diff;
+            
+            /* Tolerate up to 2 seconds of difference to account for filesystem 
+             * rounding, cache delays, and async monitor events. */
+            if (diff <= G_TIME_SPAN_SECOND * 2) {
+                changed = FALSE;
+            }
+        }
+        
+        if (changed) {
             document_set_last_mtime_from_info(doc, info);
             /* File changed externally */
             for (GList *l = doc->ext_mod_callbacks; l != NULL; l = l->next) {
