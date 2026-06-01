@@ -11,12 +11,13 @@ split view is not having wordwrap working properly perhaps fixed split editor ar
 
 split view not showing 'close button' for the view
 
-huge 2 million lines html/xml file on loading takes are lot of time for syntax highlighting, improve.
-
-typing at the end freezes with syntax highlighting. plain text would allow it. so files > 20k lines disable syntax highlighting.
+X huge 2 million lines html/xml file on loading takes are lot of time for syntax highlighting, improve.
 
 Also selection right-click menu->Syntax highlight->C,C++, html, etc. should higlight only the selected lines.
 
-discard and discard all ; if one file then discard, if more than 1 files discard all
+typing at the end freezes with syntax highlighting. plain text would allow it. so files > 20k lines disable syntax highlighting.
 
-open opening from recent, if file not found, inform the user and do not move it top in recent; and do not load/create an empty file.
+
+X discard and discard all ; if one file then discard, if more than 1 files discard all
+
+X open opening from recent, if file not found, inform the user and do not move it top in recent; and do not load/create an empty file.
