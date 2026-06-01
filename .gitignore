@@ -10,7 +10,7 @@ tests
 *.log
 .github
 CudaText
-gnome-text-editor-49.0
+gnome-text-editor*
 
 core.dmp
 *.bak
