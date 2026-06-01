@@ -168,6 +168,7 @@ struct _EditorWidget {
     guint autoscroll_tick_count;
     guint idle_resize_id;
     guint syntax_scan_idle_id; /* For background full-document scanning */
+    guint fold_rebuild_idle_id; /* For debounced folding recalculation */
     
     gboolean last_theme_dark_mode; /* Tracking for syntax cache invalidation */
     guint64 last_theme_revision;   /* Theme revision seen by this editor */

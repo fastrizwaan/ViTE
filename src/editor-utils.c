@@ -1131,13 +1131,16 @@ editor_widget_rebuild_folding(EditorWidget *self)
     GArray *stack_lines = g_array_new(FALSE, FALSE, sizeof(size_t));
     GArray *stack_indents = g_array_new(FALSE, FALSE, sizeof(int));
 
+    DocumentIter iter;
+    document_iter_init(self->doc, &iter, 0);
+    
+    #define SCAN_BUF_SIZE 4096
+    char *buf = g_malloc(SCAN_BUF_SIZE + 1);
+
     for (size_t i = 0; i < total; i++) {
-        size_t len = 0;
-        char *line = document_get_line(self->doc, i, &len);
-        if (!line) continue;
+        size_t len = document_iter_next_line(&iter, buf, SCAN_BUF_SIZE);
         int indent = 0;
-        gboolean has_text = editor_widget_line_has_text(line, len, self->tab_width, &indent);
-        g_free(line);
+        gboolean has_text = editor_widget_line_has_text(buf, MIN(len, SCAN_BUF_SIZE), self->tab_width, &indent);
         if (!has_text) continue;
 
         while (stack_lines->len > 0) {
@@ -1173,6 +1176,7 @@ editor_widget_rebuild_folding(EditorWidget *self)
 
     g_array_free(stack_lines, TRUE);
     g_array_free(stack_indents, TRUE);
+    g_free(buf);
 
     if (self->fold_ranges->len > 1) {
         g_array_sort(self->fold_ranges, (GCompareFunc)fold_range_compare);

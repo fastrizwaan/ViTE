@@ -310,6 +310,16 @@ shift_collapsed_folds(EditorWidget *self, size_t start_line, int line_delta)
     }
 }
 
+static gboolean
+on_fold_rebuild_timeout(gpointer user_data)
+{
+    EditorWidget *self = EDITOR_WIDGET(user_data);
+    self->fold_rebuild_idle_id = 0;
+    editor_widget_rebuild_folding(self);
+    gtk_widget_queue_draw(GTK_WIDGET(self));
+    return G_SOURCE_REMOVE;
+}
+
 static void
 on_document_update(Document *doc G_GNUC_UNUSED, size_t start_line, int line_delta, gpointer user_data)
 {
@@ -333,7 +343,16 @@ on_document_update(Document *doc G_GNUC_UNUSED, size_t start_line, int line_delt
     }
 
     shift_collapsed_folds(self, start_line, line_delta);
-    editor_widget_rebuild_folding(self);
+    
+    /* Synchronously update visible lines array length so renderer doesn't crash */
+    editor_widget_rebuild_visible_lines(self);
+
+    if (self->fold_rebuild_idle_id) {
+        g_source_remove(self->fold_rebuild_idle_id);
+    }
+    /* Debounce folding rebuild to avoid freezing on rapid typing */
+    self->fold_rebuild_idle_id = g_timeout_add(250, on_fold_rebuild_timeout, self);
+
     if (self->line_y_offsets) g_array_set_size(self->line_y_offsets, 0);
     editor_widget_update_adjustments(self, -1, -1);
     gtk_widget_queue_draw(GTK_WIDGET(self));
