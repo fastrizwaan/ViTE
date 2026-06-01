@@ -236,11 +236,10 @@ create_encoding_menu(ViteStatusBar *self)
 static GtkWidget *
 create_separator(void)
 {
-    GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
-    gtk_widget_set_margin_top(sep, 4);
-    gtk_widget_set_margin_bottom(sep, 4);
-    gtk_widget_set_margin_start(sep, 4);
-    gtk_widget_set_margin_end(sep, 4);
+    GtkWidget *sep = gtk_label_new("•");
+    gtk_widget_add_css_class(sep, "dim-label");
+    gtk_widget_set_margin_start(sep, 0);
+    gtk_widget_set_margin_end(sep, 0);
     return sep;
 }
 
@@ -556,7 +555,7 @@ vite_status_bar_init(ViteStatusBar *self)
     gtk_box_append(GTK_BOX(self->box), spacer);
     
     /* Cursor Position */
-    self->cursor_label = gtk_label_new("Ln 1, Col 1");
+    self->cursor_label = gtk_label_new("1:1");
     gtk_widget_set_margin_start(self->cursor_label, 8);
     gtk_widget_set_margin_end(self->cursor_label, 8);
     gtk_box_append(GTK_BOX(self->box), self->cursor_label);
@@ -598,7 +597,7 @@ void
 vite_status_bar_set_cursor_position(ViteStatusBar *self, int line, int col)
 {
     g_return_if_fail(VITE_IS_STATUS_BAR(self));
-    char *text = g_strdup_printf(_("Ln %d, Col %d"), line + 1, col + 1);
+    char *text = g_strdup_printf("%d:%d", line + 1, col + 1);
     gtk_label_set_text(GTK_LABEL(self->cursor_label), text);
     g_free(text);
 }
