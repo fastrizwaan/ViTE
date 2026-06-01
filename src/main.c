@@ -6015,6 +6015,11 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
             GtkWidget *ed = g_ptr_array_index(editors, i);
             gtk_widget_set_sensitive(ed, TRUE);
             if (success) {
+                /* Disable syntax highlighting for massive files (> 20,000 lines) for performance */
+                if (document_get_line_count(doc) > 20000) {
+                    editor_widget_set_language(EDITOR_WIDGET(ed), "plain");
+                }
+
                 SyntaxContext *syntax_ctx = editor_widget_get_syntax_context(EDITOR_WIDGET(ed));
                 if (syntax_ctx) {
                     syntax_context_invalidate_all(syntax_ctx);
