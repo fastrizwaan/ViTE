@@ -1350,9 +1350,20 @@ static void close_split_view(GtkWidget *overlay);
 static void update_window_title_for_tab(ViteTab *tab);
 
 static void
+on_close_split_clicked(GtkWidget *overlay, gpointer user_data G_GNUC_UNUSED)
+{
+    GtkWidget *view_container = gtk_widget_get_parent(overlay);
+    if (view_container) {
+        close_split_view(view_container);
+    }
+}
+
+static void
 on_overlay_focus_leave(GtkEventControllerFocus *controller G_GNUC_UNUSED, gpointer user_data)
 {
-    (void)user_data;
+    GtkWidget *overlay = GTK_WIDGET(user_data);
+    GtkWidget *btn = g_object_get_data(G_OBJECT(overlay), "close-btn");
+    if (btn) gtk_widget_set_visible(btn, FALSE);
 }
 
 static void
@@ -1377,6 +1388,20 @@ on_overlay_focus_enter(GtkEventControllerFocus *controller G_GNUC_UNUSED, gpoint
         if (root) {
             ViteWindow *win = g_object_get_data(G_OBJECT(root), "vite-window");
             if (win) win->last_active_editor = editor;
+        }
+    }
+    
+    /* Update Close Button Visibility */
+    GtkWidget *btn = g_object_get_data(G_OBJECT(overlay), "close-btn");
+    if (btn) {
+        GtkWidget *parent = gtk_widget_get_parent(overlay); /* ViewContainer */
+        GtkWidget *grandparent = parent ? gtk_widget_get_parent(parent) : NULL;
+        
+        /* Only show if ViewContainer is in a split (parent is Paned) */
+        if (grandparent && GTK_IS_PANED(grandparent)) {
+            gtk_widget_set_visible(btn, TRUE);
+        } else {
+            gtk_widget_set_visible(btn, FALSE);
         }
     }
     
@@ -1525,6 +1550,18 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
     g_signal_connect(controller, "enter", G_CALLBACK(on_overlay_focus_enter), overlay);
     g_signal_connect(controller, "leave", G_CALLBACK(on_overlay_focus_leave), overlay);
     gtk_widget_add_controller(overlay, controller);
+    
+    /* Close Button */
+    GtkWidget *btn_close = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_add_css_class(btn_close, "flat");
+    gtk_widget_set_valign(btn_close, GTK_ALIGN_START);
+    gtk_widget_set_halign(btn_close, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(btn_close, 4);
+    gtk_widget_set_margin_end(btn_close, 4);
+    gtk_widget_set_visible(btn_close, FALSE); /* Hidden initially */
+    g_object_set_data(G_OBJECT(overlay), "close-btn", btn_close);
+    g_signal_connect_swapped(btn_close, "clicked", G_CALLBACK(on_close_split_clicked), overlay);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), btn_close);
     
     /* Unwrap editor if needed for FindBar access */
     GtkWidget *real_editor = editor;
@@ -2191,6 +2228,15 @@ close_split_view(GtkWidget *view_container)
         GtkWidget *new_focus = find_first_editor_recursive(sibling);
         if (new_focus) {
             defer_focus(new_focus);
+            GtkWidget *overlay = gtk_widget_get_ancestor(new_focus, GTK_TYPE_OVERLAY);
+            if (overlay) {
+                GtkWidget *s_btn = g_object_get_data(G_OBJECT(overlay), "close-btn");
+                if (s_btn) {
+                    /* Show close button if we are in a split (parent of sibling is now grandparent) */
+                    GtkWidget *s_parent = gtk_widget_get_parent(sibling); /* This is the grandparent now */
+                    gtk_widget_set_visible(s_btn, GTK_IS_PANED(s_parent));
+                }
+            }
         }
     }
 }
