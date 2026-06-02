@@ -8,7 +8,8 @@ typedef enum {
     UNDO_OP_INSERT,
     UNDO_OP_DELETE,
     UNDO_OP_GROUP,
-    UNDO_OP_RESTORE_FROM_PATH /* For bulk replaces (restore from file) */
+    UNDO_OP_RESTORE_FROM_PATH, /* For bulk replaces (restore from file) */
+    UNDO_OP_CUSTOM /* For metadata states (e.g. syntax highlights) */
 } UndoOpType;
 
 typedef struct _UndoCommand {
@@ -26,6 +27,11 @@ typedef struct _UndoCommand {
     char *redo_path;
     
     GList *group_commands; /* List of UndoCommand* if type == UNDO_OP_GROUP */
+    
+    /* For CUSTOM: Arbitrary data and callbacks */
+    void *custom_data;
+    void (*custom_execute)(void *data, gboolean is_undo);
+    void (*custom_free)(void *data);
     
     /* Selection state to restore after UNDO (i.e., state BEFORE the operation) */
     gboolean has_selection;
@@ -65,6 +71,7 @@ void undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, si
 void undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t len);
 void undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text, size_t len);
 void undo_stack_push_restore_path(UndoStack *stack, const char *undo_path, const char *redo_path);
+void undo_stack_push_custom(UndoStack *stack, void *data, void (*exec_func)(void *, gboolean), void (*free_func)(void *));
 void undo_stack_push_command(UndoStack *stack, UndoCommand *cmd);
 
 void undo_stack_begin_group(UndoStack *stack);

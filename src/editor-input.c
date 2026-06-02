@@ -1,6 +1,7 @@
 #include "editor-internal.h"
 #include <gtk/gtk.h>
 #include "editor-minimap.h"
+#include "syntax-internal.h"
 #include <string.h>
 #include <math.h>
 
@@ -27,10 +28,62 @@ static void on_ctx_redo(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_G
 static void on_ctx_select_all(GSimpleAction *action G_GNUC_UNUSED, GVariant *param G_GNUC_UNUSED, gpointer user_data) { editor_widget_select_all(EDITOR_WIDGET(user_data)); }
 static void on_ctx_change_case(GSimpleAction *action G_GNUC_UNUSED, GVariant *param, gpointer user_data) { editor_widget_change_case(EDITOR_WIDGET(user_data), g_variant_get_int32(param)); }
 
+typedef struct {
+    SyntaxContext *ctx;
+    GArray *old_overrides;
+    GArray *new_overrides;
+    EditorWidget *editor; // Weak pointer for redrawing
+} SyntaxUndoData;
+
+static void execute_syntax_undo(void *ptr, gboolean is_undo) {
+    SyntaxUndoData *data = ptr;
+    GArray *target = is_undo ? data->old_overrides : data->new_overrides;
+    
+    // Replace ctx->range_overrides
+    if (data->ctx->range_overrides) {
+        g_array_set_size(data->ctx->range_overrides, 0);
+        if (target && target->len > 0) {
+            g_array_append_vals(data->ctx->range_overrides, target->data, target->len);
+        }
+    }
+    
+    syntax_context_invalidate_all(data->ctx);
+    
+    if (data->editor) {
+        gtk_widget_queue_draw(GTK_WIDGET(data->editor));
+    }
+}
+
+static void free_syntax_undo(void *ptr) {
+    SyntaxUndoData *data = ptr;
+    if (data->ctx) syntax_context_unref(data->ctx);
+    if (data->old_overrides) g_array_unref(data->old_overrides);
+    if (data->new_overrides) g_array_unref(data->new_overrides);
+    if (data->editor) g_object_remove_weak_pointer(G_OBJECT(data->editor), (gpointer*)&data->editor);
+    g_free(data);
+}
+
 static void on_ctx_set_syntax(GSimpleAction *action G_GNUC_UNUSED, GVariant *param, gpointer user_data) {
     EditorWidget *self = EDITOR_WIDGET(user_data);
     const char *lang = g_variant_get_string(param, NULL);
-    if (!lang || !self->syntax_ctx || !self->cursors) return;
+    if (!lang || !self->syntax_ctx || !self->cursors || !self->doc) return;
+    
+    EditorCursor *primary = editor_widget_get_primary_cursor(self);
+    size_t s_start = primary->selection_anchor;
+    size_t s_end = primary->cursor_offset;
+    
+    document_begin_undo_group(self->doc);
+    document_set_undo_group_selection(self->doc, s_start, s_end);
+    
+    SyntaxUndoData *data = g_malloc0(sizeof(SyntaxUndoData));
+    data->ctx = syntax_context_ref(self->syntax_ctx);
+    data->editor = self;
+    g_object_add_weak_pointer(G_OBJECT(self), (gpointer*)&data->editor);
+    
+    data->old_overrides = g_array_new(FALSE, FALSE, sizeof(SyntaxRangeOverride));
+    if (self->syntax_ctx->range_overrides && self->syntax_ctx->range_overrides->len > 0) {
+        g_array_append_vals(data->old_overrides, self->syntax_ctx->range_overrides->data, self->syntax_ctx->range_overrides->len);
+    }
     
     for (guint i = 0; i < self->cursors->len; i++) {
         EditorCursor *c = &g_array_index(self->cursors, EditorCursor, i);
@@ -40,6 +93,17 @@ static void on_ctx_set_syntax(GSimpleAction *action G_GNUC_UNUSED, GVariant *par
             syntax_context_set_language_for_byte_range(self->syntax_ctx, min_off, max_off, lang);
         }
     }
+    
+    data->new_overrides = g_array_new(FALSE, FALSE, sizeof(SyntaxRangeOverride));
+    if (self->syntax_ctx->range_overrides && self->syntax_ctx->range_overrides->len > 0) {
+        g_array_append_vals(data->new_overrides, self->syntax_ctx->range_overrides->data, self->syntax_ctx->range_overrides->len);
+    }
+    
+    document_push_custom_undo(self->doc, data, execute_syntax_undo, free_syntax_undo);
+    
+    document_set_redo_group_selection(self->doc, s_start, s_end);
+    document_end_undo_group(self->doc);
+    
     gtk_widget_queue_draw(GTK_WIDGET(self));
 }
 

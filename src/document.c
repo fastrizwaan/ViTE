@@ -734,6 +734,13 @@ document_set_redo_group_selection(Document *doc, size_t start, size_t end)
 }
 
 void
+document_push_custom_undo(Document *doc, void *data, void (*exec_func)(void *, gboolean), void (*free_func)(void *))
+{
+    undo_stack_push_custom(doc->undo_stack, data, exec_func, free_func);
+}
+
+
+void
 document_clear_undo_redo(Document *doc)
 {
     if (!doc) return;

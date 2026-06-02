@@ -83,6 +83,9 @@ free_command(gpointer data)
         unlink(cmd->redo_path);
         g_free(cmd->redo_path);
     }
+    if (cmd->type == UNDO_OP_CUSTOM && cmd->custom_free) {
+        cmd->custom_free(cmd->custom_data);
+    }
     
     if (cmd->group_commands) {
         g_list_free_full(cmd->group_commands, free_command);
@@ -302,6 +305,20 @@ undo_stack_push_restore_path(UndoStack *stack, const char *undo_path, const char
 }
 
 void
+undo_stack_push_custom(UndoStack *stack, void *data, void (*exec_func)(void *, gboolean), void (*free_func)(void *))
+{
+    if (stack->in_undo_redo) return;
+
+    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    cmd->type = UNDO_OP_CUSTOM;
+    cmd->custom_data = data;
+    cmd->custom_execute = exec_func;
+    cmd->custom_free = free_func;
+    
+    undo_stack_push_command(stack, cmd);
+}
+
+void
 undo_stack_begin_group(UndoStack *stack)
 {
     stack->group_depth++;
@@ -438,6 +455,10 @@ execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean und
                 execute_command(stack, l->data, pt, FALSE);
             }
         }
+    } else if (cmd->type == UNDO_OP_CUSTOM) {
+        if (cmd->custom_execute) {
+            cmd->custom_execute(cmd->custom_data, undo);
+        }
     }
 }
 
@@ -494,6 +515,8 @@ get_command_info(UndoCommand *cmd, gboolean undo, UndoInfo *info)
         info->is_insert = undo;
     } else if (cmd->type == UNDO_OP_RESTORE_FROM_PATH) {
         info->is_insert = FALSE; /* Full reload */
+    } else if (cmd->type == UNDO_OP_CUSTOM) {
+        info->is_insert = FALSE; /* Metadata change */
     }
 }
 
