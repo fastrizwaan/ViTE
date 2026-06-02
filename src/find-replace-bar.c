@@ -23,6 +23,7 @@ struct _ViteFindReplaceBar {
     guint search_timeout_id;
     SearchTask *current_search;
     gboolean initial_jump_done;
+    gboolean just_replaced;
     
     /* Viewport Search */
     gboolean viewport_mode;
@@ -442,10 +443,15 @@ static void on_search_update(GArray *matches, gboolean finished, void *user_data
     editor_widget_set_search_results(self->editor, viewport_matches);
     if (viewport_matches) g_array_unref(viewport_matches);
     
-    /* Jump to the first match after cursor automatically when search finds matches (only once per search) */
-    if (match_count > 0 && !self->initial_jump_done) {
-        self->initial_jump_done = TRUE;
-        editor_widget_jump_to_current_match(self->editor);
+    /* Anchor search to current cursor position so Next/Prev work relative to cursor */
+    if (match_count > 0) {
+        editor_widget_anchor_search(self->editor, self->just_replaced);
+        
+        if (!self->initial_jump_done) {
+            self->initial_jump_done = TRUE;
+            editor_widget_jump_to_current_match(self->editor);
+        }
+        self->just_replaced = FALSE;
     }
 }
 
@@ -650,6 +656,7 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
 static void on_search_changed(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
     self->initial_jump_done = FALSE;
+    self->just_replaced = FALSE;
     if (self->search_timeout_id) g_source_remove(self->search_timeout_id);
     self->search_timeout_id = g_timeout_add(200, (GSourceFunc)perform_search, self);
 }
@@ -698,6 +705,7 @@ static void on_replace_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
 
     /* Re-trigger search to update offsets */
     self->initial_jump_done = FALSE; /* We want to jump to the next match after replacement */
+    self->just_replaced = TRUE;
     perform_search(self);
 }
 

@@ -2,7 +2,7 @@
 #include <string.h>
 
 /* Forward declaration */
-static size_t find_match_at_or_after_cursor(EditorWidget *self, size_t cursor_offset);
+static size_t find_match_at_or_after_cursor(EditorWidget *self, size_t cursor_offset, gboolean strict_after);
 
 /* Helper: Update viewport matches from active search around current scroll position */
 void
@@ -301,20 +301,21 @@ editor_widget_clear_search(EditorWidget *self)
 
 /* Helper: Binary search to find first match at or after cursor_offset */
 static size_t
-find_match_at_or_after_cursor(EditorWidget *self, size_t cursor_offset)
+find_match_at_or_after_cursor(EditorWidget *self, size_t cursor_offset, gboolean strict_after)
 {
     if (!self->active_search) return 0;
     
     size_t total = document_search_task_get_match_count(self->active_search);
     if (total == 0) return 0;
     
-    /* Binary search for first match.end >= cursor_offset */
+    /* Binary search */
     size_t low = 0, high = total;
     while (low < high) {
         size_t mid = (low + high) / 2;
         SearchMatch m;
         if (document_search_task_get_match_at(self->active_search, mid, &m)) {
-            if (m.end < cursor_offset) {
+            gboolean condition = strict_after ? (m.start < cursor_offset) : (m.end < cursor_offset);
+            if (condition) {
                 low = mid + 1;
             } else {
                 high = mid;
@@ -327,6 +328,18 @@ find_match_at_or_after_cursor(EditorWidget *self, size_t cursor_offset)
     /* If past end, wrap to beginning */
     if (low >= total) low = 0;
     return low;
+}
+
+void
+editor_widget_anchor_search(EditorWidget *self, gboolean strict_after)
+{
+    g_return_if_fail(EDITOR_IS_WIDGET(self));
+    
+    if (self->active_search) {
+        EditorCursor *c = editor_widget_get_primary_cursor(self);
+        size_t cursor_pos = c ? c->cursor_offset : 0;
+        self->global_match_idx = find_match_at_or_after_cursor(self, cursor_pos, strict_after);
+    }
 }
 
 void 
@@ -445,7 +458,7 @@ editor_widget_get_current_match_index(EditorWidget *self)
         if (total == 0) return -1;
         
         /* Find first match >= cursor_pos */
-        size_t idx = find_match_at_or_after_cursor(self, cursor_pos);
+        size_t idx = find_match_at_or_after_cursor(self, cursor_pos, FALSE);
         
         /* Check if cursor is actually inside the PREVIOUS match */
         if (idx == 0) {
