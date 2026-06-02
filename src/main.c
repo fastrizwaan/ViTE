@@ -370,28 +370,9 @@ default_save_directory(void)
 static char *
 suggest_untitled_filename(ViteTab *tab, Document *doc)
 {
-    size_t len = 0;
-    char *line = document_get_line(doc, 0, &len);
-    char *from_line = NULL;
-    if (line && len > 0) {
-        char *nl = strchr(line, '\n');
-        if (nl) *nl = '\0';
-        char *clean = sanitize_filename(line);
-        if (clean && *clean && g_strcmp0(clean, "untitled") != 0) {
-            from_line = clean;
-        } else {
-            g_free(clean);
-        }
-    }
-    g_free(line);
-
-    if (from_line) {
-        char *name = g_str_has_suffix(from_line, ".txt") ? from_line : g_strconcat(from_line, ".txt", NULL);
-        if (name != from_line) g_free(from_line);
-        return name;
-    }
-
+    (void)doc; /* Unused now, we rely on the tab's pre-calculated title */
     const char *title = vite_tab_get_title(tab);
+    
     char *clean_title = sanitize_filename(title && *title ? title : "untitled");
     char *name = g_str_has_suffix(clean_title, ".txt") ? clean_title : g_strconcat(clean_title, ".txt", NULL);
     if (name != clean_title) g_free(clean_title);
