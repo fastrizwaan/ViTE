@@ -5631,15 +5631,7 @@ setup_window(AdwApplicationWindow *window)
     /* Main Menu Construction */
     GMenu *main_menu = g_menu_new();
     
-    /* Zoom controls section */
-    GMenu *s_zoom = g_menu_new();
-    GMenuItem *zoom_item = g_menu_item_new(NULL, NULL);
-    g_menu_item_set_attribute(zoom_item, "custom", "s", "zoom-controls");
-    g_menu_append_item(s_zoom, zoom_item);
-    g_object_unref(zoom_item);
-    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_zoom));
-    g_object_unref(s_zoom);
-    
+
     /* Group 1: New Window, etc. */
     GMenu *s_new = g_menu_new();
     g_menu_append(s_new, _("New Window"), "win.new-window");
@@ -5746,6 +5738,15 @@ setup_window(AdwApplicationWindow *window)
     g_menu_append(s_fs, _("Fullscreen"), "win.fullscreen");
     g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_fs));
     g_object_unref(s_fs);
+    
+    /* Zoom controls section */
+    GMenu *s_zoom = g_menu_new();
+    GMenuItem *zoom_item = g_menu_item_new(NULL, NULL);
+    g_menu_item_set_attribute(zoom_item, "custom", "s", "zoom-controls");
+    g_menu_append_item(s_zoom, zoom_item);
+    g_object_unref(zoom_item);
+    g_menu_append_section(main_menu, NULL, G_MENU_MODEL(s_zoom));
+    g_object_unref(s_zoom);
     
     /* Group 6: App Info */
     GMenu *s_app = g_menu_new();
