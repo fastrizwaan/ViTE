@@ -1590,7 +1590,16 @@ on_key_pressed(GtkEventControllerKey *controller,
              break;
         case GDK_KEY_z:
             if (state & GDK_CONTROL_MASK) {
-                 editor_widget_undo(self);
+                 if (state & GDK_SHIFT_MASK) {
+                     editor_widget_redo(self);
+                 } else {
+                     editor_widget_undo(self);
+                 }
+            }
+            break;
+        case GDK_KEY_Z: /* When shift is pressed, keyval is often uppercase */
+            if (state & GDK_CONTROL_MASK) {
+                 editor_widget_redo(self);
             }
             break;
         case GDK_KEY_y:
