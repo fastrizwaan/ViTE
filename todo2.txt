@@ -7,7 +7,7 @@ file name/titlebar should have 25-30 characters with '.' or ' ' (up to 40)
 
 find replace is not setting 'modified state' or now showing dot before file
 
-split view is not having wordwrap working properly perhaps fixed split editor area is used which won't readjust with the split resize
+x split view is not having wordwrap working properly perhaps fixed split editor area is used which won't readjust with the split resize
 
 split view not showing 'close button' for the view
 

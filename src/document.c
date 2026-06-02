@@ -2432,6 +2432,11 @@ static gboolean replace_idle_step(gpointer user_data) {
     /* Re-enable undo recording */
     doc->undo_stack->in_undo_redo = FALSE;
     
+    /* Push a dummy command so the undo stack top changes and document_is_modified evaluates to TRUE */
+    UndoCommand *dummy_cmd = g_malloc0(sizeof(UndoCommand));
+    dummy_cmd->type = UNDO_OP_GROUP; /* A safe dummy op */
+    undo_stack_push_command(doc->undo_stack, dummy_cmd);
+    
     /* Mark document as modified */
     check_modification_state(doc);
     
@@ -2823,6 +2828,9 @@ static gboolean streaming_replace_idle_step(gpointer user_data) {
     
     /* mmap the temp file and replace document content */
     piece_table_replace_from_fd(doc->pt, fd, task->output_size, task->lf_count);
+    
+    /* Mark document as modified */
+    check_modification_state(doc);
     
     /* Report completion */
     if (task->callback) {
@@ -3514,6 +3522,9 @@ streaming_change_case_idle_step(gpointer user_data)
         
         /* Replace document content */
         piece_table_replace_from_fd(doc->pt, fd, task->output_size, task->lf_count);
+        
+        /* Mark document as modified */
+        check_modification_state(doc);
         
         if (task->callback) {
             task->callback(task->total_size, task->total_size, TRUE, task->user_data);
