@@ -59,7 +59,7 @@ editor_widget_set_search_results(EditorWidget *self, GArray *matches)
         int best_idx = 0;
         for (guint i = 0; i < self->search_matches->len; i++) {
             SearchMatch m = g_array_index(self->search_matches, SearchMatch, i);
-            if (m.start >= cursor) {
+            if (m.end >= cursor) {
                 best_idx = (int)i;
                 break;
             }
@@ -157,8 +157,16 @@ editor_widget_next_match(EditorWidget *self)
         size_t total = compact_matches_count(self->filtered_lines);
         if (total == 0) return;
         
-        self->global_match_idx++;
-        if (self->global_match_idx >= total) self->global_match_idx = 0;
+        size_t m_line;
+        if (compact_matches_get(self->filtered_lines, self->global_match_idx, &m_line, NULL)) {
+            size_t offset = document_get_offset_of_line(self->doc, m_line);
+            EditorCursor *c = editor_widget_get_primary_cursor(self);
+            size_t cursor = c ? c->cursor_offset : 0;
+            if (cursor >= offset) {
+                self->global_match_idx++;
+                if (self->global_match_idx >= total) self->global_match_idx = 0;
+            }
+        }
         
         editor_widget_jump_to_current_match(self);
         return;
@@ -168,9 +176,15 @@ editor_widget_next_match(EditorWidget *self)
     if (!self->active_search) {
         if (!self->search_matches || self->search_matches->len == 0) return;
         
-        self->current_match_idx++;
-        if (self->current_match_idx >= (int)self->search_matches->len) {
-            self->current_match_idx = 0;
+        SearchMatch m = g_array_index(self->search_matches, SearchMatch, self->current_match_idx);
+        EditorCursor *c = editor_widget_get_primary_cursor(self);
+        size_t cursor = c ? c->cursor_offset : 0;
+        
+        if (cursor >= m.start) {
+            self->current_match_idx++;
+            if (self->current_match_idx >= (int)self->search_matches->len) {
+                self->current_match_idx = 0;
+            }
         }
         editor_widget_jump_to_current_match(self);
         return;
@@ -179,9 +193,16 @@ editor_widget_next_match(EditorWidget *self)
     size_t total = document_search_task_get_match_count(self->active_search);
     if (total == 0) return;
     
-    /* Simply go to the next match by index */
-    self->global_match_idx++;
-    if (self->global_match_idx >= total) self->global_match_idx = 0;
+    SearchMatch m;
+    if (document_search_task_get_match_at(self->active_search, self->global_match_idx, &m)) {
+        EditorCursor *c = editor_widget_get_primary_cursor(self);
+        size_t cursor = c ? c->cursor_offset : 0;
+        
+        if (cursor >= m.start) {
+            self->global_match_idx++;
+            if (self->global_match_idx >= total) self->global_match_idx = 0;
+        }
+    }
     
     editor_widget_jump_to_current_match(self);
 }
@@ -242,7 +263,7 @@ editor_widget_set_active_search(EditorWidget *self, SearchTask *task)
         for (size_t i = 0; i < total; i++) {
             SearchMatch m;
             if (document_search_task_get_match_at(task, i, &m)) {
-                if (m.start >= cursor_pos) {
+                if (m.end >= cursor_pos) {
                     self->global_match_idx = i;
                     break;
                 }
@@ -287,13 +308,13 @@ find_match_at_or_after_cursor(EditorWidget *self, size_t cursor_offset)
     size_t total = document_search_task_get_match_count(self->active_search);
     if (total == 0) return 0;
     
-    /* Binary search for first match.start >= cursor_offset */
+    /* Binary search for first match.end >= cursor_offset */
     size_t low = 0, high = total;
     while (low < high) {
         size_t mid = (low + high) / 2;
         SearchMatch m;
         if (document_search_task_get_match_at(self->active_search, mid, &m)) {
-            if (m.start < cursor_offset) {
+            if (m.end < cursor_offset) {
                 low = mid + 1;
             } else {
                 high = mid;
@@ -311,10 +332,24 @@ find_match_at_or_after_cursor(EditorWidget *self, size_t cursor_offset)
 void 
 editor_widget_replace_current(EditorWidget *self, const char *replacement, gboolean regex, const char *regex_text)
 {
-    if (self->current_match_idx == -1 || !self->search_matches) return;
-    if (self->current_match_idx >= (int)self->search_matches->len) return;
+    SearchMatch m;
+    gboolean found = FALSE;
     
-    SearchMatch m = g_array_index(self->search_matches, SearchMatch, self->current_match_idx);
+    if (self->active_search) {
+        size_t total = document_search_task_get_match_count(self->active_search);
+        if (self->global_match_idx < total) {
+            if (document_search_task_get_match_at(self->active_search, self->global_match_idx, &m)) {
+                found = TRUE;
+            }
+        }
+    } else if (self->search_matches && self->current_match_idx != -1) {
+        if (self->current_match_idx < (int)self->search_matches->len) {
+            m = g_array_index(self->search_matches, SearchMatch, self->current_match_idx);
+            found = TRUE;
+        }
+    }
+    
+    if (!found) return;
     
     char *final_replacement = NULL;
     
