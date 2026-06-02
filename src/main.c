@@ -278,20 +278,18 @@ typedef void (*SaveChangesDialogCallback)(const char *response, SaveChangesDialo
 
 struct _SaveChangesDialogData {
     GWeakRef win_ref;
-    GtkWindow *window;
-    GtkWidget *save_button;
     GPtrArray *tabs;     /* strong refs: ViteTab* */
     GPtrArray *checks;   /* GtkCheckButton* by row index */
     GPtrArray *entries;  /* GtkEntry* by row index */
     SaveChangesDialogCallback callback;
     gpointer user_data;
     gboolean handled;
-    gboolean closing_programmatically;
 };
 
 static void save_async_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const char *path);
 static gboolean save_changes_dialog_tab_selected(SaveChangesDialogData *dialog, ViteTab *tab);
 static char *save_changes_dialog_filename_for_tab(SaveChangesDialogData *dialog, ViteTab *tab);
+
 static void show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCallback callback, gpointer user_data);
 
 static void
@@ -427,42 +425,17 @@ save_changes_dialog_finish(SaveChangesDialogData *dialog, const char *response)
     if (dialog->callback) {
         dialog->callback(response, dialog, dialog->user_data);
     }
-
-    if (dialog->window && GTK_IS_WINDOW(dialog->window) && !dialog->closing_programmatically) {
-        dialog->closing_programmatically = TRUE;
-        gtk_window_destroy(dialog->window);
-    }
+    
+    save_changes_dialog_data_free(dialog);
 }
 
 static void
-on_save_changes_button_clicked(GtkButton *btn, gpointer user_data)
+on_save_changes_alert_response(AdwAlertDialog *alert G_GNUC_UNUSED, const char *response, gpointer user_data)
 {
     SaveChangesDialogData *dialog = user_data;
-    const char *response = g_object_get_data(G_OBJECT(btn), "save-dialog-response");
     save_changes_dialog_finish(dialog, response ? response : "cancel");
 }
 
-static gboolean
-on_save_changes_close_request(GtkWindow *window G_GNUC_UNUSED, gpointer user_data)
-{
-    SaveChangesDialogData *dialog = user_data;
-    if (dialog->closing_programmatically) return FALSE;
-    save_changes_dialog_finish(dialog, "cancel");
-    return TRUE;
-}
-
-static void
-on_save_changes_dialog_destroy(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data)
-{
-    save_changes_dialog_data_free((SaveChangesDialogData *)user_data);
-}
-
-static void
-on_save_changes_dialog_map(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data)
-{
-    SaveChangesDialogData *dialog = user_data;
-    if (dialog->save_button) gtk_widget_grab_focus(dialog->save_button);
-}
 
 static gboolean
 save_changes_dialog_tab_selected(SaveChangesDialogData *dialog, ViteTab *tab)
@@ -510,46 +483,19 @@ show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCall
     dialog->checks = g_ptr_array_new();
     dialog->entries = g_ptr_array_new();
 
-    GtkWidget *window = adw_window_new();
-    dialog->window = GTK_WINDOW(window);
-    gtk_window_set_modal(GTK_WINDOW(window), TRUE);
-    gtk_window_set_transient_for(GTK_WINDOW(window), GTK_WINDOW(win->window));
-    gtk_window_set_resizable(GTK_WINDOW(window), FALSE);
-    gtk_window_set_default_size(GTK_WINDOW(window), 440, -1);
+    const char *title = _("Save Changes?");
+    const char *body = tabs->len == 1 ? 
+        _("Open document contains unsaved changes.\nChanges which are not saved will be permanently lost.") :
+        _("Open documents contain unsaved changes.\nChanges which are not saved will be permanently lost.");
 
-    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-
-    /* Header */
-    GtkWidget *header = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_margin_top(header, 12);
-    gtk_widget_set_margin_bottom(header, 12);
-    gtk_widget_set_margin_start(header, 12);
-    gtk_widget_set_margin_end(header, 12);
-    gtk_box_append(GTK_BOX(main_box), header);
-
-    GtkWidget *title = gtk_label_new(_("Save Changes?"));
-    gtk_widget_add_css_class(title, "title-2");
-    gtk_widget_set_halign(title, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(header), title);
-
-    GtkWidget *body = gtk_label_new(NULL);
-    if (tabs->len == 1) {
-        gtk_label_set_text(GTK_LABEL(body), _("Open document contains unsaved changes.\nChanges which are not saved will be permanently lost."));
-    } else {
-        gtk_label_set_text(GTK_LABEL(body), _("Open documents contain unsaved changes.\nChanges which are not saved will be permanently lost."));
-    }
-    gtk_widget_add_css_class(body, "dim-label");
-    gtk_label_set_wrap(GTK_LABEL(body), TRUE);
-    gtk_label_set_justify(GTK_LABEL(body), GTK_JUSTIFY_CENTER);
-    gtk_widget_set_halign(body, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(header), body);
+    AdwAlertDialog *alert = ADW_ALERT_DIALOG(adw_alert_dialog_new(title, body));
+    gtk_widget_add_css_class(GTK_WIDGET(alert), "compact-alert-buttons");
 
     /* File List with ScrolledWindow */
     GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
     gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 400);
-    gtk_box_append(GTK_BOX(main_box), scroll);
 
     GtkWidget *files_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_set_margin_top(files_box, 12);
@@ -605,44 +551,23 @@ show_save_changes_dialog(ViteWindow *win, GPtrArray *tabs, SaveChangesDialogCall
         gtk_box_append(GTK_BOX(files_box), file_row);
     }
 
+    adw_alert_dialog_set_extra_child(alert, scroll);
+
     /* Buttons */
-    GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
-    gtk_box_set_homogeneous(GTK_BOX(button_box), TRUE);
-    gtk_widget_set_margin_top(button_box, 12);
-    gtk_widget_set_margin_bottom(button_box, 24);
-    gtk_widget_set_margin_start(button_box, 24);
-    gtk_widget_set_margin_end(button_box, 24);
-    gtk_box_append(GTK_BOX(main_box), button_box);
+    adw_alert_dialog_add_response(alert, "cancel", _("Cancel"));
+    adw_alert_dialog_add_response(alert, "discard", tabs->len == 1 ? _("Discard") : _("Discard All"));
+    adw_alert_dialog_add_response(alert, "save", _("Save"));
+    
+    adw_alert_dialog_set_response_appearance(alert, "discard", ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_response_appearance(alert, "save", ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response(alert, "save");
 
-    GtkWidget *cancel_btn = gtk_button_new_with_label(_("Cancel"));
-    GtkWidget *discard_btn = gtk_button_new_with_label(tabs->len == 1 ? _("Discard") : _("Discard All"));
-    GtkWidget *save_btn = gtk_button_new_with_label(_("Save"));
-    
-    gtk_widget_add_css_class(discard_btn, "destructive-action");
-    gtk_widget_add_css_class(save_btn, "suggested-action");
-    
-    g_object_set_data(G_OBJECT(cancel_btn), "save-dialog-response", "cancel");
-    g_object_set_data(G_OBJECT(discard_btn), "save-dialog-response", "discard");
-    g_object_set_data(G_OBJECT(save_btn), "save-dialog-response", "save");
-    
-    g_signal_connect(cancel_btn, "clicked", G_CALLBACK(on_save_changes_button_clicked), dialog);
-    g_signal_connect(discard_btn, "clicked", G_CALLBACK(on_save_changes_button_clicked), dialog);
-    g_signal_connect(save_btn, "clicked", G_CALLBACK(on_save_changes_button_clicked), dialog);
-    dialog->save_button = save_btn;
+    adw_alert_dialog_set_prefer_wide_layout(alert, TRUE);
 
-    gtk_box_append(GTK_BOX(button_box), cancel_btn);
-    gtk_box_append(GTK_BOX(button_box), discard_btn);
-    gtk_box_append(GTK_BOX(button_box), save_btn);
-
-    GtkWidget *handle = gtk_window_handle_new();
-    gtk_window_handle_set_child(GTK_WINDOW_HANDLE(handle), main_box);
-    adw_window_set_content(ADW_WINDOW(window), handle);
+    g_signal_connect(alert, "response", G_CALLBACK(on_save_changes_alert_response), dialog);
     
-    g_signal_connect(window, "close-request", G_CALLBACK(on_save_changes_close_request), dialog);
-    g_signal_connect(window, "destroy", G_CALLBACK(on_save_changes_dialog_destroy), dialog);
-    g_signal_connect(window, "map", G_CALLBACK(on_save_changes_dialog_map), dialog);
-    
-    gtk_window_present(GTK_WINDOW(window));
+    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(win->window));
+    adw_alert_dialog_choose(alert, GTK_WIDGET(root), NULL, NULL, NULL);
 }
 
 static void
@@ -3146,6 +3071,11 @@ load_css(void)
     "    min-width: 240px;"
     "    min-height: 200px;"
     "}"
+    ".compact-alert-buttons button {"
+    "    min-height: 32px;"
+    "    padding-top: 2px;"
+    "    padding-bottom: 2px;"
+    "}"
     );
 
     GtkCssProvider *provider = gtk_css_provider_new();
@@ -5316,6 +5246,7 @@ static gboolean
 on_window_close_request(GtkWindow *window, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
+    g_print("on_window_close_request called for win=%p\n", win);
 
     if (win->force_close_once) {
         win->force_close_once = FALSE;
@@ -5372,11 +5303,13 @@ on_window_close_request(GtkWindow *window, gpointer user_data)
 
     GPtrArray *modified_tabs = collect_modified_tabs(win);
     if (modified_tabs->len > 0) {
+        g_print("on_window_close_request: showing save changes dialog for win=%p with %d modified tabs\n", win, modified_tabs->len);
         show_save_changes_dialog(win, modified_tabs, on_unsaved_window_close_response, win);
         g_ptr_array_unref(modified_tabs);
         return TRUE;
     }
     g_ptr_array_unref(modified_tabs);
+    g_print("on_window_close_request: allowing close for win=%p\n", win);
     
     return FALSE; /* Allow close */
 }
