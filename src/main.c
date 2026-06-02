@@ -1846,19 +1846,36 @@ on_document_content_changed(Document *doc, void *user_data)
         size_t len;
         char *line = document_get_line(doc, 0, &len);
         if (line && len > 0) {
-            /* Truncate to 20 characters (safe UTF-8) */
+            /* Truncate to dynamic length (25-40 chars) on word boundaries */
             if (g_utf8_validate(line, -1, NULL)) {
                 long char_count = g_utf8_strlen(line, -1);
-                if (char_count > 20) {
-                    char *ptr = g_utf8_offset_to_pointer(line, 20);
-                    if (ptr) *ptr = '\0';
+                if (char_count > 25) {
+                    long search_limit = (char_count > 40) ? 40 : char_count;
+                    long cut_idx = 25;
+                    gboolean found_boundary = FALSE;
+                    
+                    char *ptr = g_utf8_offset_to_pointer(line, 25);
+                    for (long i = 25; i < search_limit; i++) {
+                        gunichar c = g_utf8_get_char(ptr);
+                        if (c == ' ' || c == '.') {
+                            cut_idx = i;
+                            found_boundary = TRUE;
+                            break;
+                        }
+                        ptr = g_utf8_next_char(ptr);
+                    }
+                    
+                    if (!found_boundary) {
+                        cut_idx = search_limit;
+                    }
+                    
+                    char *cut_ptr = g_utf8_offset_to_pointer(line, cut_idx);
+                    if (cut_ptr) *cut_ptr = '\0';
                 }
             } else {
-                 /* Fallback for invalid UTF-8: just clamp bytes but respect boundaries? 
-                    Actually, if invalid, just cap bytes but ensure we don't cut mid-sequence?
-                    Let's just use strict byte limit of 20 but back off if continuation. */
-                 if (len > 20) {
-                     int cut = 20;
+                 /* Fallback for invalid UTF-8: cap bytes at 40 */
+                 if (len > 40) {
+                     int cut = 40;
                      while (cut > 0 && (line[cut] & 0xC0) == 0x80) cut--;
                      line[cut] = '\0';
                  }
