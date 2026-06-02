@@ -220,7 +220,6 @@ syntax_context_set_language_for_byte_range(SyntaxContext *ctx, size_t start_off,
     if (!ctx || start_off >= end_off) return;
     
     SyntaxLanguage new_lang = syntax_language_from_string(lang_name);
-    if (new_lang == LANG_NONE) return;
     
     SyntaxRangeOverride override = { start_off, end_off, new_lang };
     g_array_append_val(ctx->range_overrides, override);
@@ -606,11 +605,37 @@ syntax_process_line_len(SyntaxContext *ctx, size_t line_index, size_t line_start
                     case LANG_DESKTOP: syntax_highlight_desktop(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
                     case LANG_RUST: syntax_highlight_rust(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
                     case LANG_MARKDOWN: syntax_highlight_markdown(ctx, sub_attrs, sub_text, intersect_len, sub_state, 0); break;
+                    case LANG_NONE: {
+                        const ViteTheme *theme = theme_manager_get_current();
+                        if (theme) {
+                            PangoAttribute *attr_fg = pango_attr_foreground_new(
+                                theme->editor_fg.red * 65535,
+                                theme->editor_fg.green * 65535,
+                                theme->editor_fg.blue * 65535);
+                            attr_fg->start_index = 0;
+                            attr_fg->end_index = intersect_len;
+                            pango_attr_list_insert(sub_attrs, attr_fg);
+                            
+                            PangoAttribute *attr_w = pango_attr_weight_new(PANGO_WEIGHT_NORMAL);
+                            attr_w->start_index = 0; attr_w->end_index = intersect_len;
+                            pango_attr_list_insert(sub_attrs, attr_w);
+                            
+                            PangoAttribute *attr_s = pango_attr_style_new(PANGO_STYLE_NORMAL);
+                            attr_s->start_index = 0; attr_s->end_index = intersect_len;
+                            pango_attr_list_insert(sub_attrs, attr_s);
+                            
+                            PangoAttribute *attr_u = pango_attr_underline_new(PANGO_UNDERLINE_NONE);
+                            attr_u->start_index = 0; attr_u->end_index = intersect_len;
+                            pango_attr_list_insert(sub_attrs, attr_u);
+                        }
+                        break;
+                    }
                     default: break;
                 }
                 
-                /* Splice sub_attrs into attrs shifted by intersect_start */
-                pango_attr_list_splice(attrs, sub_attrs, intersect_start, intersect_len);
+                /* Splice sub_attrs into attrs shifted by intersect_start. 
+                   Pass 0 as length since we are overlaying, not inserting new text. */
+                pango_attr_list_splice(attrs, sub_attrs, intersect_start, 0);
                 pango_attr_list_unref(sub_attrs);
                 g_free(sub_text);
             }
