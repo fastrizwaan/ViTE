@@ -180,6 +180,9 @@ find_all_editors_recursive_internal(GtkWidget *widget, GPtrArray *editors)
         find_all_editors_recursive_internal(gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(widget)), editors);
     } else if (GTK_IS_OVERLAY(widget)) {
         find_all_editors_recursive_internal(gtk_overlay_get_child(GTK_OVERLAY(widget)), editors);
+    } else if (GTK_IS_PANED(widget)) {
+        find_all_editors_recursive_internal(gtk_paned_get_start_child(GTK_PANED(widget)), editors);
+        find_all_editors_recursive_internal(gtk_paned_get_end_child(GTK_PANED(widget)), editors);
     } else {
         GtkWidget *child = gtk_widget_get_first_child(widget);
         while (child) {
@@ -1541,7 +1544,17 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
         gtk_widget_set_margin_top(find_bar, 0);
         gtk_widget_set_margin_bottom(find_bar, 0);
         
-        gtk_box_append(GTK_BOX(root_box), find_bar);
+        /* Wrap find bar in a scrolled window to allow the split pane to shrink 
+           below the natural minimum size of the FindReplaceBar's contents. */
+        GtkWidget *find_scrolled = gtk_scrolled_window_new();
+        gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(find_scrolled), GTK_POLICY_EXTERNAL, GTK_POLICY_NEVER);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(find_scrolled), find_bar);
+        gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(find_scrolled), 10);
+        gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(find_scrolled), TRUE);
+        
+        g_object_bind_property(find_bar, "visible", find_scrolled, "visible", G_BINDING_SYNC_CREATE);
+
+        gtk_box_append(GTK_BOX(root_box), find_scrolled);
         
         /* Store logical association */
         g_object_set_data(G_OBJECT(root_box), "find_bar", find_bar);
@@ -1590,7 +1603,13 @@ create_view_container(ViteWindow *win, GtkWidget *editor)
     gtk_box_append(GTK_BOX(info_box), btn_reload);
     gtk_box_append(GTK_BOX(info_box), btn_ignore);
     
-    gtk_revealer_set_child(GTK_REVEALER(revealer), info_box);
+    GtkWidget *rev_scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(rev_scrolled), GTK_POLICY_EXTERNAL, GTK_POLICY_NEVER);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(rev_scrolled), info_box);
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(rev_scrolled), 10);
+    gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(rev_scrolled), TRUE);
+    
+    gtk_revealer_set_child(GTK_REVEALER(revealer), rev_scrolled);
     
     /* Store internal widgets for dynamic reuse (like 'File Not Found' errors) */
     g_object_set_data(G_OBJECT(revealer), "title_label", title_label);
@@ -2279,7 +2298,13 @@ do_split(ViteWindow *win, GtkOrientation orientation)
     
     /* SYNC: Settings */
     editor_widget_set_show_line_numbers(EDITOR_WIDGET(new_editor), editor_widget_get_show_line_numbers(EDITOR_WIDGET(old_editor)));
-    editor_widget_set_word_wrap(EDITOR_WIDGET(new_editor), editor_widget_get_word_wrap(EDITOR_WIDGET(old_editor)));
+    
+    gboolean wrap = editor_widget_get_word_wrap(EDITOR_WIDGET(old_editor));
+    editor_widget_set_word_wrap(EDITOR_WIDGET(new_editor), wrap);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(new_scrolled),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+
     editor_widget_set_insert_mode(EDITOR_WIDGET(new_editor), editor_widget_get_insert_mode(EDITOR_WIDGET(old_editor)));
     
     /* Connect Indentation Sync Signals */
@@ -4060,6 +4085,10 @@ create_new_tab (ViteWindow *win, const char *title, Document *doc)
     /* Synced via bindings in on_tab_clicked now */
     /* g_signal_connect(editor, "notify::show-line-numbers", ...); removed */
     
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+    
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), editor);
     
     const char *doc_path = document_get_file_path(doc);
@@ -4907,16 +4936,51 @@ on_show_line_numbers_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *valu
 }
 
 static void
+apply_to_all_editors_in_active_tab(ViteWindow *win, void (*func)(GtkWidget *, gpointer), gpointer user_data)
+{
+    if (!win || !win->tab_bar) return;
+    ViteTab *tab = vite_tab_bar_get_active_tab(win->tab_bar);
+    if (!tab) return;
+    
+    GtkWidget *page = g_object_get_data(G_OBJECT(tab), "page");
+    if (!page) return;
+    
+    GPtrArray *editors = find_all_editors_recursive(page);
+    for (guint i = 0; i < editors->len; i++) {
+        GtkWidget *ed = g_ptr_array_index(editors, i);
+        if (EDITOR_IS_WIDGET(ed)) {
+            func(ed, user_data);
+        }
+    }
+    g_ptr_array_unref(editors);
+}
+
+static void
+word_wrap_helper(GtkWidget *editor, gpointer user_data)
+{
+    gboolean state = GPOINTER_TO_INT(user_data);
+    editor_widget_set_word_wrap(EDITOR_WIDGET(editor), state);
+    
+    GtkWidget *scrolled = gtk_widget_get_parent(editor);
+    if (GTK_IS_SCROLLED_WINDOW(scrolled)) {
+         gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
+                                        GTK_POLICY_AUTOMATIC,
+                                        GTK_POLICY_AUTOMATIC);
+    }
+}
+
+static void
 on_enable_word_wrap_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow*)user_data;
     gboolean state = g_variant_get_boolean(value);
     g_simple_action_set_state(action, value);
     
-    GtkWidget *editor = get_active_editor(win);
-    if (editor && EDITOR_IS_WIDGET(editor)) {
-         editor_widget_set_word_wrap(EDITOR_WIDGET(editor), state);
-         gtk_widget_grab_focus(editor);
+    apply_to_all_editors_in_active_tab(win, word_wrap_helper, GINT_TO_POINTER(state));
+    
+    GtkWidget *active = get_active_editor(win);
+    if (active && EDITOR_IS_WIDGET(active)) {
+         gtk_widget_grab_focus(active);
     }
 }
 
@@ -5255,18 +5319,33 @@ on_window_close_request(GtkWindow *window, gpointer user_data)
 }
 
 static void
+folding_helper(GtkWidget *editor, gpointer user_data)
+{
+    gboolean enabled = GPOINTER_TO_INT(user_data);
+    g_object_set(editor, "enable-folding", enabled, NULL);
+}
+
+static void
 on_enable_folding_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, gpointer user_data)
 {
     ViteWindow *win = (ViteWindow *)user_data;
     gboolean enabled = g_variant_get_boolean(value);
     
-    GtkWidget *editor = get_active_editor(win);
-    if (EDITOR_IS_WIDGET(editor)) {
-         g_object_set(editor, "enable-folding", enabled, NULL);
-         gtk_widget_grab_focus(editor);
+    apply_to_all_editors_in_active_tab(win, folding_helper, GINT_TO_POINTER(enabled));
+    
+    GtkWidget *active = get_active_editor(win);
+    if (active && EDITOR_IS_WIDGET(active)) {
+         gtk_widget_grab_focus(active);
     }
     
     g_simple_action_set_state(action, value);
+}
+
+static void
+minimap_helper(GtkWidget *editor, gpointer user_data)
+{
+    gboolean enabled = GPOINTER_TO_INT(user_data);
+    g_object_set(editor, "minimap-enabled", enabled, NULL);
 }
 
 static void
@@ -5275,10 +5354,11 @@ on_enable_minimap_toggled(GSimpleAction *action G_GNUC_UNUSED, GVariant *value, 
     ViteWindow *win = (ViteWindow *)user_data;
     gboolean enabled = g_variant_get_boolean(value);
 
-    GtkWidget *editor = get_active_editor(win);
-    if (EDITOR_IS_WIDGET(editor)) {
-         g_object_set(editor, "minimap-enabled", enabled, NULL);
-         gtk_widget_grab_focus(editor);
+    apply_to_all_editors_in_active_tab(win, minimap_helper, GINT_TO_POINTER(enabled));
+
+    GtkWidget *active = get_active_editor(win);
+    if (active && EDITOR_IS_WIDGET(active)) {
+         gtk_widget_grab_focus(active);
     }
 
     g_simple_action_set_state(action, value);

@@ -950,6 +950,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
 
     /* Search Entry */
     self->find_entry = gtk_search_entry_new();
+    gtk_widget_set_size_request(self->find_entry, 10, -1);
     gtk_widget_set_hexpand(self->find_entry, TRUE);
     gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(self->find_entry), _("Find"));
     gtk_widget_set_tooltip_text(self->find_entry, _("Find (Shift+Enter for newline)"));
@@ -1056,6 +1057,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     
     /* Replace Entry */
     self->replace_entry = gtk_entry_new();
+    gtk_widget_set_size_request(self->replace_entry, 10, -1);
     gtk_widget_set_hexpand(self->replace_entry, TRUE);
     gtk_entry_set_placeholder_text(GTK_ENTRY(self->replace_entry), _("Replace"));
     gtk_entry_set_icon_from_icon_name(GTK_ENTRY(self->replace_entry), GTK_ENTRY_ICON_PRIMARY, "edit-find-replace-symbolic");

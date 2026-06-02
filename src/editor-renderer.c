@@ -320,6 +320,7 @@ render_single_line(SnapshotRenderContext *ctx, size_t phys_line, double current_
     if (self->wrap_lines) {
         int avail = width - text_start_x - self->active_right_padding - (int)minimap_w;
         pango_layout_set_width(layout, (avail < 50 ? 50 : avail) * PANGO_SCALE);
+
         pango_layout_set_wrap(layout, is_virtualized ? PANGO_WRAP_CHAR : PANGO_WRAP_WORD_CHAR);
     }
 

@@ -503,12 +503,14 @@ editor_widget_measure (GtkWidget      *widget,
     editor_widget_ensure_metrics(self);
 
     if (orientation == GTK_ORIENTATION_HORIZONTAL) {
-        /* Minimum width should accommodate at least some text content */
         double gutter_width = get_effective_gutter_width(self);
-        *minimum = (int)(gutter_width + self->cached_char_width * 10 + 20); /* 10 chars + padding */
-        
-        /* Natural width should be larger to show content properly */
-        *natural = (int)(gutter_width + self->cached_char_width * 80 + 20); /* 80 chars + padding */
+        if (self->wrap_lines) {
+            *minimum = (int)gutter_width;
+            *natural = (int)gutter_width;
+        } else {
+            *minimum = (int)(gutter_width + self->cached_char_width * 10 + 20); /* 10 chars + padding */
+            *natural = (int)(gutter_width + self->cached_char_width * 80 + 20); /* 80 chars + padding */
+        }
     } else {
         /* Minimum height should be at least one line */
         *minimum = (int)(self->line_height + 20); /* One line + padding */
@@ -1187,6 +1189,7 @@ editor_widget_set_word_wrap(EditorWidget *self, gboolean wrap)
         if (self->line_y_offsets) g_array_set_size(self->line_y_offsets, 0);
         
         editor_widget_update_adjustments(self, -1, -1);
+        gtk_widget_queue_resize(GTK_WIDGET(self));
         gtk_widget_queue_draw(GTK_WIDGET(self));
     }
 }
