@@ -19,6 +19,7 @@ const char *editor_widget_get_language_name(EditorWidget *self);
 
 /* Search Integration */
 void editor_widget_set_search_results(EditorWidget *self, GArray *matches);
+void editor_widget_jump_to_current_match(EditorWidget *self);
 void editor_widget_next_match(EditorWidget *self);
 void editor_widget_prev_match(EditorWidget *self);
 void editor_widget_replace_current(EditorWidget *self, const char *replacement, gboolean regex, const char *regex_text);

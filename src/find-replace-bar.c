@@ -445,7 +445,7 @@ static void on_search_update(GArray *matches, gboolean finished, void *user_data
     /* Jump to the first match after cursor automatically when search finds matches (only once per search) */
     if (match_count > 0 && !self->initial_jump_done) {
         self->initial_jump_done = TRUE;
-        editor_widget_next_match(self->editor);
+        editor_widget_jump_to_current_match(self->editor);
     }
 }
 
@@ -629,7 +629,6 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
     gtk_label_set_text(GTK_LABEL(self->matches_label), _("Finding..."));
     gtk_widget_set_visible(self->matches_label, TRUE);
     
-    self->initial_jump_done = FALSE;
     self->current_search = document_search_async_start(doc, text, regex, case_sensitive, whole_word, on_search_update, self);
     
     /* Set active search on editor for global navigation */
@@ -650,6 +649,7 @@ static gboolean perform_search(ViteFindReplaceBar *self) {
 
 static void on_search_changed(GtkWidget *widget G_GNUC_UNUSED, gpointer user_data) {
     ViteFindReplaceBar *self = VITE_FIND_REPLACE_BAR(user_data);
+    self->initial_jump_done = FALSE;
     if (self->search_timeout_id) g_source_remove(self->search_timeout_id);
     self->search_timeout_id = g_timeout_add(200, (GSourceFunc)perform_search, self);
 }
@@ -697,6 +697,7 @@ static void on_replace_clicked(GtkButton *btn G_GNUC_UNUSED, gpointer user_data)
     update_history_popovers(self);
 
     /* Re-trigger search to update offsets */
+    self->initial_jump_done = FALSE; /* We want to jump to the next match after replacement */
     perform_search(self);
 }
 
