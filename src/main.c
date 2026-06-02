@@ -6266,6 +6266,11 @@ on_load_complete(GObject *source, GAsyncResult *res, gpointer user_data)
         ctx->tab_bar = NULL;
     }
     
+    if (ctx->gtkw_ref) {
+        g_object_remove_weak_pointer(G_OBJECT(ctx->gtkw_ref), (gpointer *)&ctx->gtkw_ref);
+        ctx->gtkw_ref = NULL;
+    }
+    
     if (err) g_error_free(err);
     g_free(ctx->filename);
     ctx->filename = NULL;
