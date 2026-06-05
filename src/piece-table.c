@@ -48,8 +48,7 @@ disk_buffer_new(void)
     buf->len = 0;
     buf->capacity = DISK_BUFFER_INITIAL_SIZE;
     
-    const char *tmp_dir = g_get_tmp_dir();
-    if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
+    const char *tmp_dir = resource_get_vite_cache_dir();
 
     /* Try O_TMPFILE first (anonymous temp file, no path needed) */
 #ifdef O_TMPFILE
@@ -1192,7 +1191,7 @@ build_tree:
         }
         
         pt->root = build_balanced_tree_recursive(nodes, 0, (int)count - 1, pt);
-        free(nodes);
+        g_free(nodes);
     } else {
         pt->root = NULL;
     }
@@ -1205,7 +1204,7 @@ free_tree(PieceNode *node)
     if (!node) return;
     free_tree(node->left);
     free_tree(node->right);
-    free(node);
+    g_free(node);
 }
 
 static void
@@ -1245,7 +1244,7 @@ piece_table_free(PieceTable *pt)
     /* Clean up external sources */
     piece_table_clear_external_sources(pt);
     
-    free(pt);
+    g_free(pt);
 }
 
 size_t
@@ -1346,7 +1345,7 @@ piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, siz
     }
     
     pt->root = build_balanced_tree_recursive(nodes, 0, (int)count - 1, pt);
-    free(nodes);
+    g_free(nodes);
 }
 
 void
@@ -1414,7 +1413,7 @@ piece_table_replace_from_fd(PieceTable *pt, int fd, size_t len, size_t lf_count)
     }
     
     pt->root = build_balanced_tree_recursive(nodes, 0, (int)count - 1, pt);
-    free(nodes);
+    g_free(nodes);
 }
 
 /* Async versions */
@@ -1456,7 +1455,7 @@ piece_table_replace_async_start(PieceTable *pt, int fd, size_t len)
     task->chunk_size = 64 * 1024; /* 64KB chunks */
     task->total_chunks = (len + task->chunk_size - 1) / task->chunk_size;
     task->current_chunk = 0;
-    task->nodes = g_malloc0(task->total_chunks * sizeof(PieceNode*));
+    task->nodes = resource_safe_malloc0(task->total_chunks * sizeof(PieceNode*));
     
     return task;
 }
@@ -1549,7 +1548,7 @@ piece_table_replace_async_cancel(PieceTableReplaceTask *task)
     
     /* Free created nodes */
     for (size_t i = 0; i < task->current_chunk; i++) {
-        if (task->nodes[i]) free(task->nodes[i]);
+        if (task->nodes[i]) g_free(task->nodes[i]);
     }
     
     munmap(task->map, task->map_size);
@@ -2611,7 +2610,7 @@ load_result_free(LoadResult *res)
         }
     }
     
-    if (res->temp_nodes) free(res->temp_nodes);
+    if (res->temp_nodes) g_free(res->temp_nodes);
     
     /* Clean up temp file if present */
     if (res->temp_path) {
@@ -2643,7 +2642,6 @@ dispatch_progress_idle(gpointer user_data)
     if (info->cb) {
         info->cb(info->progress, info->encoding, info->newline, info->data);
     }
-    g_free(info);
     return G_SOURCE_REMOVE; 
 }
 
@@ -2657,7 +2655,7 @@ queue_load_progress(PieceTableLoadData *data, double progress, FileEncoding enco
     info->progress = progress;
     info->encoding = encoding;
     info->newline = newline;
-    g_idle_add_full(G_PRIORITY_HIGH_IDLE, dispatch_progress_idle, info, NULL);
+    g_idle_add_full(G_PRIORITY_HIGH_IDLE, dispatch_progress_idle, info, g_free);
 }
 
 /* Thread worker */
@@ -3313,7 +3311,7 @@ piece_table_check_encoding_lossy(PieceTable *pt)
         size_t working_len = chunk_len;
         
         if (pending_len > 0) {
-            combined = g_malloc(pending_len + chunk_len);
+            combined = resource_safe_malloc(pending_len + chunk_len);
             memcpy(combined, pending_bytes, pending_len);
             memcpy(combined + pending_len, chunk, chunk_len);
             working_data = combined;
@@ -3481,7 +3479,7 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
         size_t working_len = chunk_len;
         
         if (pending_len > 0) {
-            combined = g_malloc(pending_len + chunk_len);
+            combined = resource_safe_malloc(pending_len + chunk_len);
             memcpy(combined, pending_bytes, pending_len);
             memcpy(combined + pending_len, chunk, chunk_len);
             working_data = combined;
@@ -3533,7 +3531,7 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
         
         if (need_crlf && safe_len > 0) {
             /* Convert LF to CRLF */
-            GString *converted = g_string_sized_new(safe_len + 32);
+            GString *converted = resource_safe_g_string_sized_new(safe_len + 32);
             const char *ptr = working_data;
             const char *end = working_data + safe_len;
             
@@ -3559,7 +3557,7 @@ piece_table_save_to_fd(PieceTable *pt, int fd, GError **error)
             const char *src_utf8 = data_to_encode;
             gsize src_len = data_len;
             if (!g_utf8_validate(data_to_encode, (gssize)data_len, NULL)) {
-                GString *safe = g_string_sized_new(data_len);
+                GString *safe = resource_safe_g_string_sized_new(data_len);
                 const char *p = data_to_encode;
                 const char *end_p = data_to_encode + data_len;
                 while (p < end_p) {
@@ -3735,7 +3733,7 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
         size_t working_len = bytes_to_process;
         
         if (task->pending_len > 0) {
-            combined = g_malloc(task->pending_len + bytes_to_process);
+            combined = resource_safe_malloc(task->pending_len + bytes_to_process);
             memcpy(combined, task->pending_bytes, task->pending_len);
             memcpy(combined + task->pending_len, chunk, bytes_to_process);
             working_data = combined;
@@ -3793,7 +3791,7 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
         */
         
         if (safe_len > 0 || task->saved_cr) {
-            GString *converted = g_string_sized_new(safe_len + 128);
+            GString *converted = resource_safe_g_string_sized_new(safe_len + 128);
             const char *ptr = working_data;
             const char *end = working_data + safe_len;
             
@@ -3845,7 +3843,7 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
             gsize src_len = data_len;
             if (!g_utf8_validate(data_to_encode, (gssize)data_len, NULL)) {
                 task->had_lossy_conversion = TRUE; /* Bad bytes in input = lossy */
-                GString *safe = g_string_sized_new(data_len);
+                GString *safe = resource_safe_g_string_sized_new(data_len);
                 const char *p = data_to_encode;
                 const char *end_p = data_to_encode + data_len;
                 while (p < end_p) {
