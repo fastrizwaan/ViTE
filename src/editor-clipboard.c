@@ -379,6 +379,7 @@ perform_copy_internal(EditorWidget *self, size_t total_size)
     if (current_offset > 0) {
         GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
         gdk_clipboard_set_text(clipboard, clip_text);
+        vite_clipboard_clear(vite_clipboard_get_default());
     }
     
     g_array_free(sorted, TRUE);
@@ -388,43 +389,21 @@ perform_copy_internal(EditorWidget *self, size_t total_size)
     g_free(template_path);
 }
 
-static void
-perform_copy_internal_reference(EditorWidget *self, size_t total_size)
-{
-    if (filtered_lines_active(self)) {
-        perform_copy_internal(self, total_size);
-        return;
-    }
-    /* Zero-RAM Copy: Set reference to document range */
-    ViteClipboard *clip = vite_clipboard_get_default();
-    
-    /* We assume single selection for huge files usually. 
-       If multiple, we take the primary or union? 
-       ViteClipboard currently supports one range entry. 
-       Let's take the primary cursor or the largest range?
-       Let's take the first non-empty cursor range for now. 
-    */
-    
-    for (guint c = 0; c < self->cursors->len; c++) {
-         EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
-         size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
-         size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
-         if (start < end) {
-             /* Found selection - set reference */
-             vite_clipboard_set_reference(clip, self->doc, start, end, FALSE);
-             return;
-         }
-    }
-}
+
 
 struct _CutState {
     EditorWidget *self;
+    size_t start;
+    size_t end;
 };
 
 static void
 on_cut_deleted(double progress, gboolean finished, gpointer user_data)
 {
     struct _CutState *state = user_data;
+
+    g_signal_emit_by_name(state->self, "undo-redo-progress", progress, !finished);
+
     if (finished) {
         document_end_undo_group(state->self->doc);
         g_free(state);
@@ -436,33 +415,71 @@ on_internal_copy_done(size_t done, size_t total, gpointer user_data)
 {
     struct _CutState *state = user_data;
     if (!state) return;
-    
-    if (done >= total) {
+
+    if (total == 0) {
+        g_free(state);
+        return;
+    }
+
+    double progress = total > 0 ? (double)done / total : 1.0;
+    gboolean finished = (done >= total);
+
+    g_signal_emit_by_name(state->self, "undo-redo-progress", progress, !finished);
+
+    if (finished) {
          document_begin_undo_group(state->self->doc);
-         if (state->self->cursors && state->self->cursors->len > 0) {
-              EditorCursor *primary = &g_array_index(state->self->cursors, EditorCursor, 0);
-              if (primary->cursor_offset != primary->selection_anchor) {
-                  document_set_undo_group_selection(state->self->doc, primary->selection_anchor, primary->cursor_offset);
-              }
+         if (state->start != state->end) {
+             document_set_undo_group_selection(state->self->doc, state->start, state->end);
          }
-         
-         if (state->self->cursors->len == 1) {
+
+         size_t doc_len = document_get_length(state->self->doc);
+         size_t delete_start = MIN(state->start, doc_len);
+         size_t delete_end = MIN(state->end, doc_len);
+
+         if (state->self->cursors->len == 1 && state->start < state->end) {
              EditorCursor *cur = &g_array_index(state->self->cursors, EditorCursor, 0);
-             size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
-             size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
-             size_t doc_len = document_get_length(state->self->doc);
-             
-             if (start == 0 && end == doc_len && doc_len > 0) {
+
+             if (delete_start == 0 && delete_end == doc_len && doc_len > 0) {
                  document_delete_entire_async(state->self->doc, on_cut_deleted, state);
                  cur->cursor_offset = 0;
                  cur->selection_anchor = 0;
                  return;
              }
          }
-         
-         editor_widget_delete_selection(state->self);
+
+         if (delete_start < delete_end) {
+             document_delete(state->self->doc, delete_start, delete_end - delete_start);
+             if (state->self->cursors && state->self->cursors->len > 0) {
+                 EditorCursor *primary = &g_array_index(state->self->cursors, EditorCursor, 0);
+                 primary->cursor_offset = delete_start;
+                 primary->selection_anchor = delete_start;
+                 state->self->cursor_offset = delete_start;
+                 state->self->selection_anchor = delete_start;
+             }
+         }
          document_end_undo_group(state->self->doc);
          g_free(state);
+    }
+}
+
+static void
+on_internal_copy_progress_only(size_t done, size_t total, gpointer user_data)
+{
+    struct _CutState *state = user_data;
+    if (!state || !state->self) return;
+
+    if (total == 0) {
+        g_free(state);
+        return;
+    }
+
+    double progress = total > 0 ? (double)done / total : 1.0;
+    gboolean finished = (done >= total);
+
+    g_signal_emit_by_name(state->self, "undo-redo-progress", progress, !finished);
+
+    if (finished) {
+        g_free(state);
     }
 }
 
@@ -495,9 +512,15 @@ large_copy_response_cb(AdwAlertDialog *dialog, gchar *response, EditorWidget *se
             if (is_cut) {
                 struct _CutState *state = g_new0(struct _CutState, 1);
                 state->self = self;
+                state->start = start;
+                state->end = end;
                 vite_clipboard_copy_async(clip, self->doc, start, end, TRUE, on_internal_copy_done, state);
             } else {
-                vite_clipboard_copy_async(clip, self->doc, start, end, FALSE, NULL, NULL);
+                struct _CutState *state = g_new0(struct _CutState, 1);
+                state->self = self;
+                state->start = start;
+                state->end = end;
+                vite_clipboard_copy_async(clip, self->doc, start, end, FALSE, on_internal_copy_progress_only, state);
             }
         }
     }
@@ -690,6 +713,18 @@ on_paste_text_received(GObject *source_object, GAsyncResult *res, gpointer user_
     }
 }
 
+static void
+on_internal_paste_progress(size_t done, size_t total, gpointer user_data)
+{
+    EditorWidget *self = user_data;
+    if (!self) return;
+
+    double progress = total > 0 ? (double)done / total : 1.0;
+    gboolean finished = (done >= total);
+
+    g_signal_emit_by_name(self, "undo-redo-progress", progress, !finished);
+}
+
 void
 editor_widget_paste(EditorWidget *self)
 {
@@ -699,7 +734,7 @@ editor_widget_paste(EditorWidget *self)
          /* Streaming paste for primary cursor */
          /* We use primary cursor offset */
          EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
-         vite_clipboard_paste_streaming(vclip, self->doc, primary->cursor_offset, NULL, NULL);
+         vite_clipboard_paste_streaming(vclip, self->doc, primary->cursor_offset, on_internal_paste_progress, self);
          return;
     }
 

@@ -502,7 +502,8 @@ document_delete_streaming(Document *doc, size_t offset, size_t len)
             size_t to_write = MIN(chunk_size, len - written);
             char *chunk = piece_table_get_text_range(doc->pt, offset + written, to_write);
             if (chunk) {
-                fwrite(chunk, 1, to_write, stack->log_file);
+                size_t written_now = fwrite(chunk, 1, to_write, stack->log_file);
+                stack->log_written += written_now;
                 g_free(chunk);
             }
             written += to_write;
@@ -671,7 +672,7 @@ document_delete_entire_idle_step(gpointer user_data)
     
     if (task->save_task) {
         double progress = 0;
-        if (document_save_async_step(task->save_task, 10000, &progress)) {
+        if (!document_save_async_step(task->save_task, 10000, &progress)) {
             if (task->callback) task->callback(progress, FALSE, task->user_data);
             return G_SOURCE_CONTINUE;
         }
@@ -998,7 +999,7 @@ undo_redo_task_free(UndoRedoTask *task)
 }
 
 static void
-undo_redo_exec_cb(UndoOpType type, size_t offset, int64_t byte_delta, gpointer user_data)
+undo_redo_exec_cb(UndoOpType type G_GNUC_UNUSED, size_t offset, int64_t byte_delta, gpointer user_data)
 {
     Document *doc = user_data;
     document_emit_edit(doc, offset, byte_delta);

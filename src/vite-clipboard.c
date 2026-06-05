@@ -72,8 +72,7 @@ vite_clipboard_free(ViteClipboard *clip)
 {
     if (!clip) return;
     
-    vite_clipboard_cancel_streaming(clip);
-    free_entry(clip->current);
+    vite_clipboard_clear(clip);
     
     if (clip == global_clipboard) {
         global_clipboard = NULL;
@@ -83,13 +82,27 @@ vite_clipboard_free(ViteClipboard *clip)
 }
 
 void
+vite_clipboard_clear(ViteClipboard *clip)
+{
+    if (!clip) return;
+
+    vite_clipboard_cancel_streaming(clip);
+    if (clip->active_copy) {
+        vite_clipboard_copy_async_cancel(clip->active_copy);
+    }
+    free_entry(clip->current);
+    clip->current = NULL;
+    clip->system_sync_pending = FALSE;
+    clip->generation++;
+}
+
+void
 vite_clipboard_set_reference(ViteClipboard *clip, Document *doc,
                               size_t start, size_t end, gboolean is_cut)
 {
     if (!clip || !doc || start >= end) return;
     
-    /* Free old entry */
-    free_entry(clip->current);
+    vite_clipboard_clear(clip);
     
     ViteClipboardEntry *entry = g_new0(ViteClipboardEntry, 1);
     entry->type = VITE_CLIPBOARD_ENTRY_REFERENCE;
@@ -178,6 +191,7 @@ vite_clipboard_persist_to_file(ViteClipboard *clip)
         entry->source_doc = NULL;
         /* is_valid remains TRUE, as file is static */
         g_debug("vite_clipboard: Persistence successful, switched to FILE mode");
+    } else {
         g_warning("vite_clipboard: Persistence failed");
         unlink(fname);
         g_free(fname);
@@ -191,6 +205,7 @@ struct _ViteClipboardCopyTask {
     size_t start;
     size_t end;
     gboolean is_cut;
+    uint64_t generation;
     ViteClipboardProgressCallback cb;
     gpointer user_data;
     guint idle_id;
@@ -229,6 +244,7 @@ vite_clipboard_copy_idle_step(gpointer user_data)
         task->written += to_write;
         
         if (g_get_monotonic_time() - start_time >= 10000) {
+            g_print("[DEBUG] vite_clipboard_copy_idle_step processed %zu chunks (%.2f MB) in %f seconds\n", task->written / chunk_size, (double)task->written / (1024.0 * 1024.0), (g_get_monotonic_time() - start_time) / 1000000.0);
             if (task->cb) task->cb(task->written, len, task->user_data);
             return G_SOURCE_CONTINUE;
         }
@@ -236,7 +252,9 @@ vite_clipboard_copy_idle_step(gpointer user_data)
     
     close(task->fd);
     
-    if (task->written == len) {
+    gboolean committed = FALSE;
+
+    if (task->written == len && task->clip->generation == task->generation) {
         if (task->clip->current) {
             free_entry(task->clip->current);
         }
@@ -250,12 +268,23 @@ vite_clipboard_copy_idle_step(gpointer user_data)
         entry->is_cut = task->is_cut;
         
         task->clip->current = entry;
+        committed = TRUE;
     } else {
         unlink(task->path);
         g_free(task->path);
     }
     
-    if (task->cb) task->cb(len, len, task->user_data);
+    if (task->clip->active_copy == task) {
+        task->clip->active_copy = NULL;
+    }
+
+    if (task->cb) {
+        if (committed) {
+            task->cb(len, len, task->user_data);
+        } else {
+            task->cb(0, 0, task->user_data);
+        }
+    }
     
     task->idle_id = 0;
     g_free(task);
@@ -285,6 +314,8 @@ vite_clipboard_copy_async(ViteClipboard *clip, Document *doc, size_t start, size
         g_free(full_template);
         return NULL;
     }
+
+    vite_clipboard_clear(clip);
     
     ViteClipboardCopyTask *task = g_new0(ViteClipboardCopyTask, 1);
     task->clip = clip;
@@ -292,12 +323,14 @@ vite_clipboard_copy_async(ViteClipboard *clip, Document *doc, size_t start, size
     task->start = start;
     task->end = end;
     task->is_cut = is_cut;
+    task->generation = clip->generation;
     task->cb = cb;
     task->user_data = user_data;
     task->fd = fd;
     task->path = full_template;
     
     task->idle_id = g_idle_add(vite_clipboard_copy_idle_step, task);
+    clip->active_copy = task;
     return task;
 }
 
@@ -305,10 +338,14 @@ void
 vite_clipboard_copy_async_cancel(ViteClipboardCopyTask *task)
 {
     if (!task) return;
+    if (task->clip && task->clip->active_copy == task) {
+        task->clip->active_copy = NULL;
+    }
     if (task->idle_id) g_source_remove(task->idle_id);
     close(task->fd);
     unlink(task->path);
     g_free(task->path);
+    if (task->cb) task->cb(0, 0, task->user_data);
     g_free(task);
 }
 

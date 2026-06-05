@@ -6761,7 +6761,6 @@ typedef struct {
     GWeakRef window_ref; /* Weak ref to GtkWindow to prevent crashes if window is closed */
     /* Progress Reporting */
     GMainContext *context;
-    GSource *idle_source;
     /* Lossy encoding conversion flag: set if any chars were replaced with '?' */
     gboolean had_lossy_conversion;
 } SaveWorkerData;
@@ -6812,56 +6811,57 @@ on_save_progress_idle(gpointer user_data)
     return G_SOURCE_REMOVE;
 }
 
-#if 0
-/* Worker Thread */
-static void
-save_file_worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable)
-{
-    /* Unused in this implementation, wrapper below is used */
-}
-#endif
+typedef struct {
+    GTask *task;
+    SaveWorkerData *data;
+    gint64 last_report;
+} SaveIdleData;
 
-static void
-save_worker_wrapper(GTask *task, gpointer source_object G_GNUC_UNUSED, gpointer task_data, GCancellable *cancellable)
+static gboolean
+save_idle_step_cb(gpointer user_data)
 {
-    SaveWorkerData *data = task_data;
+    SaveIdleData *idle = user_data;
+    SaveWorkerData *data = idle->data;
     DocumentSaveTask *save_task = data->task;
+    GCancellable *cancellable = g_task_get_cancellable(idle->task);
     GError *error = NULL;
-    gboolean done = FALSE;
-    gint64 last_report = 0;
-    
-    while (!done && !g_cancellable_is_cancelled(cancellable)) {
-        double progress = 0.0;
-        /* Step for 18ms - Slightly larger chunks for faster saves */
-        done = document_save_async_step(save_task, 20 * 1000, &progress);
-        
-        /* Throttle: Sleep 45ms (work:idle ~ 4:10) */
-        g_usleep(500); 
-        
-        gint64 now = g_get_monotonic_time();
-        if (now - last_report > 100 * 1000) { /* 100ms updates */
-            ProgressInfo *pi = g_new(ProgressInfo, 1);
-            pi->data = data;
-            pi->progress = progress;
-            g_main_context_invoke(data->context, on_save_progress_idle, pi);
-            last_report = now;
-        }
-    }
-    
-    if (g_cancellable_is_cancelled(cancellable)) {
+    double progress = 0.0;
+
+    if (cancellable && g_cancellable_is_cancelled(cancellable)) {
         document_save_async_cancel(save_task);
-        document_save_async_finish(save_task, NULL); /* Clean up leaked .vite_save_XXXXXX */
-        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
-    } else {
-        /* Query lossy BEFORE finish() frees the task */
-        data->had_lossy_conversion = document_save_async_had_lossy(save_task);
-        document_save_async_finish(save_task, &error);
-        if (error) {
-            g_task_return_error(task, error);
-        } else {
-            g_task_return_boolean(task, TRUE); /* Success */
-        }
+        document_save_async_finish(save_task, NULL);
+        g_task_return_new_error(idle->task, G_IO_ERROR, G_IO_ERROR_CANCELLED, "Cancelled");
+        g_object_unref(idle->task);
+        g_free(idle);
+        return G_SOURCE_REMOVE;
     }
+
+    gboolean done = document_save_async_step(save_task, 20 * 1000, &progress);
+
+    gint64 now = g_get_monotonic_time();
+    if (done || now - idle->last_report > 100 * 1000) {
+        ProgressInfo *pi = g_new(ProgressInfo, 1);
+        pi->data = data;
+        pi->progress = progress;
+        on_save_progress_idle(pi);
+        idle->last_report = now;
+    }
+
+    if (!done) {
+        return G_SOURCE_CONTINUE;
+    }
+
+    data->had_lossy_conversion = document_save_async_had_lossy(save_task);
+    document_save_async_finish(save_task, &error);
+    if (error) {
+        g_task_return_error(idle->task, error);
+    } else {
+        g_task_return_boolean(idle->task, TRUE);
+    }
+
+    g_object_unref(idle->task);
+    g_free(idle);
+    return G_SOURCE_REMOVE;
 }
 
 static void
@@ -7076,8 +7076,14 @@ do_save_with_progress(ViteWindow *win, ViteTab *tab, Document *doc, const char *
     
     GTask *task = g_task_new(NULL, cancellable, on_save_complete, data);
     g_task_set_task_data(task, data, NULL);
-    g_task_run_in_thread(task, save_worker_wrapper);
-    g_object_unref(task);
+    SaveIdleData *idle = g_new0(SaveIdleData, 1);
+    idle->task = task;
+    idle->data = data;
+    idle->last_report = 0;
+    GSource *source = g_idle_source_new();
+    g_source_set_callback(source, save_idle_step_cb, idle, NULL);
+    g_source_attach(source, data->context);
+    g_source_unref(source);
 }
 
 /* Context for the pre-save lossy encoding dialog response */

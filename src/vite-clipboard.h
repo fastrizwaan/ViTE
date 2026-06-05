@@ -54,12 +54,19 @@ typedef void (*ViteClipboardProgressCallback)(size_t bytes_done, size_t bytes_to
 /* Streaming paste context */
 typedef struct _ViteStreamingPaste ViteStreamingPaste;
 
+/* Async copy context */
+typedef struct _ViteClipboardCopyTask ViteClipboardCopyTask;
+
 /* Global Clipboard Manager */
 typedef struct {
     ViteClipboardEntry *current;
     GdkClipboard *system_clipboard;
     gboolean system_sync_pending;  /* Deferred system clipboard sync */
+    uint64_t generation;           /* Bumps whenever internal content is replaced/cleared */
     
+    /* Active async copy (if any) */
+    ViteClipboardCopyTask *active_copy;
+
     /* Active streaming paste (if any) */
     ViteStreamingPaste *active_paste;
 } ViteClipboard;
@@ -67,6 +74,7 @@ typedef struct {
 /* API */
 ViteClipboard *vite_clipboard_get_default(void);
 void vite_clipboard_free(ViteClipboard *clip);
+void vite_clipboard_clear(ViteClipboard *clip);
 
 /* Set clipboard to reference a document region (O(1) copy) */
 void vite_clipboard_set_reference(ViteClipboard *clip, Document *doc, 
@@ -76,7 +84,6 @@ void vite_clipboard_set_reference(ViteClipboard *clip, Document *doc,
 gboolean vite_clipboard_has_internal_content(ViteClipboard *clip);
 
 /* Async Copy */
-typedef struct _ViteClipboardCopyTask ViteClipboardCopyTask;
 ViteClipboardCopyTask *vite_clipboard_copy_async(ViteClipboard *clip, Document *doc, size_t start, size_t end, gboolean is_cut, ViteClipboardProgressCallback cb, gpointer user_data);
 void vite_clipboard_copy_async_cancel(ViteClipboardCopyTask *task);
 

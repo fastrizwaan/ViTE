@@ -1321,6 +1321,7 @@ piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, siz
     
     free_tree(pt->root);
     pt->root = NULL;
+    piece_table_clear_external_sources(pt);
     
     if (len == 0) return;
     
@@ -1373,6 +1374,7 @@ piece_table_replace_from_fd(PieceTable *pt, int fd, size_t len, size_t lf_count)
     /* 2. Free old tree */
     free_tree(pt->root);
     pt->root = NULL;
+    piece_table_clear_external_sources(pt);
 
     /* 3. Free old backing store */
     if (pt->is_mmapped) {
@@ -1587,7 +1589,7 @@ ensure_split_at(PieceTable *pt, size_t offset)
     right_piece.start += local_off;
     right_piece.length -= local_off;
     /* Calculate and cache LF for right piece */
-    const char *src_data = (right_piece.source == SOURCE_ORIGINAL) ? pt->orig_data : (char*)pt->add_buffer->mmap_base;
+    const char *src_data = get_piece_data(pt, &right_piece);
     right_piece.cached_lf = count_newlines(src_data + right_piece.start, right_piece.length);
     PieceNode *right_node = node_new(right_piece);
     
@@ -3629,6 +3631,7 @@ struct _PieceTableSaveTask {
     PieceTableIter iter;
     size_t total_bytes;
     size_t bytes_written;
+    uint64_t start_change_count;
     gboolean need_crlf;
     gboolean bom_written;
     gboolean cancelled;
@@ -3655,6 +3658,7 @@ piece_table_save_async_start(PieceTable *pt, int fd)
     task->fd = fd;
     task->total_bytes = piece_table_get_length(pt);
     task->bytes_written = 0;
+    task->start_change_count = pt->change_count;
     task->need_crlf = (pt->newline_style == NEWLINE_CRLF);
     
     g_print("SAVE START: newline_style = %d, need_crlf = %d\n", pt->newline_style, task->need_crlf);
@@ -3677,6 +3681,19 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
     if (!task || task->cancelled) {
         if (progress_out) *progress_out = 1.0;
         return TRUE; /* Done */
+    }
+
+    if (task->pt->change_count != task->start_change_count) {
+        if (!task->error) {
+            g_set_error(&task->error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "Document changed while saving. Please save again.");
+        }
+        if (progress_out) {
+            *progress_out = task->total_bytes > 0
+                            ? (double)task->bytes_written / task->total_bytes
+                            : 1.0;
+        }
+        return TRUE;
     }
     
     gint64 start_us = g_get_monotonic_time();
@@ -3714,7 +3731,10 @@ piece_table_save_async_step(PieceTableSaveTask *task, gint64 budget_us, double *
         
         /* Check time budget */
         gint64 elapsed = g_get_monotonic_time() - start_us;
-        if (elapsed >= budget_us) break;
+        if (elapsed >= budget_us) {
+            g_print("[DEBUG] piece_table_save_async_step processed %.2f MB in %f seconds\n", (double)task->bytes_written / (1024.0 * 1024.0), elapsed / 1000000.0);
+            break;
+        }
         
         if (chunk_len == 0) {
             piece_table_iter_advance(&task->iter, 1);

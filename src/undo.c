@@ -170,8 +170,9 @@ maybe_prune_undo_history(UndoStack *stack)
         
         /* Truncate log file */
         
-        /* Close and reopen log file to truncate it */
+        /* Truncate log file by unlinking so we don't corrupt existing mmaps */
         fclose(stack->log_file);
+        unlink(stack->log_file_path);
         stack->log_file = fopen(stack->log_file_path, "w+b");
         if (!stack->log_file) {
             g_warning("Failed to recreate undo log after truncation");
@@ -371,6 +372,7 @@ undo_stack_push_insert_from_fd_step(UndoInsertFdTask *task, gint64 budget_micros
         }
         
         if (g_get_monotonic_time() - start_time >= budget_micros) {
+            g_print("[DEBUG] undo_stack_push_insert_from_fd_step processed %zu MB in %f seconds\n", task->written / (1024 * 1024), (g_get_monotonic_time() - start_time) / 1000000.0);
             break; /* Yield */
         }
     }
@@ -896,6 +898,7 @@ undo_executor_step(UndoExecutor *exec, gint64 budget_micros, double *progress)
             
             if (exec->processed % 32 == 0) {
                 if (g_get_monotonic_time() - start_time >= budget_micros) {
+                    g_print("[DEBUG] undo_executor_step processed %zu commands in %f seconds\n", exec->processed, (g_get_monotonic_time() - start_time) / 1000000.0);
                     break; /* Yield */
                 }
             }
