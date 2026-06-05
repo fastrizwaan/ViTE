@@ -118,6 +118,8 @@ typedef struct {
 void document_iter_init(Document *doc, DocumentIter *iter, size_t line_index);
 size_t document_iter_next_line(DocumentIter *iter, char *buf, size_t buf_len);
 void document_delete(Document *doc, size_t offset, size_t len);
+/* Optimized: snapshot-based delete for entire document (Select All + Delete/Cut) */
+void document_delete_entire(Document *doc);
 
 /* Undo/Redo */
 UndoInfo document_undo(Document *doc);

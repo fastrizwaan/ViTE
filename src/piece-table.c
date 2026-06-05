@@ -965,8 +965,6 @@ find_node_for_line(PieceTable *pt, size_t line_index, size_t *out_node_start_lf,
     return NULL;
 }
 
-
-
 /* Helper to build balanced tree from array of nodes */
 static PieceNode*
 build_balanced_tree_recursive(PieceNode **nodes, int start, int end, PieceTable *pt)
@@ -1178,8 +1176,8 @@ build_tree:
     pt->external_sources = g_ptr_array_new_full(0, g_free); /* We need custom free func, see piece_table_free */
     
     if (pt->orig_size > 0) {
-        /* Chunking strategy */
-        size_t chunk_size = 16 * 1024; /* 16KB */
+        /* Chunking strategy for O(log N) offset resolution */
+        size_t chunk_size = 64 * 1024; /* 64KB */
         size_t count = (pt->orig_size + chunk_size - 1) / chunk_size;
         
         PieceNode **nodes = malloc(count * sizeof(PieceNode*));
@@ -1291,28 +1289,21 @@ piece_table_insert(PieceTable *pt, size_t offset, const char *text, size_t len)
     size_t start_in_add = pt->add_buffer->len;
     disk_buffer_append(pt->add_buffer, text, len);
     
-    /* Chunking strategy */
+    /* Chunking strategy for large insertions to preserve O(1) scanning bound */
     size_t chunk_size = 64 * 1024;
-    size_t current_off = 0;
+    size_t count = (len + chunk_size - 1) / chunk_size;
     
-    /* If len is small, just do one insert */
-    if (len <= chunk_size) {
-        size_t lf_count = count_newlines(text, len);
-        Piece new_piece = { SOURCE_ADD, start_in_add, len, lf_count };
-        insert_piece_at_offset(pt, offset, new_piece);
-        return;
-    }
-
-    while (current_off < len) {
-        size_t chunk = chunk_size;
-        if (current_off + chunk > len) chunk = len - current_off;
+    size_t current_offset = offset;
+    for (size_t i = 0; i < count; i++) {
+        size_t chunk_start = i * chunk_size;
+        size_t chunk_len = chunk_size;
+        if (chunk_start + chunk_len > len) chunk_len = len - chunk_start;
         
-        size_t chunk_lf = count_newlines(text + current_off, chunk);
-        Piece p = { SOURCE_ADD, start_in_add + current_off, chunk, chunk_lf };
+        size_t lf_count = count_newlines(text + chunk_start, chunk_len);
+        Piece new_piece = { SOURCE_ADD, start_in_add + chunk_start, chunk_len, lf_count };
+        insert_piece_at_offset(pt, current_offset, new_piece);
         
-        insert_piece_at_offset(pt, offset + current_off, p);
-        
-        current_off += chunk;
+        current_offset += chunk_len;
     }
 }
 
@@ -1338,8 +1329,8 @@ piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, siz
     size_t start_in_add = pt->add_buffer->len;
     disk_buffer_append(pt->add_buffer, new_content, len);
     
-    /* Chunking strategy like piece_table_new - 16KB chunks for O(log N) line access */
-    size_t chunk_size = 16 * 1024;
+    /* Chunking strategy */
+    size_t chunk_size = 64 * 1024;
     size_t count = (len + chunk_size - 1) / chunk_size;
     
     PieceNode **nodes = malloc(count * sizeof(PieceNode*));
@@ -1349,13 +1340,7 @@ piece_table_replace_all(PieceTable *pt, const char *new_content, size_t len, siz
         size_t chunk_len = chunk_size;
         if (chunk_start + chunk_len > len) chunk_len = len - chunk_start;
         
-        /* Count newlines in this chunk */
-        size_t chunk_lf = 0;
-        const char *chunk_data = new_content + chunk_start;
-        for (size_t j = 0; j < chunk_len; j++) {
-            if (chunk_data[j] == '\n') chunk_lf++;
-        }
-        
+        size_t chunk_lf = count_newlines(new_content + chunk_start, chunk_len);
         Piece p = { SOURCE_ADD, start_in_add + chunk_start, chunk_len, chunk_lf };
         nodes[i] = node_new(p);
     }
@@ -1413,25 +1398,17 @@ piece_table_replace_from_fd(PieceTable *pt, int fd, size_t len, size_t lf_count)
     
     /* 6. Rebuild tree (Chunking strategy for O(log N) access) */
     if (len == 0) return;
-    
-    size_t chunk_size = 16 * 1024;
+    size_t chunk_size = 64 * 1024;
     size_t count = (len + chunk_size - 1) / chunk_size;
     
     PieceNode **nodes = malloc(count * sizeof(PieceNode*));
-    if (!nodes) return;
     
     for (size_t i = 0; i < count; i++) {
         size_t chunk_start = i * chunk_size;
         size_t chunk_len = chunk_size;
         if (chunk_start + chunk_len > len) chunk_len = len - chunk_start;
         
-        /* Count newlines in this chunk */
-        size_t chunk_lf = 0;
-        const char *chunk_data = pt->orig_data + chunk_start;
-        for (size_t j = 0; j < chunk_len; j++) {
-            if (chunk_data[j] == '\n') chunk_lf++;
-        }
-        
+        size_t chunk_lf = count_newlines(pt->orig_data + chunk_start, chunk_len);
         Piece p = { SOURCE_ORIGINAL, chunk_start, chunk_len, chunk_lf };
         nodes[i] = node_new(p);
     }
@@ -1475,7 +1452,8 @@ piece_table_replace_async_start(PieceTable *pt, int fd, size_t len)
     task->map = map;
     task->map_size = size;
     
-    task->chunk_size = 16 * 1024;
+    /* Process in much larger chunks since we don't allocate nodes per chunk anymore */
+    task->chunk_size = 64 * 1024; /* 64KB chunks */
     task->total_chunks = (len + task->chunk_size - 1) / task->chunk_size;
     task->current_chunk = 0;
     task->nodes = g_malloc0(task->total_chunks * sizeof(PieceNode*));
@@ -1488,6 +1466,7 @@ piece_table_replace_async_step(PieceTableReplaceTask *task, gint64 budget_us, do
 {
     gint64 start_time = g_get_monotonic_time();
     
+    int processed_chunks = 0;
     while (task->current_chunk < task->total_chunks) {
         size_t i = task->current_chunk;
         size_t chunk_start = i * task->chunk_size;
@@ -1505,12 +1484,16 @@ piece_table_replace_async_step(PieceTableReplaceTask *task, gint64 budget_us, do
         task->nodes[i] = node_new(p);
         
         task->current_chunk++;
+        processed_chunks++;
         
         /* Check budget every 20 chunks */
-        if (task->current_chunk % 20 == 0) {
+        if (processed_chunks % 20 == 0) {
             if (g_get_monotonic_time() - start_time > budget_us) break;
         }
     }
+    
+    gint64 end_time = g_get_monotonic_time();
+    g_print("[DEBUG] piece_table_replace_async_step processed %d chunks in %f seconds\n", processed_chunks, (end_time - start_time) / 1000000.0);
     
     if (progress_out) {
         *progress_out = (double)task->current_chunk / task->total_chunks;
@@ -1554,7 +1537,7 @@ piece_table_replace_async_finalize(PieceTableReplaceTask *task)
     /* 5. Finalize tree build */
     pt->root = build_balanced_tree_recursive(task->nodes, 0, (int)task->total_chunks - 1, pt);
     
-    /* Free task container (but map belongs to pt now) */
+    /* Free task container */
     g_free(task->nodes);
     g_free(task);
 }
@@ -2422,6 +2405,34 @@ piece_table_iter_init_at_line(PieceTable *pt, PieceTableIter *iter, size_t line_
     iter->current_node = NULL;
 }
 
+void
+piece_table_iter_init_at_offset(PieceTable *pt, PieceTableIter *iter, size_t byte_offset)
+{
+    if (!pt || !iter) return;
+    memset(iter, 0, sizeof(PieceTableIter));
+    iter->pt = pt;
+    
+    if (!pt->root) return;
+    
+    /* Clamp to document length */
+    size_t total = pt->root->size_subtree;
+    if (byte_offset >= total) {
+        iter->current_node = NULL;
+        return;
+    }
+    
+    /* Walk the splay tree to find the node containing byte_offset */
+    size_t node_start = 0;
+    PieceNode *node = find_node_at_offset(pt, byte_offset, &node_start);
+    if (!node) {
+        iter->current_node = NULL;
+        return;
+    }
+    
+    iter->current_node = node;
+    iter->offset_in_node = byte_offset - node_start;
+}
+
 /* Chunk Iterator API */
 const char *
 piece_table_iter_get_chunk(PieceTableIter *iter, size_t *out_len)
@@ -2904,7 +2915,7 @@ conversion_done:
 
     /* Build Tree */
     if (res->size > 0) {
-        size_t chunk_size = 16 * 1024;
+        size_t chunk_size = 64 * 1024; /* 64KB chunks */
         size_t count = (res->size + chunk_size - 1) / chunk_size;
         
         res->temp_nodes = calloc(count, sizeof(PieceNode*));
@@ -2916,33 +2927,25 @@ conversion_done:
         madvise(res->mmap_base, res->mmap_size, MADV_SEQUENTIAL);
 #endif
         
-
-
         /* 1. Create nodes */
         for (size_t i = 0; i < count; i++) {
-            if ((i % 128) == 0) {
-                 if (g_cancellable_is_cancelled(cancellable)) {
-
-                     load_result_free(res);
-                     g_task_return_error_if_cancelled(task);
-                     return;
-                 }
-                 
-                 
-                 if (data->progress_cb) {
-                     double p = (double)i / count;
-                     double base = did_conversion ? conversion_share : 0.0;
-                     double scale = did_conversion ? (1.0 - conversion_share) : 1.0;
-                     queue_load_progress(data, base + (scale * p), res->encoding, res->newline_style);
-                 }
-            }
+             if (g_cancellable_is_cancelled(cancellable)) {
+                 load_result_free(res);
+                 g_task_return_error_if_cancelled(task);
+                 return;
+             }
+             
+             if ((i % 16) == 0 && data->progress_cb) {
+                 double p = (double)i / count;
+                 double base = did_conversion ? conversion_share : 0.0;
+                 double scale = did_conversion ? (1.0 - conversion_share) : 1.0;
+                 queue_load_progress(data, base + (scale * p), res->encoding, res->newline_style);
+             }
 
             size_t start = i * chunk_size;
             size_t len = chunk_size;
             if (start + len > res->size) len = res->size - start;
             
-
-
             size_t lf = count_newlines(res->data + start, len);
             Piece p = { SOURCE_ORIGINAL, start, len, lf };
             res->temp_nodes[i] = node_new(p);
@@ -2953,7 +2956,6 @@ conversion_done:
         madvise(res->mmap_base, res->mmap_size, MADV_NORMAL);
 #endif
          
-        
         /* 2. Build Tree */
         res->root = build_balanced_tree_recursive(res->temp_nodes, 0, (int)count - 1, NULL);
         
@@ -2962,7 +2964,6 @@ conversion_done:
         res->node_count = 0;
     }
     
-
     g_timer_destroy(timer);
     
     g_task_return_pointer(task, res, (GDestroyNotify)load_result_free);

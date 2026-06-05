@@ -4,6 +4,10 @@
 #include "piece-table.h"
 #include <glib.h>
 
+/* Undo history limits - prevents unbounded growth */
+#define UNDO_MAX_COMMANDS      10000
+#define UNDO_MAX_LOG_SIZE      (2ULL * 1024 * 1024 * 1024)  /* 2GB */
+
 typedef enum {
     UNDO_OP_INSERT,
     UNDO_OP_DELETE,
@@ -60,6 +64,10 @@ typedef struct {
     /* Memory mapping of the log file for zero-RAM access */
     char *map_base;
     size_t map_size;
+    
+    /* History management */
+    size_t undo_count;  /* Cached count of commands in undo_stack */
+    size_t log_written;  /* Total bytes written to log (approximate) */
 } UndoStack;
 
 UndoStack *undo_stack_new(void);
@@ -70,6 +78,8 @@ void undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, si
 /* Push insertion where content is read from a file descriptor (for HUGE files) */
 void undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t len);
 void undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text, size_t len);
+/* Zero-copy streaming delete: reads directly from piece table iterator into log */
+void undo_stack_push_delete_streaming(UndoStack *stack, size_t start, PieceTable *pt, size_t offset, size_t len);
 void undo_stack_push_restore_path(UndoStack *stack, const char *undo_path, const char *redo_path);
 void undo_stack_push_custom(UndoStack *stack, void *data, void (*exec_func)(void *, gboolean), void (*free_func)(void *));
 void undo_stack_push_command(UndoStack *stack, UndoCommand *cmd);

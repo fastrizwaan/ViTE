@@ -862,7 +862,6 @@ editor_widget_ensure_syntax_state_up_to(EditorWidget *self, size_t target_line)
         current_offset += orig_len;
     }
     g_free(buf);
-    
     self->syntax_ctx->valid_up_to = limit;
 }
 

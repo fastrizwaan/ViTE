@@ -148,6 +148,7 @@ typedef struct {
 
 void piece_table_iter_init(PieceTable *pt, PieceTableIter *iter);
 void piece_table_iter_init_at_line(PieceTable *pt, PieceTableIter *iter, size_t line_index);
+void piece_table_iter_init_at_offset(PieceTable *pt, PieceTableIter *iter, size_t byte_offset);
 size_t piece_table_iter_get_next_line(PieceTableIter *iter, char *buf, size_t buf_len);
 size_t piece_table_iter_get_next_line(PieceTableIter *iter, char *buf, size_t buf_len);
 size_t piece_table_iter_get_next_line_string(PieceTableIter *iter, GString *buf);

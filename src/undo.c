@@ -140,16 +140,69 @@ undo_stack_clear(UndoStack *stack)
      */
 }
 
+static void
+maybe_prune_undo_history(UndoStack *stack)
+{
+    /* 1. Check command count limit */
+    if (stack->undo_count > UNDO_MAX_COMMANDS) {
+        /* Find the tail and prune the last 10% */
+        size_t to_prune = stack->undo_count / 10;
+        if (to_prune == 0) to_prune = 1;
+        
+        GList *tail = g_list_last(stack->undo_stack);
+        while (tail && to_prune > 0) {
+            GList *prev = tail->prev;
+            free_command(tail->data);
+            stack->undo_stack = g_list_delete_link(stack->undo_stack, tail);
+            stack->undo_count--;
+            to_prune--;
+            tail = prev;
+        }
+    }
+    
+    /* 2. Check log size limit (e.g. 2GB) */
+    if (stack->log_file && stack->log_written > UNDO_MAX_LOG_SIZE) {
+        g_warning("Undo log exceeded %llu bytes. Truncating history to reclaim disk space.", (unsigned long long)UNDO_MAX_LOG_SIZE);
+        
+        /* Clear all history to safely truncate log */
+        g_list_free_full(stack->undo_stack, free_command);
+        stack->undo_stack = NULL;
+        stack->undo_count = 0;
+        
+        g_list_free_full(stack->redo_stack, free_command);
+        stack->redo_stack = NULL;
+        
+        /* Truncate log file */
+        if (stack->map_base) {
+            munmap(stack->map_base, stack->map_size);
+            stack->map_base = NULL;
+            stack->map_size = 0;
+        }
+        
+        /* Close and reopen log file to truncate it */
+        fclose(stack->log_file);
+        stack->log_file = fopen(stack->log_file_path, "w+b");
+        if (!stack->log_file) {
+            g_warning("Failed to recreate undo log after truncation");
+        }
+        stack->log_written = 0;
+    }
+}
+
 void
 undo_stack_push_command(UndoStack *stack, UndoCommand *cmd)
 {
     if (stack->current_group) {
-        stack->current_group->group_commands = g_list_append(stack->current_group->group_commands, cmd);
+        /* O(1) prepend - list is reversed in undo_stack_end_group() */
+        stack->current_group->group_commands = g_list_prepend(stack->current_group->group_commands, cmd);
     } else {
         stack->undo_stack = g_list_prepend(stack->undo_stack, cmd);
+        stack->undo_count++;
         /* Clear redo stack */
         g_list_free_full(stack->redo_stack, free_command);
         stack->redo_stack = NULL;
+        /* Prune if over limit */
+        maybe_prune_undo_history(stack);
     }
 }
 
@@ -181,11 +234,11 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
         /* Check disk space before writing */
         if (!resource_can_write_disk(undo_temp_dir(), len)) {
              g_warning("undo_stack_push_insert: Disk full, dropping undo data");
-             /* Truncate len? Or just fail? For now, we commit what we can or empty command */
              cmd->length = 0;
         } else {
              size_t written = fwrite(text, 1, len, stack->log_file);
              fflush(stack->log_file);
+             stack->log_written += written;
              if (written != len) {
                  g_warning("undo_stack_push_insert: Short write %zu < %zu", written, len);
                  cmd->length = written;
@@ -281,10 +334,74 @@ undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text,
         } else {
              size_t written = fwrite(deleted_text, 1, len, stack->log_file);
              fflush(stack->log_file);
+             stack->log_written += written;
              if (written != len) {
                  g_warning("undo_stack_push_delete: Short write %zu < %zu", written, len);
                  cmd->length = written;
              }
+        }
+    }
+    
+    undo_stack_push_command(stack, cmd);
+}
+
+void
+undo_stack_push_delete_streaming(UndoStack *stack, size_t start, PieceTable *pt, size_t offset, size_t len)
+{
+    if (stack->in_undo_redo) return;
+    
+    if (!resource_size_valid(len)) {
+        g_warning("undo_stack_push_delete_streaming: Invalid size %zu", len);
+        return;
+    }
+    
+    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    cmd->type = UNDO_OP_DELETE;
+    cmd->start = start;
+    cmd->length = len;
+    
+    if (stack->current_group) {
+        stack->current_group_size += len;
+    }
+    
+    /* Zero-copy streaming: read directly from piece table mmap'd data into log */
+    if (stack->log_file && len > 0) {
+        if (!resource_can_write_disk(undo_temp_dir(), len)) {
+            g_warning("undo_stack_push_delete_streaming: Disk full");
+            cmd->length = 0;
+        } else {
+            fseeko(stack->log_file, 0, SEEK_END);
+            cmd->log_offset = ftello(stack->log_file);
+            
+            PieceTableIter iter;
+            piece_table_iter_init_at_offset(pt, &iter, offset);
+            
+            size_t written = 0;
+            while (written < len) {
+                size_t chunk_len = 0;
+                const char *chunk = piece_table_iter_get_chunk(&iter, &chunk_len);
+                if (!chunk || chunk_len == 0) break;
+                
+                /* Clamp to remaining bytes needed */
+                size_t to_write = len - written;
+                if (chunk_len > to_write) chunk_len = to_write;
+                
+                size_t w = fwrite(chunk, 1, chunk_len, stack->log_file);
+                written += w;
+                if (w != chunk_len) {
+                    g_warning("undo_stack_push_delete_streaming: Short write %zu < %zu", w, chunk_len);
+                    break;
+                }
+                
+                piece_table_iter_advance(&iter, chunk_len);
+            }
+            fflush(stack->log_file);
+            stack->log_written += written;
+            
+            if (written != len) {
+                g_warning("undo_stack_push_delete_streaming: Wrote %zu of %zu", written, len);
+                cmd->length = written;
+            }
         }
     }
     
@@ -348,6 +465,8 @@ undo_stack_end_group(UndoStack *stack)
     if (group->group_commands == NULL) {
         free_command(group);
     } else {
+        /* Reverse the list since we used g_list_prepend for O(1) building */
+        group->group_commands = g_list_reverse(group->group_commands);
         undo_stack_push_command(stack, group);
     }
 }
@@ -444,6 +563,8 @@ execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean und
         }
         
     } else if (cmd->type == UNDO_OP_GROUP) {
+        /* Batch mmap once before executing all sub-commands */
+        ensure_mmap(stack);
         if (undo) {
             /* Undo in reverse order */
             for (GList *l = g_list_last(cmd->group_commands); l; l = l->prev) {
@@ -529,6 +650,7 @@ undo_stack_undo(UndoStack *stack, PieceTable *pt)
     UndoCommand *cmd = stack->undo_stack->data;
     stack->undo_stack = g_list_remove(stack->undo_stack, cmd);
     stack->redo_stack = g_list_prepend(stack->redo_stack, cmd);
+    if (stack->undo_count > 0) stack->undo_count--;
     
     stack->in_undo_redo = TRUE;
     execute_command(stack, cmd, pt, TRUE);
@@ -547,6 +669,7 @@ undo_stack_redo(UndoStack *stack, PieceTable *pt)
     UndoCommand *cmd = stack->redo_stack->data;
     stack->redo_stack = g_list_remove(stack->redo_stack, cmd);
     stack->undo_stack = g_list_prepend(stack->undo_stack, cmd);
+    stack->undo_count++;
     
     stack->in_undo_redo = TRUE;
     execute_command(stack, cmd, pt, FALSE);

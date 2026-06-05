@@ -370,9 +370,16 @@ syntax_context_apply_edit(SyntaxContext *ctx, size_t start_line, int line_delta)
     if (ctx->line_cache) {
         if (line_delta > 0) {
             if (start_line <= ctx->line_cache->len) {
-                for (int i = 0; i < line_delta; i++) {
-                    g_ptr_array_insert(ctx->line_cache, start_line, NULL);
+                size_t old_len = ctx->line_cache->len;
+                g_ptr_array_set_size(ctx->line_cache, old_len + line_delta);
+                
+                size_t move_count = old_len - start_line;
+                if (move_count > 0) {
+                    memmove(ctx->line_cache->pdata + start_line + line_delta,
+                            ctx->line_cache->pdata + start_line,
+                            move_count * sizeof(gpointer));
                 }
+                memset(ctx->line_cache->pdata + start_line, 0, line_delta * sizeof(gpointer));
             }
         } else if (line_delta < 0) {
             int to_remove = -line_delta;

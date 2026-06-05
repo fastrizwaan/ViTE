@@ -246,6 +246,21 @@ editor_widget_delete_selection(EditorWidget *self)
     /* This function handles bulk deletion of all selections */
     if (!self->cursors || self->cursors->len == 0) return 0;
     
+    /* Optimization: If single cursor selects entire document, use snapshot-based delete */
+    if (self->cursors->len == 1) {
+        EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, 0);
+        size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+        size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+        size_t total = document_get_length(self->doc);
+        
+        if (start == 0 && end == total && total > 0) {
+            document_delete_entire(self->doc);
+            cur->cursor_offset = 0;
+            cur->selection_anchor = 0;
+            return total;
+        }
+    }
+    
     g_array_sort(self->cursors, compare_cursors_desc);
     
     document_begin_undo_group(self->doc);
