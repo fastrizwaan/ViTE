@@ -547,6 +547,40 @@ document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len)
 }
 
 void
+document_delete_entire(Document *doc)
+{
+    if (!doc || !doc->pt) return;
+    
+    size_t total = piece_table_get_length(doc->pt);
+    if (total == 0) return;
+    
+    /* Snapshot-based delete: save current state to file, then clear.
+     * This is O(file_size) I/O but O(1) RAM — much better than streaming
+     * the entire file through the undo log for very large files. */
+    char *undo_path = document_snapshot_to_file(doc);
+    
+    if (!undo_path) {
+        /* Fallback to streaming if snapshot fails */
+        document_delete_streaming(doc, 0, total);
+        return;
+    }
+    
+    /* Push undo command: undo restores from snapshot, redo has no path (empty doc) */
+    undo_stack_push_restore_path(doc->undo_stack, undo_path, NULL);
+    g_free(undo_path);
+    
+    /* Clear the piece table */
+    size_t old_lines = piece_table_get_line_count(doc->pt);
+    piece_table_replace_all(doc->pt, "", 0, 0);
+    size_t new_lines = piece_table_get_line_count(doc->pt);
+    int line_delta = (int)new_lines - (int)old_lines;
+    
+    check_modification_state(doc);
+    document_emit_edit(doc, 0, -(int64_t)total);
+    document_emit_update(doc, 0, line_delta);
+}
+
+void
 document_transfer_range(Document *dest, Document *src, size_t src_offset, size_t len, size_t dest_offset)
 {
     if (!dest || !src || len == 0) return;

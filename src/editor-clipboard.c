@@ -285,12 +285,12 @@ editor_widget_delete_selection(EditorWidget *self)
 }
 
 static void
-perform_copy_internal(EditorWidget *self)
+perform_copy_internal(EditorWidget *self, size_t total_size)
 {
     /* Copy logic: we iterate cursors. Usually document order is preferred for copy. */
     /* Implementation in widget used default array order. */
     
-    GString *clip_text = g_string_new("");
+    GString *clip_text = g_string_sized_new(total_size + 1);
     
     /* Create a temp array to sort ascending */
     GArray *sorted = g_array_sized_new(FALSE, FALSE, sizeof(EditorCursor), self->cursors->len);
@@ -367,10 +367,10 @@ perform_copy_internal(EditorWidget *self)
 }
 
 static void
-perform_copy_internal_reference(EditorWidget *self)
+perform_copy_internal_reference(EditorWidget *self, size_t total_size)
 {
     if (filtered_lines_active(self)) {
-        perform_copy_internal(self);
+        perform_copy_internal(self, total_size);
         return;
     }
     /* Zero-RAM Copy: Set reference to document range */
@@ -399,17 +399,23 @@ static void
 large_copy_response_cb(AdwAlertDialog *dialog, gchar *response, EditorWidget *self)
 {
     gboolean is_cut = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(dialog), "is_cut"));
+    size_t total_size = GPOINTER_TO_SIZE(g_object_get_data(G_OBJECT(dialog), "total_size"));
 
     if (g_strcmp0(response, "copy") == 0) {
-        perform_copy_internal(self);
-        /* If system copy succeeded and it was cut, we should delete.
-           But perform_copy_internal doesn't report success.
-           Assuming success for now or user deals with it. 
-           But actually, if it hits allocation error, it shows another dialog.
-           Let's only handle Cut for Internal Copy for now as strictly requested.
-        */
+        perform_copy_internal(self, total_size);
+        if (is_cut) {
+            document_begin_undo_group(self->doc);
+            if (self->cursors && self->cursors->len > 0) {
+                 EditorCursor *primary = &g_array_index(self->cursors, EditorCursor, 0);
+                 if (primary->cursor_offset != primary->selection_anchor) {
+                     document_set_undo_group_selection(self->doc, primary->selection_anchor, primary->cursor_offset);
+                 }
+            }
+            editor_widget_delete_selection(self);
+            document_end_undo_group(self->doc);
+        }
     } else if (g_strcmp0(response, "internal") == 0) {
-        perform_copy_internal_reference(self);
+        perform_copy_internal_reference(self, total_size);
         
         if (is_cut) {
              /* For Cut, we need to persist reference to file and then delete */
@@ -447,14 +453,14 @@ editor_widget_copy_full(EditorWidget *self, gboolean is_cut)
          return FALSE;
     }
     
-    /* Warning Threshold: 1GB */
-    size_t huge_threshold = 1ULL * 1024 * 1024 * 1024;
+    /* Warning Threshold: 50MB */
+    size_t huge_threshold = 50ULL * 1024 * 1024;
     if (total_size > huge_threshold) {
         size_t free_ram = resource_get_available_ram();
-        double size_gb = (double)total_size / (1024.0 * 1024.0 * 1024.0);
-        double free_gb = (double)free_ram / (1024.0 * 1024.0 * 1024.0);
+        double size_mb = (double)total_size / (1024.0 * 1024.0);
+        double free_mb = (double)free_ram / (1024.0 * 1024.0);
         
-        char *msg = g_strdup_printf("Copying %.2f GB. available RAM is %.2f GB.\n\nThis operation may freeze the application for a few seconds.", size_gb, free_gb);
+        char *msg = g_strdup_printf("Copying %.2f MB. Available RAM is %.2f MB.\n\nThis operation may freeze the application or cause memory crashes.", size_mb, free_mb);
         
         GtkWindow *root = GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(self)));
         AdwAlertDialog *dialog = ADW_ALERT_DIALOG(adw_alert_dialog_new(
@@ -465,6 +471,7 @@ editor_widget_copy_full(EditorWidget *self, gboolean is_cut)
         
         /* Pass is_cut state to dialog */
         g_object_set_data(G_OBJECT(dialog), "is_cut", GINT_TO_POINTER(is_cut));
+        g_object_set_data(G_OBJECT(dialog), "total_size", GSIZE_TO_POINTER(total_size));
         
         adw_alert_dialog_add_response(dialog, "cancel", "Cancel");
         adw_alert_dialog_add_response(dialog, "internal", "Internal Copy (Zero RAM)");
@@ -482,7 +489,7 @@ editor_widget_copy_full(EditorWidget *self, gboolean is_cut)
         return FALSE; /* Abort synchronous copy/cut */
     }
     
-    perform_copy_internal(self);
+    perform_copy_internal(self, total_size);
     return TRUE;
 }
 

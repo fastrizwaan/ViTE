@@ -110,9 +110,7 @@ undo_stack_free(UndoStack *stack)
         g_free(stack->log_file_path);
     }
     
-    if (stack->map_base && stack->map_size > 0) {
-        munmap(stack->map_base, stack->map_size);
-    }
+    /* map_base removed */
     
     g_free(stack);
 }
@@ -173,11 +171,6 @@ maybe_prune_undo_history(UndoStack *stack)
         stack->redo_stack = NULL;
         
         /* Truncate log file */
-        if (stack->map_base) {
-            munmap(stack->map_base, stack->map_size);
-            stack->map_base = NULL;
-            stack->map_size = 0;
-        }
         
         /* Close and reopen log file to truncate it */
         fclose(stack->log_file);
@@ -491,33 +484,6 @@ undo_stack_set_group_selection_after(UndoStack *stack, size_t start, size_t end)
     }
 }
 
-/* Helper: Ensure memory map covers the whole log file */
-static void
-ensure_mmap(UndoStack *stack)
-{
-    if (!stack->log_file) return;
-    
-    int fd = fileno(stack->log_file);
-    struct stat st;
-    if (fstat(fd, &st) < 0) return;
-    
-    size_t file_size = st.st_size;
-    if (file_size == 0) return;
-    
-    if (stack->map_size < file_size) {
-        if (stack->map_base) {
-            munmap(stack->map_base, stack->map_size);
-        }
-        stack->map_size = file_size;
-        stack->map_base = mmap(NULL, stack->map_size, PROT_READ, MAP_PRIVATE, fd, 0);
-        if (stack->map_base == MAP_FAILED) {
-             g_warning("ensure_mmap: mmap failed: %s", strerror(errno));
-             stack->map_base = NULL;
-             stack->map_size = 0;
-        }
-    }
-}
-
 static void
 execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean undo)
 {
@@ -526,22 +492,22 @@ execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean und
              /* Delete what was inserted */
              piece_table_delete(pt, cmd->start, cmd->length);
         } else {
-             /* Redo Insert: Read from mmap log */
-             ensure_mmap(stack);
-             if (stack->map_base && (cmd->log_offset + cmd->length <= stack->map_size)) {
-                 piece_table_insert(pt, cmd->start, stack->map_base + cmd->log_offset, cmd->length);
+             /* Redo Insert: Zero-copy insert directly from undo log file */
+             if (stack->log_file && cmd->length > 0) {
+                 fflush(stack->log_file); /* Ensure all writes are on disk */
+                 piece_table_insert_from_fd_range(pt, cmd->start, fileno(stack->log_file), cmd->log_offset, cmd->length);
              } else {
-                 g_warning("execute_command: Undo log unavailable or truncated");
+                 g_warning("execute_command: Undo log unavailable");
              }
         }
     } else if (cmd->type == UNDO_OP_DELETE) {
         if (undo) {
-             /* Undo Delete -> Insert back from mmap log */
-             ensure_mmap(stack);
-             if (stack->map_base && (cmd->log_offset + cmd->length <= stack->map_size)) {
-                 piece_table_insert(pt, cmd->start, stack->map_base + cmd->log_offset, cmd->length);
+             /* Undo Delete -> Zero-copy insert directly from undo log file */
+             if (stack->log_file && cmd->length > 0) {
+                 fflush(stack->log_file); /* Ensure all writes are on disk */
+                 piece_table_insert_from_fd_range(pt, cmd->start, fileno(stack->log_file), cmd->log_offset, cmd->length);
              } else {
-                 g_warning("execute_command: Undo log unavailable or truncated");
+                 g_warning("execute_command: Undo log unavailable");
              }
         } else {
              /* Redo Delete */
@@ -563,8 +529,6 @@ execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean und
         }
         
     } else if (cmd->type == UNDO_OP_GROUP) {
-        /* Batch mmap once before executing all sub-commands */
-        ensure_mmap(stack);
         if (undo) {
             /* Undo in reverse order */
             for (GList *l = g_list_last(cmd->group_commands); l; l = l->prev) {

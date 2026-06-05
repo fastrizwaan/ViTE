@@ -61,9 +61,7 @@ typedef struct {
     
     int group_depth; /* Nesting level for undo groups */
     
-    /* Memory mapping of the log file for zero-RAM access */
-    char *map_base;
-    size_t map_size;
+    /* Memory mapping removed - using direct FD for zero-RAM access */
     
     /* History management */
     size_t undo_count;  /* Cached count of commands in undo_stack */
