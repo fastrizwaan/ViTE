@@ -18,15 +18,13 @@
 static const char *
 undo_temp_dir(void)
 {
-    const char *tmp_dir = g_get_tmp_dir();
-    if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
-    return tmp_dir;
+    return resource_get_vite_cache_dir();
 }
 
 UndoStack *
 undo_stack_new(void)
 {
-    UndoStack *s = g_malloc0(sizeof(UndoStack));
+    UndoStack *s = resource_safe_malloc0(sizeof(UndoStack));
     s->undo_stack = NULL;
     s->redo_stack = NULL;
     s->in_undo_redo = FALSE;
@@ -210,7 +208,7 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
         return;
     }
     
-    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_INSERT;
     cmd->start = start;
     cmd->length = len;
@@ -253,7 +251,7 @@ undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t le
         return;
     }
 
-    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_INSERT;
     cmd->start = start;
     cmd->length = len;
@@ -297,6 +295,110 @@ undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t le
     undo_stack_push_command(stack, cmd);
 }
 
+struct _UndoInsertFdTask {
+    UndoStack *stack;
+    size_t start;
+    int fd;
+    size_t total_len;
+    size_t written;
+    UndoCommand *cmd;
+};
+
+UndoInsertFdTask *
+undo_stack_push_insert_from_fd_async(UndoStack *stack, size_t start, int fd, size_t len)
+{
+    if (stack->in_undo_redo) return NULL;
+    if (!resource_size_valid(len)) return NULL;
+    
+    UndoInsertFdTask *task = resource_safe_malloc0(sizeof(UndoInsertFdTask));
+    task->stack = stack;
+    task->start = start;
+    task->fd = fd;
+    task->total_len = len;
+    
+    task->cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    task->cmd->type = UNDO_OP_INSERT;
+    task->cmd->start = start;
+    task->cmd->length = len;
+    
+    if (stack->current_group) {
+        stack->current_group_size += len;
+    }
+    
+    if (stack->log_file && len > 0) {
+        fseeko(stack->log_file, 0, SEEK_END);
+        task->cmd->log_offset = ftello(stack->log_file);
+        
+        if (!resource_can_write_disk(undo_temp_dir(), len)) {
+             g_warning("undo_stack_push_insert_from_fd_async: Disk full, dropping undo data");
+             task->cmd->length = 0;
+             task->total_len = 0;
+        }
+    } else {
+        task->total_len = 0; /* Nothing to write */
+    }
+    
+    return task;
+}
+
+gboolean
+undo_stack_push_insert_from_fd_step(UndoInsertFdTask *task, gint64 budget_micros, double *progress)
+{
+    if (!task) return FALSE;
+    if (task->written >= task->total_len) return FALSE;
+    
+    gint64 start_time = g_get_monotonic_time();
+    char buf[64 * 1024]; /* 64KB chunk */
+    
+    while (task->written < task->total_len) {
+        size_t to_read = task->total_len - task->written;
+        if (to_read > sizeof(buf)) to_read = sizeof(buf);
+        
+        ssize_t r = read(task->fd, buf, to_read);
+        if (r <= 0) {
+            task->cmd->length = task->written;
+            break; /* EOF or error */
+        }
+        
+        size_t written = fwrite(buf, 1, r, task->stack->log_file);
+        task->written += written;
+        task->stack->log_written += written;
+        
+        if (written != (size_t)r) {
+            g_warning("undo_stack_push_insert_from_fd_step: Short write %zu < %zd", written, r);
+            task->cmd->length = task->written;
+            break;
+        }
+        
+        if (g_get_monotonic_time() - start_time >= budget_micros) {
+            break; /* Yield */
+        }
+    }
+    
+    if (progress && task->total_len > 0) {
+        *progress = (double)task->written / task->total_len;
+    }
+    
+    return task->written < task->cmd->length;
+}
+
+void
+undo_stack_push_insert_from_fd_finish(UndoInsertFdTask *task)
+{
+    if (!task) return;
+    fflush(task->stack->log_file);
+    undo_stack_push_command(task->stack, task->cmd);
+    g_free(task);
+}
+
+void
+undo_stack_push_insert_from_fd_cancel(UndoInsertFdTask *task)
+{
+    if (!task) return;
+    free_command(task->cmd);
+    g_free(task);
+}
+
 void
 undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text, size_t len)
 {
@@ -307,7 +409,7 @@ undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text,
          return;
     }
     
-    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_DELETE;
     cmd->start = start;
     cmd->length = len;
@@ -348,7 +450,7 @@ undo_stack_push_delete_streaming(UndoStack *stack, size_t start, PieceTable *pt,
         return;
     }
     
-    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_DELETE;
     cmd->start = start;
     cmd->length = len;
@@ -406,7 +508,7 @@ undo_stack_push_restore_path(UndoStack *stack, const char *undo_path, const char
 {
     if (stack->in_undo_redo) return;
 
-    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_RESTORE_FROM_PATH;
     cmd->undo_path = g_strdup(undo_path);
     cmd->redo_path = g_strdup(redo_path);
@@ -419,7 +521,7 @@ undo_stack_push_custom(UndoStack *stack, void *data, void (*exec_func)(void *, g
 {
     if (stack->in_undo_redo) return;
 
-    UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
     cmd->type = UNDO_OP_CUSTOM;
     cmd->custom_data = data;
     cmd->custom_execute = exec_func;
@@ -437,7 +539,7 @@ undo_stack_begin_group(UndoStack *stack)
     /* If for some reason current_group is already set (should differ from depth > 1 check), abort */
     if (stack->current_group) return; 
     
-    UndoCommand *group = g_malloc0(sizeof(UndoCommand));
+    UndoCommand *group = resource_safe_malloc0(sizeof(UndoCommand));
     group->type = UNDO_OP_GROUP;
     stack->current_group = group;
     stack->current_group_size = 0; /* Reset accumulator */
@@ -686,5 +788,152 @@ undo_stack_redo_skip_execute(UndoStack *stack)
     stack->undo_stack = g_list_prepend(stack->undo_stack, cmd);
     
     get_command_info(cmd, FALSE, &info);
+    return info;
+}
+
+/* Incremental Undo Executor */
+struct _UndoExecutor {
+    UndoStack *stack;
+    PieceTable *pt;
+    UndoCommand *cmd;
+    gboolean is_undo;
+    GList *current_node;
+    size_t processed;
+    size_t total;
+    UndoInfo info;
+    UndoExecutorCallback callback;
+    gpointer user_data;
+};
+
+UndoExecutor *
+undo_executor_start_undo(UndoStack *stack, PieceTable *pt, UndoExecutorCallback cb, gpointer user_data)
+{
+    if (!stack->undo_stack) return NULL;
+    
+    UndoCommand *cmd = stack->undo_stack->data;
+    stack->undo_stack = g_list_remove(stack->undo_stack, cmd);
+    stack->redo_stack = g_list_prepend(stack->redo_stack, cmd);
+    if (stack->undo_count > 0) stack->undo_count--;
+    
+    UndoExecutor *exec = resource_safe_malloc0(sizeof(UndoExecutor));
+    exec->stack = stack;
+    exec->pt = pt;
+    exec->cmd = cmd;
+    exec->is_undo = TRUE;
+    exec->callback = cb;
+    exec->user_data = user_data;
+    
+    if (cmd->type == UNDO_OP_GROUP) {
+        exec->current_node = g_list_last(cmd->group_commands);
+        exec->total = g_list_length(cmd->group_commands);
+    } else {
+        exec->total = 1;
+    }
+    
+    return exec;
+}
+
+UndoExecutor *
+undo_executor_start_redo(UndoStack *stack, PieceTable *pt, UndoExecutorCallback cb, gpointer user_data)
+{
+    if (!stack->redo_stack) return NULL;
+    
+    UndoCommand *cmd = stack->redo_stack->data;
+    stack->redo_stack = g_list_remove(stack->redo_stack, cmd);
+    stack->undo_stack = g_list_prepend(stack->undo_stack, cmd);
+    stack->undo_count++;
+    
+    UndoExecutor *exec = resource_safe_malloc0(sizeof(UndoExecutor));
+    exec->stack = stack;
+    exec->pt = pt;
+    exec->cmd = cmd;
+    exec->is_undo = FALSE;
+    exec->callback = cb;
+    exec->user_data = user_data;
+    
+    if (cmd->type == UNDO_OP_GROUP) {
+        exec->current_node = cmd->group_commands;
+        exec->total = g_list_length(cmd->group_commands);
+    } else {
+        exec->total = 1;
+    }
+    
+    return exec;
+}
+
+gboolean
+undo_executor_step(UndoExecutor *exec, gint64 budget_micros, double *progress)
+{
+    if (!exec) return FALSE;
+    
+    gint64 start_time = g_get_monotonic_time();
+    exec->stack->in_undo_redo = TRUE;
+    
+    if (exec->cmd->type == UNDO_OP_GROUP) {
+        while (exec->current_node) {
+            UndoCommand *subcmd = exec->current_node->data;
+            execute_command(exec->stack, subcmd, exec->pt, exec->is_undo);
+            
+            if (exec->callback) {
+                int64_t delta = 0;
+                if (subcmd->type == UNDO_OP_INSERT) {
+                    delta = exec->is_undo ? -(int64_t)subcmd->length : (int64_t)subcmd->length;
+                } else if (subcmd->type == UNDO_OP_DELETE) {
+                    delta = exec->is_undo ? (int64_t)subcmd->length : -(int64_t)subcmd->length;
+                }
+                if (delta != 0) {
+                    exec->callback(subcmd->type, subcmd->start, delta, exec->user_data);
+                }
+            }
+            
+            exec->processed++;
+            
+            if (exec->is_undo) {
+                exec->current_node = exec->current_node->prev;
+            } else {
+                exec->current_node = exec->current_node->next;
+            }
+            
+            if (exec->processed % 32 == 0) {
+                if (g_get_monotonic_time() - start_time >= budget_micros) {
+                    break; /* Yield */
+                }
+            }
+        }
+    } else {
+        if (exec->processed == 0) {
+            execute_command(exec->stack, exec->cmd, exec->pt, exec->is_undo);
+            if (exec->callback) {
+                int64_t delta = 0;
+                if (exec->cmd->type == UNDO_OP_INSERT) {
+                    delta = exec->is_undo ? -(int64_t)exec->cmd->length : (int64_t)exec->cmd->length;
+                } else if (exec->cmd->type == UNDO_OP_DELETE) {
+                    delta = exec->is_undo ? (int64_t)exec->cmd->length : -(int64_t)exec->cmd->length;
+                }
+                if (delta != 0) {
+                    exec->callback(exec->cmd->type, exec->cmd->start, delta, exec->user_data);
+                }
+            }
+            exec->processed = 1;
+        }
+    }
+    
+    exec->stack->in_undo_redo = FALSE;
+    
+    if (progress && exec->total > 0) {
+        *progress = (double)exec->processed / exec->total;
+    }
+    
+    return exec->processed < exec->total; /* return TRUE if still working */
+}
+
+UndoInfo
+undo_executor_finish(UndoExecutor *exec)
+{
+    UndoInfo info = {0};
+    if (exec) {
+        get_command_info(exec->cmd, exec->is_undo, &info);
+        g_free(exec);
+    }
     return info;
 }

@@ -75,6 +75,11 @@ void vite_clipboard_set_reference(ViteClipboard *clip, Document *doc,
 /* Check if we have internal (reference-based) content */
 gboolean vite_clipboard_has_internal_content(ViteClipboard *clip);
 
+/* Async Copy */
+typedef struct _ViteClipboardCopyTask ViteClipboardCopyTask;
+ViteClipboardCopyTask *vite_clipboard_copy_async(ViteClipboard *clip, Document *doc, size_t start, size_t end, gboolean is_cut, ViteClipboardProgressCallback cb, gpointer user_data);
+void vite_clipboard_copy_async_cancel(ViteClipboardCopyTask *task);
+
 /* Get the size of clipboard content without materializing */
 size_t vite_clipboard_get_content_size(ViteClipboard *clip);
 

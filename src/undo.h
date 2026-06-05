@@ -75,6 +75,13 @@ void undo_stack_clear(UndoStack *stack);
 void undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t len);
 /* Push insertion where content is read from a file descriptor (for HUGE files) */
 void undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t len);
+
+/* Async variant for huge files to prevent blocking the UI */
+typedef struct _UndoInsertFdTask UndoInsertFdTask;
+UndoInsertFdTask *undo_stack_push_insert_from_fd_async(UndoStack *stack, size_t start, int fd, size_t len);
+gboolean undo_stack_push_insert_from_fd_step(UndoInsertFdTask *task, gint64 budget_micros, double *progress);
+void undo_stack_push_insert_from_fd_finish(UndoInsertFdTask *task);
+void undo_stack_push_insert_from_fd_cancel(UndoInsertFdTask *task);
 void undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text, size_t len);
 /* Zero-copy streaming delete: reads directly from piece table iterator into log */
 void undo_stack_push_delete_streaming(UndoStack *stack, size_t start, PieceTable *pt, size_t offset, size_t len);
@@ -105,6 +112,16 @@ UndoInfo undo_stack_redo(UndoStack *stack, PieceTable *pt);
 /* Variants that only manage the stack/info and skip execution (for async management) */
 UndoInfo undo_stack_undo_skip_execute(UndoStack *stack);
 UndoInfo undo_stack_redo_skip_execute(UndoStack *stack);
+
+/* Incremental Execution for Groups */
+typedef struct _UndoExecutor UndoExecutor;
+
+typedef void (*UndoExecutorCallback)(UndoOpType type, size_t offset, int64_t byte_delta, gpointer user_data);
+
+UndoExecutor *undo_executor_start_undo(UndoStack *stack, PieceTable *pt, UndoExecutorCallback cb, gpointer user_data);
+UndoExecutor *undo_executor_start_redo(UndoStack *stack, PieceTable *pt, UndoExecutorCallback cb, gpointer user_data);
+gboolean undo_executor_step(UndoExecutor *exec, gint64 budget_micros, double *progress);
+UndoInfo undo_executor_finish(UndoExecutor *exec);
 
 /* For modification tracking */
 void *undo_stack_peek(UndoStack *stack);

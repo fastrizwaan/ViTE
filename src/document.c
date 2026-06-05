@@ -66,9 +66,7 @@ check_disk_space(const char *dir, size_t required_bytes)
 static const char *
 document_temp_dir(void)
 {
-    const char *tmp_dir = g_get_tmp_dir();
-    if (!tmp_dir || !*tmp_dir) tmp_dir = "/tmp";
-    return tmp_dir;
+    return resource_get_vite_cache_dir();
 }
 
 struct _Document {
@@ -488,7 +486,7 @@ document_delete_streaming(Document *doc, size_t offset, size_t len)
     
     if (!stack->in_undo_redo && stack->log_file) {
         /* ... existing log logic ... */
-        UndoCommand *cmd = g_malloc0(sizeof(UndoCommand));
+        UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
         cmd->type = UNDO_OP_DELETE;
         cmd->start = offset;
         cmd->length = len;
@@ -546,6 +544,82 @@ document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len)
     }
 }
 
+/* Async Insert from FD */
+struct _DocumentInsertFromFdTask {
+    Document *doc;
+    size_t offset;
+    int fd;
+    size_t len;
+    DocumentInsertFromFdProgressCallback callback;
+    gpointer user_data;
+    guint idle_id;
+    UndoInsertFdTask *undo_task;
+};
+
+static gboolean
+document_insert_from_fd_idle_step(gpointer user_data)
+{
+    DocumentInsertFromFdTask *task = user_data;
+    
+    if (task->undo_task) {
+        double progress = 0;
+        if (undo_stack_push_insert_from_fd_step(task->undo_task, 10000, &progress)) {
+            if (task->callback) task->callback(progress, FALSE, task->user_data);
+            return G_SOURCE_CONTINUE;
+        }
+        
+        undo_stack_push_insert_from_fd_finish(task->undo_task);
+        task->undo_task = NULL;
+    }
+    
+    /* Undo log is ready. Perform the fast in-memory insertion */
+    size_t old_lines = piece_table_get_line_count(task->doc->pt);
+    piece_table_insert_from_fd_range(task->doc->pt, task->offset, task->fd, 0, task->len);
+    size_t new_lines = piece_table_get_line_count(task->doc->pt);
+    int line_delta = (int)new_lines - (int)old_lines;
+    size_t start_line = piece_table_get_line_of_offset(task->doc->pt, task->offset);
+    
+    check_modification_state(task->doc);
+    document_emit_edit(task->doc, task->offset, (int64_t)task->len);
+    document_emit_update(task->doc, start_line, line_delta);
+    
+    if (task->callback) task->callback(1.0, TRUE, task->user_data);
+    
+    task->idle_id = 0;
+    g_free(task);
+    return G_SOURCE_REMOVE;
+}
+
+DocumentInsertFromFdTask *
+document_insert_from_fd_async(Document *doc, size_t offset, int fd, size_t len, DocumentInsertFromFdProgressCallback cb, gpointer user_data)
+{
+    if (!doc || len == 0) return NULL;
+    
+    DocumentInsertFromFdTask *task = g_new0(DocumentInsertFromFdTask, 1);
+    task->doc = doc;
+    task->offset = offset;
+    task->fd = fd;
+    task->len = len;
+    task->callback = cb;
+    task->user_data = user_data;
+    
+    if (doc->undo_stack) {
+        task->undo_task = undo_stack_push_insert_from_fd_async(doc->undo_stack, offset, fd, len);
+    }
+    
+    task->idle_id = g_idle_add(document_insert_from_fd_idle_step, task);
+    return task;
+}
+
+void
+document_insert_from_fd_cancel(DocumentInsertFromFdTask *task)
+{
+    if (!task) return;
+    if (task->idle_id) g_source_remove(task->idle_id);
+    if (task->undo_task) undo_stack_push_insert_from_fd_cancel(task->undo_task);
+    g_free(task);
+}
+
 void
 document_delete_entire(Document *doc)
 {
@@ -578,6 +652,108 @@ document_delete_entire(Document *doc)
     check_modification_state(doc);
     document_emit_edit(doc, 0, -(int64_t)total);
     document_emit_update(doc, 0, line_delta);
+}
+
+/* Async Delete Entire */
+struct _DocumentDeleteEntireTask {
+    Document *doc;
+    DocumentDeleteEntireProgressCallback callback;
+    gpointer user_data;
+    guint idle_id;
+    DocumentSaveTask *save_task;
+    char *snapshot_path;
+};
+
+static gboolean
+document_delete_entire_idle_step(gpointer user_data)
+{
+    DocumentDeleteEntireTask *task = user_data;
+    
+    if (task->save_task) {
+        double progress = 0;
+        if (document_save_async_step(task->save_task, 10000, &progress)) {
+            if (task->callback) task->callback(progress, FALSE, task->user_data);
+            return G_SOURCE_CONTINUE;
+        }
+        
+        GError *err = NULL;
+        document_save_async_finish(task->save_task, &err);
+        task->save_task = NULL;
+        
+        if (err) {
+            g_warning("Snapshot failed: %s", err->message);
+            g_error_free(err);
+            
+            // Fallback to streaming if snapshot fails
+            size_t total = piece_table_get_length(task->doc->pt);
+            document_delete_streaming(task->doc, 0, total);
+            
+            if (task->callback) task->callback(1.0, TRUE, task->user_data);
+            g_free(task->snapshot_path);
+            g_free(task);
+            return G_SOURCE_REMOVE;
+        }
+    }
+    
+    size_t total = piece_table_get_length(task->doc->pt);
+    undo_stack_push_restore_path(task->doc->undo_stack, task->snapshot_path, NULL);
+    
+    /* Clear the piece table */
+    size_t old_lines = piece_table_get_line_count(task->doc->pt);
+    piece_table_replace_all(task->doc->pt, "", 0, 0);
+    size_t new_lines = piece_table_get_line_count(task->doc->pt);
+    int line_delta = (int)new_lines - (int)old_lines;
+    
+    check_modification_state(task->doc);
+    document_emit_edit(task->doc, 0, -(int64_t)total);
+    document_emit_update(task->doc, 0, line_delta);
+    
+    if (task->callback) task->callback(1.0, TRUE, task->user_data);
+    
+    g_free(task->snapshot_path);
+    g_free(task);
+    return G_SOURCE_REMOVE;
+}
+
+DocumentDeleteEntireTask *
+document_delete_entire_async(Document *doc, DocumentDeleteEntireProgressCallback cb, gpointer user_data)
+{
+    if (!doc || !doc->pt) return NULL;
+    
+    size_t total = piece_table_get_length(doc->pt);
+    if (total == 0) return NULL;
+    
+    DocumentDeleteEntireTask *task = g_new0(DocumentDeleteEntireTask, 1);
+    task->doc = doc;
+    task->callback = cb;
+    task->user_data = user_data;
+    
+    char template[] = "vite-snapshot-XXXXXX";
+    char *temp_dir = g_build_filename(g_get_tmp_dir(), "vite", NULL);
+    g_mkdir_with_parents(temp_dir, 0700);
+    char *full_template = g_build_filename(temp_dir, template, NULL);
+    int fd = mkstemp(full_template);
+    g_free(temp_dir);
+    if (fd != -1) {
+        close(fd);
+        task->snapshot_path = full_template;
+        task->save_task = document_save_async_start(doc, task->snapshot_path);
+    } else {
+        g_free(full_template);
+    }
+    
+    task->idle_id = g_idle_add(document_delete_entire_idle_step, task);
+    return task;
+}
+
+void
+document_delete_entire_cancel(DocumentDeleteEntireTask *task)
+{
+    if (!task) return;
+    if (task->idle_id) g_source_remove(task->idle_id);
+    if (task->save_task) document_save_async_cancel(task->save_task);
+    g_free(task->snapshot_path);
+    g_free(task);
 }
 
 void
@@ -798,6 +974,7 @@ struct _UndoRedoTask {
     
     /* Incremental restoration */
     PieceTableReplaceTask *pt_task;
+    UndoExecutor *exec;
 };
 
 static void
@@ -813,7 +990,18 @@ undo_redo_task_free(UndoRedoTask *task)
         piece_table_replace_async_cancel(task->pt_task);
     }
     
+    if (task->exec) {
+        undo_executor_finish(task->exec);
+    }
+    
     g_free(task);
+}
+
+static void
+undo_redo_exec_cb(UndoOpType type, size_t offset, int64_t byte_delta, gpointer user_data)
+{
+    Document *doc = user_data;
+    document_emit_edit(doc, offset, byte_delta);
 }
 
 static gboolean
@@ -848,6 +1036,36 @@ undo_redo_idle_step(gpointer user_data)
         
         check_modification_state(doc);
         document_emit_update(doc, 0, 0);
+        operation_done = TRUE;
+    } else if (task->exec) {
+        double progress = 0;
+        size_t old_lines = piece_table_get_line_count(doc->pt);
+        
+        if (undo_executor_step(task->exec, 10000, &progress)) {
+            if (task->callback) {
+                task->callback(progress, FALSE, NULL, task->user_data);
+            }
+            return G_SOURCE_CONTINUE;
+        }
+        
+        info = undo_executor_finish(task->exec);
+        task->exec = NULL;
+        
+        if (info.success) {
+            size_t new_lines = piece_table_get_line_count(doc->pt);
+            int line_delta = (int)new_lines - (int)old_lines;
+            
+            size_t start_line = 0;
+            if (info.length > 0) {
+                start_line = piece_table_get_line_of_offset(doc->pt, info.start);
+            }
+            
+            check_modification_state(doc);
+            
+            /* Emitting edit was done incrementally by callbacks! */
+            
+            document_emit_update(doc, start_line, line_delta);
+        }
         operation_done = TRUE;
     } else {
         /* Standard operation (INSERT/DELETE) or small restore */
@@ -920,6 +1138,10 @@ document_undo_async(Document *doc, UndoRedoProgressCallback callback, gpointer u
         }
     }
     
+    if (!task->pt_task) {
+        task->exec = undo_executor_start_undo(doc->undo_stack, doc->pt, undo_redo_exec_cb, doc);
+    }
+    
     task->idle_id = g_idle_add(undo_redo_idle_step, task);
     return task;
 }
@@ -950,6 +1172,10 @@ document_redo_async(Document *doc, UndoRedoProgressCallback callback, gpointer u
             }
             close(fd);
         }
+    }
+    
+    if (!task->pt_task) {
+        task->exec = undo_executor_start_redo(doc->undo_stack, doc->pt, undo_redo_exec_cb, doc);
     }
     
     task->idle_id = g_idle_add(undo_redo_idle_step, task);
@@ -1888,7 +2114,7 @@ document_search_async_start(Document *doc, const char *raw_query, gboolean regex
     task->original_query = g_strdup(raw_query);
     
     piece_table_iter_init(doc->pt, &task->iter);
-    task->line_buf = g_string_sized_new(4096);
+    task->line_buf = resource_safe_g_string_sized_new(4096);
     task->start_change_count = doc->pt->change_count;
     
     task->current_offset = 0;
@@ -2372,7 +2598,7 @@ static gboolean replace_idle_step(gpointer user_data) {
         /* Estimate size: Current size + (difference * count). 
            Safe bet: Current size * 1.2 or similar. */
         size_t current_len = document_get_length(doc);
-        task->new_content_buffer = g_string_sized_new(current_len + 1024);
+        task->new_content_buffer = resource_safe_g_string_sized_new(current_len + 1024);
     }
     
     /* Process continuously until budget exhausted */
@@ -2474,7 +2700,7 @@ static gboolean replace_idle_step(gpointer user_data) {
     doc->undo_stack->in_undo_redo = FALSE;
     
     /* Push a dummy command so the undo stack top changes and document_is_modified evaluates to TRUE */
-    UndoCommand *dummy_cmd = g_malloc0(sizeof(UndoCommand));
+    UndoCommand *dummy_cmd = resource_safe_malloc0(sizeof(UndoCommand));
     dummy_cmd->type = UNDO_OP_GROUP; /* A safe dummy op */
     undo_stack_push_command(doc->undo_stack, dummy_cmd);
     
@@ -2671,7 +2897,7 @@ static gboolean streaming_replace_idle_step(gpointer user_data) {
             new_text = g_regex_replace(task->pattern, task->full_text, -1, 0, task->replacement, 0, NULL);
         } else {
             /* Literal string replace */
-            GString *res = g_string_sized_new(strlen(task->full_text));
+            GString *res = resource_safe_g_string_sized_new(strlen(task->full_text));
             char *haystack = task->full_text;
             char *found = NULL;
             while (haystack && *haystack) {
@@ -2976,7 +3202,7 @@ document_replace_streaming_start(Document *doc, const char *raw_query, const cha
     
     /* Initialize iterator for line processing */
     piece_table_iter_init(doc->pt, &task->iter);
-    task->line_buf = g_string_sized_new(4096);
+    task->line_buf = resource_safe_g_string_sized_new(4096);
     task->total_lines = document_get_line_count(doc);
     task->current_line = 0;
     task->replace_count = 0;
@@ -3434,15 +3660,27 @@ document_snapshot_to_file(Document *doc)
     
     size_t chunk_len;
     const char *chunk;
+    gboolean success = TRUE;
     
     while ((chunk = piece_table_iter_get_chunk(&iter, &chunk_len))) {
         if (chunk_len > 0) {
-            fwrite(chunk, 1, chunk_len, f);
+            if (fwrite(chunk, 1, chunk_len, f) != chunk_len) {
+                g_warning("document_snapshot_to_file: fwrite failed");
+                success = FALSE;
+                break;
+            }
         }
         piece_table_iter_advance(&iter, chunk_len);
     }
     
     fclose(f);
+    
+    if (!success) {
+        unlink(path);
+        g_free(path);
+        return NULL;
+    }
+    
     return path; /* Caller owns path and file */
 }
 

@@ -38,14 +38,14 @@ write_to_temp_file(const char *data, size_t len)
     char *path = NULL;
     
 #ifdef O_TMPFILE
-    fd = open("/tmp", O_TMPFILE | O_RDWR | O_EXCL, 0600);
+    fd = open(resource_get_vite_cache_dir(), O_TMPFILE | O_RDWR | O_EXCL, 0600);
     if (fd != -1) {
         /* O_TMPFILE succeeded - write directly */
     } else
 #endif
     {
         /* Fallback to mkstemp */
-        path = g_strdup("/tmp/vite_syspaste_XXXXXX");
+        path = g_build_filename(resource_get_vite_cache_dir(), "vite_syspaste_XXXXXX", NULL);
         fd = mkstemp(path);
         if (fd == -1) {
             g_warning("write_to_temp_file: mkstemp failed: %s", strerror(errno));
@@ -58,7 +58,7 @@ write_to_temp_file(const char *data, size_t len)
     }
     
     /* Check disk space */
-    if (!resource_can_write_disk("/tmp", len)) {
+    if (!resource_can_write_disk(resource_get_vite_cache_dir(), len)) {
         g_warning("write_to_temp_file: Insufficient disk space for %zu bytes", len);
         close(fd);
         /* If named file, unlink it */
@@ -289,7 +289,7 @@ static void
 perform_copy_internal(EditorWidget *self, size_t total_size)
 {
     /* Use mmap-backed file instead of RAM for massive copies */
-    char *template_path = g_strdup("/tmp/vite-copy-XXXXXX");
+    char *template_path = g_build_filename(resource_get_vite_cache_dir(), "vite-copy-XXXXXX", NULL);
     int fd = mkstemp(template_path);
     if (fd == -1) {
         g_free(template_path);
@@ -297,7 +297,9 @@ perform_copy_internal(EditorWidget *self, size_t total_size)
         return;
     }
     
-    if (ftruncate(fd, total_size + 1) != 0) {
+    /* Use posix_fallocate to reserve physical disk blocks immediately instead of creating a sparse file.
+     * This prevents a SIGBUS when faulting in mmap pages if the disk/quota gets exhausted. */
+    if (posix_fallocate(fd, 0, total_size + 1) != 0) {
         close(fd);
         unlink(template_path);
         g_free(template_path);
@@ -415,6 +417,55 @@ perform_copy_internal_reference(EditorWidget *self, size_t total_size)
     }
 }
 
+struct _CutState {
+    EditorWidget *self;
+};
+
+static void
+on_cut_deleted(double progress, gboolean finished, gpointer user_data)
+{
+    struct _CutState *state = user_data;
+    if (finished) {
+        document_end_undo_group(state->self->doc);
+        g_free(state);
+    }
+}
+
+static void
+on_internal_copy_done(size_t done, size_t total, gpointer user_data)
+{
+    struct _CutState *state = user_data;
+    if (!state) return;
+    
+    if (done >= total) {
+         document_begin_undo_group(state->self->doc);
+         if (state->self->cursors && state->self->cursors->len > 0) {
+              EditorCursor *primary = &g_array_index(state->self->cursors, EditorCursor, 0);
+              if (primary->cursor_offset != primary->selection_anchor) {
+                  document_set_undo_group_selection(state->self->doc, primary->selection_anchor, primary->cursor_offset);
+              }
+         }
+         
+         if (state->self->cursors->len == 1) {
+             EditorCursor *cur = &g_array_index(state->self->cursors, EditorCursor, 0);
+             size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+             size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+             size_t doc_len = document_get_length(state->self->doc);
+             
+             if (start == 0 && end == doc_len && doc_len > 0) {
+                 document_delete_entire_async(state->self->doc, on_cut_deleted, state);
+                 cur->cursor_offset = 0;
+                 cur->selection_anchor = 0;
+                 return;
+             }
+         }
+         
+         editor_widget_delete_selection(state->self);
+         document_end_undo_group(state->self->doc);
+         g_free(state);
+    }
+}
+
 static void
 large_copy_response_cb(AdwAlertDialog *dialog, gchar *response, EditorWidget *self)
 {
@@ -435,15 +486,19 @@ large_copy_response_cb(AdwAlertDialog *dialog, gchar *response, EditorWidget *se
             document_end_undo_group(self->doc);
         }
     } else if (g_strcmp0(response, "internal") == 0) {
-        perform_copy_internal_reference(self, total_size);
-        
-        if (is_cut) {
-             /* For Cut, we need to persist reference to file and then delete */
-             ViteClipboard *clip = vite_clipboard_get_default();
-             if (vite_clipboard_has_internal_content(clip) && vite_clipboard_is_reference_valid(clip)) {
-                  vite_clipboard_persist_to_file(clip);
-             }
-             editor_widget_delete_selection(self);
+        ViteClipboard *clip = vite_clipboard_get_default();
+        if (self->cursors && self->cursors->len > 0) {
+            EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, 0);
+            size_t start = MIN(cur->cursor_offset, cur->selection_anchor);
+            size_t end = MAX(cur->cursor_offset, cur->selection_anchor);
+            
+            if (is_cut) {
+                struct _CutState *state = g_new0(struct _CutState, 1);
+                state->self = self;
+                vite_clipboard_copy_async(clip, self->doc, start, end, TRUE, on_internal_copy_done, state);
+            } else {
+                vite_clipboard_copy_async(clip, self->doc, start, end, FALSE, NULL, NULL);
+            }
         }
     }
 }

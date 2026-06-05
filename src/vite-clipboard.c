@@ -126,7 +126,7 @@ vite_clipboard_persist_to_file(ViteClipboard *clip)
     if (len == 0) return;
     
     /* Create temp file */
-    char *fname = g_strdup("/tmp/vite-clipboard-XXXXXX");
+    char *fname = g_build_filename(resource_get_vite_cache_dir(), "vite-clipboard-XXXXXX", NULL);
     int fd = mkstemp(fname);
     if (fd == -1) {
         g_warning("Failed to create persistence file: %s", strerror(errno));
@@ -136,7 +136,7 @@ vite_clipboard_persist_to_file(ViteClipboard *clip)
     
     g_debug("vite_clipboard: Persisting %zu bytes to %s", len, fname);
     
-    if (!resource_can_write_disk("/tmp", len)) {
+    if (!resource_can_write_disk(resource_get_vite_cache_dir(), len)) {
         g_warning("vite_clipboard: Insufficient disk space to persist clipboard");
         close(fd);
         unlink(fname);
@@ -178,11 +178,138 @@ vite_clipboard_persist_to_file(ViteClipboard *clip)
         entry->source_doc = NULL;
         /* is_valid remains TRUE, as file is static */
         g_debug("vite_clipboard: Persistence successful, switched to FILE mode");
-    } else {
         g_warning("vite_clipboard: Persistence failed");
         unlink(fname);
         g_free(fname);
     }
+}
+
+/* Async Copy Implementation */
+struct _ViteClipboardCopyTask {
+    ViteClipboard *clip;
+    Document *doc;
+    size_t start;
+    size_t end;
+    gboolean is_cut;
+    ViteClipboardProgressCallback cb;
+    gpointer user_data;
+    guint idle_id;
+    int fd;
+    char *path;
+    size_t written;
+};
+
+static gboolean
+vite_clipboard_copy_idle_step(gpointer user_data)
+{
+    ViteClipboardCopyTask *task = user_data;
+    size_t len = task->end - task->start;
+    
+    gint64 start_time = g_get_monotonic_time();
+    size_t chunk_size = 256 * 1024; /* 256KB chunks */
+    
+    while (task->written < len) {
+        size_t to_write = len - task->written;
+        if (to_write > chunk_size) to_write = chunk_size;
+        
+        char *chunk = document_get_text_range(task->doc, task->start + task->written, to_write);
+        if (!chunk) {
+            g_warning("vite_clipboard_copy_idle_step: allocation failed");
+            break; /* Error out */
+        }
+        
+        ssize_t res = write(task->fd, chunk, to_write);
+        g_free(chunk);
+        
+        if (res != (ssize_t)to_write) {
+            g_warning("vite_clipboard_copy_idle_step: write failed");
+            break;
+        }
+        
+        task->written += to_write;
+        
+        if (g_get_monotonic_time() - start_time >= 10000) {
+            if (task->cb) task->cb(task->written, len, task->user_data);
+            return G_SOURCE_CONTINUE;
+        }
+    }
+    
+    close(task->fd);
+    
+    if (task->written == len) {
+        if (task->clip->current) {
+            free_entry(task->clip->current);
+        }
+        
+        ViteClipboardEntry *entry = resource_safe_malloc0(sizeof(ViteClipboardEntry));
+        entry->type = VITE_CLIPBOARD_ENTRY_FILE;
+        entry->persisted_file_path = task->path; /* takes ownership */
+        entry->start_offset = 0;
+        entry->end_offset = len;
+        entry->is_valid = TRUE;
+        entry->is_cut = task->is_cut;
+        
+        task->clip->current = entry;
+    } else {
+        unlink(task->path);
+        g_free(task->path);
+    }
+    
+    if (task->cb) task->cb(len, len, task->user_data);
+    
+    task->idle_id = 0;
+    g_free(task);
+    return G_SOURCE_REMOVE;
+}
+
+ViteClipboardCopyTask *
+vite_clipboard_copy_async(ViteClipboard *clip, Document *doc, size_t start, size_t end, gboolean is_cut, ViteClipboardProgressCallback cb, gpointer user_data)
+{
+    if (!clip || !doc || start >= end) return NULL;
+    
+    size_t len = end - start;
+    if (!resource_can_write_disk(resource_get_vite_cache_dir(), len)) {
+        g_warning("vite_clipboard_copy_async: Insufficient disk space");
+        return NULL;
+    }
+    
+    char template[] = "vite-clip-XXXXXX";
+    char *temp_dir = g_build_filename(resource_get_vite_cache_dir(), NULL);
+    g_mkdir_with_parents(temp_dir, 0700);
+    char *full_template = g_build_filename(temp_dir, template, NULL);
+    int fd = mkstemp(full_template);
+    g_free(temp_dir);
+    
+    if (fd == -1) {
+        g_warning("vite_clipboard_copy_async: mkstemp failed");
+        g_free(full_template);
+        return NULL;
+    }
+    
+    ViteClipboardCopyTask *task = g_new0(ViteClipboardCopyTask, 1);
+    task->clip = clip;
+    task->doc = doc;
+    task->start = start;
+    task->end = end;
+    task->is_cut = is_cut;
+    task->cb = cb;
+    task->user_data = user_data;
+    task->fd = fd;
+    task->path = full_template;
+    
+    task->idle_id = g_idle_add(vite_clipboard_copy_idle_step, task);
+    return task;
+}
+
+void
+vite_clipboard_copy_async_cancel(ViteClipboardCopyTask *task)
+{
+    if (!task) return;
+    if (task->idle_id) g_source_remove(task->idle_id);
+    close(task->fd);
+    unlink(task->path);
+    g_free(task->path);
+    g_free(task);
 }
 
 gboolean
@@ -339,6 +466,28 @@ streaming_paste_chunk(gpointer user_data)
     return G_SOURCE_CONTINUE;
 }
 
+struct _PasteAsyncData {
+    Document *target;
+    ViteClipboardProgressCallback cb;
+    gpointer user_data;
+    size_t total;
+    int fd;
+};
+
+static void
+on_insert_from_fd_async_progress(double progress, gboolean finished, gpointer user_data)
+{
+    struct _PasteAsyncData *pad = user_data;
+    if (pad->cb) {
+        pad->cb(progress * pad->total, pad->total, pad->user_data);
+    }
+    if (finished) {
+        document_end_undo_group(pad->target);
+        close(pad->fd);
+        g_free(pad);
+    }
+}
+
 void
 vite_clipboard_paste_streaming(ViteClipboard *clip, Document *target,
                                 size_t offset,
@@ -378,18 +527,15 @@ vite_clipboard_paste_streaming(ViteClipboard *clip, Document *target,
         if (entry->type == VITE_CLIPBOARD_ENTRY_FILE && entry->persisted_file_path) {
             int fd = open(entry->persisted_file_path, O_RDONLY);
             if (fd >= 0) {
-                 /* 2. Insert using mmap */
-                 /* We must handle undo group here since we bypass the idle loop */
+                 /* 2. Insert using async chunking */
                  document_begin_undo_group(target);
-                 document_insert_from_fd(target, offset, fd, total);
-                 document_end_undo_group(target);
-                 
-                 close(fd);
-                 
-                 /* Report completion immediately */
-                 if (progress_cb) {
-                     progress_cb(total, total, user_data);
-                 }
+                 struct _PasteAsyncData *pad = g_new0(struct _PasteAsyncData, 1);
+                 pad->target = target;
+                 pad->cb = progress_cb;
+                 pad->user_data = user_data;
+                 pad->total = total;
+                 pad->fd = fd;
+                 document_insert_from_fd_async(target, offset, fd, total, on_insert_from_fd_async_progress, pad);
                  return;
             } else {
                  g_warning("vite_clipboard: Failed to open persisted file for Zero-RAM paste");

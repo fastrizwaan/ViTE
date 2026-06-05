@@ -107,7 +107,13 @@ uint64_t document_get_version(Document *doc);
 /* Editing */
 void document_insert(Document *doc, size_t offset, const char *text, size_t len);
 void document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len);
-void document_insert_from_fd(Document *doc, size_t offset, int fd, size_t len);
+
+/* Async chunk-copying for huge Zero-RAM Paste */
+typedef struct _DocumentInsertFromFdTask DocumentInsertFromFdTask;
+typedef void (*DocumentInsertFromFdProgressCallback)(double progress, gboolean finished, gpointer user_data);
+DocumentInsertFromFdTask *document_insert_from_fd_async(Document *doc, size_t offset, int fd, size_t len, DocumentInsertFromFdProgressCallback cb, gpointer user_data);
+void document_insert_from_fd_cancel(DocumentInsertFromFdTask *task);
+
 void document_transfer_range(Document *dest, Document *src, size_t src_offset, size_t len, size_t dest_offset);
 
 /* Iterator for fast sequential access */
@@ -120,6 +126,12 @@ size_t document_iter_next_line(DocumentIter *iter, char *buf, size_t buf_len);
 void document_delete(Document *doc, size_t offset, size_t len);
 /* Optimized: snapshot-based delete for entire document (Select All + Delete/Cut) */
 void document_delete_entire(Document *doc);
+
+/* Async chunk-copying for huge Zero-RAM Cut */
+typedef struct _DocumentDeleteEntireTask DocumentDeleteEntireTask;
+typedef void (*DocumentDeleteEntireProgressCallback)(double progress, gboolean finished, gpointer user_data);
+DocumentDeleteEntireTask *document_delete_entire_async(Document *doc, DocumentDeleteEntireProgressCallback cb, gpointer user_data);
+void document_delete_entire_cancel(DocumentDeleteEntireTask *task);
 
 /* Undo/Redo */
 UndoInfo document_undo(Document *doc);

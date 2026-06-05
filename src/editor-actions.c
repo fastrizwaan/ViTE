@@ -1,3 +1,4 @@
+#include "resource-check.h"
 #include "editor-internal.h"
 #include <string.h>
 #include <math.h>
@@ -572,7 +573,7 @@ editor_widget_indent_selection(EditorWidget *self)
     size_t indent_len;
     if (self->indent_style == 0) {
         indent_len = self->indent_width;
-        indent_str = g_malloc(indent_len + 1);
+        indent_str = resource_safe_malloc(indent_len + 1);
         memset(indent_str, ' ', indent_len);
         indent_str[indent_len] = '\0';
     } else {

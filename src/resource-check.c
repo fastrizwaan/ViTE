@@ -195,3 +195,29 @@ resource_safe_g_string_sized_new(size_t dfl_size)
        If it aborts, we at least tried to prevent it with can_allocate check. */
     return str;
 }
+
+const char *
+resource_get_vite_cache_dir(void)
+{
+    static char *cache_dir = NULL;
+    if (!cache_dir) {
+        cache_dir = g_build_filename(g_get_user_cache_dir(), "vite", NULL);
+        g_mkdir_with_parents(cache_dir, 0700);
+    }
+    return cache_dir;
+}
+
+void *
+resource_safe_malloc0(size_t size)
+{
+    if (!resource_can_allocate(size)) {
+        g_warning("resource_safe_malloc0: Refusing to allocate %zu bytes", size);
+        return NULL;
+    }
+    
+    void *ptr = g_try_malloc0(size);
+    if (!ptr && size > 0) {
+        g_warning("resource_safe_malloc0: g_try_malloc0 failed for %zu bytes", size);
+    }
+    return ptr;
+}
