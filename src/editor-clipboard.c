@@ -18,6 +18,7 @@ static int compare_cursors(gconstpointer a, gconstpointer b) {
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/mman.h>
 
 /* Threshold for Zero-RAM system clipboard paste (1MB) 
  * Below this, RAM-based paste is fine for responsiveness */
@@ -287,15 +288,38 @@ editor_widget_delete_selection(EditorWidget *self)
 static void
 perform_copy_internal(EditorWidget *self, size_t total_size)
 {
-    /* Copy logic: we iterate cursors. Usually document order is preferred for copy. */
-    /* Implementation in widget used default array order. */
+    /* Use mmap-backed file instead of RAM for massive copies */
+    char *template_path = g_strdup("/tmp/vite-copy-XXXXXX");
+    int fd = mkstemp(template_path);
+    if (fd == -1) {
+        g_free(template_path);
+        show_allocation_error_dialog(self);
+        return;
+    }
     
-    GString *clip_text = g_string_sized_new(total_size + 1);
+    if (ftruncate(fd, total_size + 1) != 0) {
+        close(fd);
+        unlink(template_path);
+        g_free(template_path);
+        show_allocation_error_dialog(self);
+        return;
+    }
+    
+    char *clip_text = mmap(NULL, total_size + 1, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (clip_text == MAP_FAILED) {
+        close(fd);
+        unlink(template_path);
+        g_free(template_path);
+        show_allocation_error_dialog(self);
+        return;
+    }
     
     /* Create a temp array to sort ascending */
     GArray *sorted = g_array_sized_new(FALSE, FALSE, sizeof(EditorCursor), self->cursors->len);
     g_array_append_vals(sorted, self->cursors->data, self->cursors->len);
     g_array_sort(sorted, compare_cursors); /* Ascending sort for clipboard order */
+    
+    size_t current_offset = 0;
     
     for (guint c = 0; c < self->cursors->len; c++) {
          EditorCursor *cur = &g_array_index(self->cursors, EditorCursor, c);
@@ -307,63 +331,59 @@ perform_copy_internal(EditorWidget *self, size_t total_size)
              GString *tmp = g_string_new("");
              gboolean appended = append_filtered_selection(self, start, end, tmp);
              if (appended && tmp->len > 0) {
-                 if (clip_text->len > 0) g_string_append_c(clip_text, '\n');
-                 g_string_append_len(clip_text, tmp->str, tmp->len);
+                 if (current_offset > 0 && current_offset < total_size) {
+                     clip_text[current_offset++] = '\n';
+                 }
+                 if (current_offset + tmp->len <= total_size) {
+                     memcpy(clip_text + current_offset, tmp->str, tmp->len);
+                     current_offset += tmp->len;
+                 }
              }
              g_string_free(tmp, TRUE);
          } else {
-             if (clip_text->len > 0) g_string_append_c(clip_text, '\n');
-             char *text = document_get_text_range(self->doc, start, end - start);
-             
-             if (!text) {
-                 /* Allocation failed */
-                 g_string_free(clip_text, TRUE);
-                 g_array_free(sorted, TRUE);
-                 show_allocation_error_dialog(self);
-                 return;
+             if (current_offset > 0 && current_offset < total_size) {
+                 clip_text[current_offset++] = '\n';
              }
              
-             g_string_append(clip_text, text);
-             g_free(text);
+             size_t len = end - start;
+             size_t written = 0;
+             while (written < len) {
+                 size_t chunk = MIN(len - written, 1024 * 1024);
+                 char *text = document_get_text_range(self->doc, start + written, chunk);
+                 if (text) {
+                     if (current_offset + chunk <= total_size) {
+                         memcpy(clip_text + current_offset, text, chunk);
+                         current_offset += chunk;
+                     }
+                     g_free(text);
+                 } else {
+                     /* Allocation error mid-copy */
+                     g_warning("perform_copy_internal: Failed to read text chunk.");
+                     break;
+                 }
+                 written += chunk;
+             }
          }
     }
     
-    if (clip_text->len > 0) {
-        GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
-        gdk_clipboard_set_text(clipboard, clip_text->str);
+    if (current_offset <= total_size) {
+        clip_text[current_offset] = '\0';
+    } else {
+        clip_text[total_size] = '\0';
     }
-    g_string_free(clip_text, TRUE);
-    g_array_free(sorted, TRUE);
     
-    /* If called from Cut, we need to trigger delete? 
-       Wait, editor_widget_copy is now boolean returning.
-       If we go Async, we return FALSE initially? 
-       
-       If we return FALSE, Cut aborts.
-       So Cut logic must also be async or we need to handle "Cut Pending".
-       
-       Complexity: changing Copy to Async breaks "Cut" expectation of synchronous success.
-       
-       Solution: 
-       For now, if we hit the WARNING path, we just return FALSE (Action Cancelled / Pending).
-       Cut will not happen. User has to re-initiate or we need a way to callback to Cut.
-       
-       Let's stick to: "Copy" action converts to async.
-       "Cut" calls Copy. If Copy warns, Cut is aborted.
-       The Warning Dialog will have "Copy" button.
-       So user clicks Copy -> Dialog -> Confirm -> Copy happens.
-       But Cut steps are lost. 
-       
-       Maybe allow Cut to pass a flag? or check if we are in cut mode?
-       Simplest: Warnings abort the Cut flow. User has to manually Copy then Delete, or we just warn "Action Aborted due to Size check".
-       
-       Actually, if user clicks "Continue", we just do the Copy. The original Cut is already aborted.
-       So "Cut" becomes "Copy (Confirmed)" + "Delete manually"? 
-       Or we can pass a callback?
-       
-       Let's keep it simple: Copy Internal just copies.
-       If warning triggers, we abort the current synchronous operation.
-    */
+    msync(clip_text, current_offset + 1, MS_SYNC);
+    
+    if (current_offset > 0) {
+        GdkClipboard *clipboard = gtk_widget_get_clipboard(GTK_WIDGET(self));
+        gdk_clipboard_set_text(clipboard, clip_text);
+    }
+    
+    g_array_free(sorted, TRUE);
+    munmap(clip_text, total_size + 1);
+    close(fd);
+    unlink(template_path);
+    g_free(template_path);
 }
 
 static void
