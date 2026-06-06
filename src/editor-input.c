@@ -895,16 +895,32 @@ on_drag_begin(GtkGestureDrag *gesture, double x, double y, gpointer user_data)
         self->is_dragging_selection = TRUE;
         self->drag_start_offset = off;
 
-        /* Create ghost layout for the selected text */
+        /* Create ghost layout for the selected text (truncated for performance) */
         size_t s = MIN(found_cur->cursor_offset, found_cur->selection_anchor);
         size_t e = MAX(found_cur->cursor_offset, found_cur->selection_anchor);
         
-        char *text = document_get_text_range(self->doc, s, e - s);
+        size_t fetch_len = e - s;
+        if (fetch_len > 100) fetch_len = 100;
+        
+        char *text = document_get_text_range(self->doc, s, fetch_len);
         if (text) {
+            char *display_text;
+            if (e - s > 100) {
+                display_text = g_strdup_printf("%s...", text);
+                g_free(text);
+            } else {
+                display_text = text;
+            }
+            
             if (self->drag_ghost_layout) g_object_unref(self->drag_ghost_layout);
-            self->drag_ghost_layout = gtk_widget_create_pango_layout(GTK_WIDGET(self), text);
+            self->drag_ghost_layout = gtk_widget_create_pango_layout(GTK_WIDGET(self), display_text);
             pango_layout_set_font_description(self->drag_ghost_layout, self->font_desc);
-            g_free(text);
+            
+            /* Limit ghost layout dimensions */
+            pango_layout_set_ellipsize(self->drag_ghost_layout, PANGO_ELLIPSIZE_END);
+            pango_layout_set_width(self->drag_ghost_layout, 300 * PANGO_SCALE);
+            
+            g_free(display_text);
         }
         self->is_dnd_active = FALSE; /* Will be set to true if drag threshold passed */
     } else {
