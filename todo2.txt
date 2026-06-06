@@ -1,24 +1,7 @@
-i love my text editor because it is fun to use. <=Example title it is cutting at edito (r missing)
+1. copy pasting utf-16le with crlf file contents is getting garbage, perhaps utf-8
+2. huge file select all, clicking on the text (to clear up the selection) takes a lot of time
+3. find/replace, make the find and replace entry align vertically.
+4. unfocused window's inactive tab is having some alpha. it should be same as headerbar color.
+5. need to fix the find/replace history, the history should be clearable. and popup entries should be list. refactor/redesign find/replace bar. refer svite.py
+6. vite RAM usage has increased from 50-60MB to 200-400MB when we cut/copy/paste and undo/redo.
 
-file name/titlebar should have 25-30 characters with '.' or ' ' (up to 40)
-
-###
-2 windows with modified files (opened file modified) and in new window unsaved document casues freezing.
-
-x find replace is not setting 'modified state' or now showing dot before file
-
-x split view is not having wordwrap working properly perhaps fixed split editor area is used which won't readjust with the split resize
-
-x split view not showing 'close button' for the active split view (only when >1 views are there) see commit 05a4dbf5edca4b2d25d29f65a465a98a11e71412
-
-x Also selection right-click menu->Syntax highlight->C,C++, html, etc. should higlight only the selected lines.
-
-X huge 2 million lines html/xml file on loading takes are lot of time for syntax highlighting, improve.
-
-
-x typing at the end freezes with syntax highlighting. plain text would allow it. so files > 20k lines disable syntax highlighting.
-
-
-X discard and discard all ; if one file then discard, if more than 1 files discard all
-
-X open opening from recent, if file not found, inform the user and do not move it top in recent; and do not load/create an empty file.
