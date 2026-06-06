@@ -1177,6 +1177,8 @@ static void set_filter_mode(ViteFindReplaceBar *bar, gboolean enabled) {
 void vite_find_replace_bar_show(ViteFindReplaceBar *bar) {
     set_filter_mode(bar, FALSE);
     gtk_widget_set_visible(GTK_WIDGET(bar), TRUE);
+    gtk_widget_set_visible(bar->replace_entry, FALSE);
+    gtk_widget_set_visible(bar->replace_box, FALSE);
     gtk_widget_grab_focus(bar->find_entry);
     gtk_editable_select_region(GTK_EDITABLE(bar->find_entry), 0, -1);
     
