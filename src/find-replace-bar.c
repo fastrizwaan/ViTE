@@ -946,16 +946,15 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_orientable_set_orientation(GTK_ORIENTABLE(self), GTK_ORIENTATION_VERTICAL);
     gtk_box_set_spacing(GTK_BOX(self), 0);
     
-    GtkWidget *grid = gtk_grid_new();
-    gtk_grid_set_column_spacing(GTK_GRID(grid), 6);
-    gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
-    gtk_box_append(GTK_BOX(self), grid);
+    /* Row 1: Find + Nav + Toggle + Options + Close */
+    GtkWidget *row1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_append(GTK_BOX(self), row1);
     
     /* Composite Find Entry Box */
     /* Find Entry Overlay */
     GtkWidget *overlay = gtk_overlay_new();
     gtk_widget_set_hexpand(overlay, TRUE);
-    gtk_grid_attach(GTK_GRID(grid), overlay, 0, 0, 1, 1);
+    gtk_box_append(GTK_BOX(row1), overlay);
 
     /* Search Entry */
     self->find_entry = gtk_search_entry_new();
@@ -985,8 +984,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
 
     /* Navigation (Up/Down) */
     GtkWidget *row1_controls = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_halign(row1_controls, GTK_ALIGN_END);
-    gtk_grid_attach(GTK_GRID(grid), row1_controls, 1, 0, 1, 1);
+    gtk_box_append(GTK_BOX(row1), row1_controls);
 
     GtkWidget *nav_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(nav_box, "linked");
@@ -1056,9 +1054,9 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     
     /* Row 2: Replace */
     self->replace_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_halign(self->replace_box, GTK_ALIGN_END);
+    gtk_widget_set_margin_top(self->replace_box, 6);
     gtk_widget_set_visible(self->replace_box, FALSE);
-    gtk_grid_attach(GTK_GRID(grid), self->replace_box, 1, 1, 1, 1);
+    gtk_box_append(GTK_BOX(self), self->replace_box);
     
     /* Replace Entry */
     self->replace_entry = gtk_entry_new();
@@ -1073,8 +1071,10 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     g_signal_connect(repl_key_ctrl, "key-pressed", G_CALLBACK(on_key_pressed), self);
     gtk_widget_add_controller(self->replace_entry, repl_key_ctrl);
     
-    gtk_widget_set_visible(self->replace_entry, FALSE);
-    gtk_grid_attach(GTK_GRID(grid), self->replace_entry, 0, 1, 1, 1);
+    gtk_box_append(GTK_BOX(self->replace_box), self->replace_entry);
+    
+    GtkWidget *row2_controls = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_box_append(GTK_BOX(self->replace_box), row2_controls);
     
     /* Replace Status Label */
     self->replace_status_label = gtk_label_new("");
@@ -1082,15 +1082,15 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_add_css_class(self->replace_status_label, "caption");
     gtk_widget_set_margin_end(self->replace_status_label, 6);
     gtk_widget_set_visible(self->replace_status_label, FALSE);
-    gtk_box_append(GTK_BOX(self->replace_box), self->replace_status_label);
+    gtk_box_append(GTK_BOX(row2_controls), self->replace_status_label);
     
     GtkWidget *do_repl_btn = gtk_button_new_with_label(_("Replace"));
     g_signal_connect(do_repl_btn, "clicked", G_CALLBACK(on_replace_clicked), self);
-    gtk_box_append(GTK_BOX(self->replace_box), do_repl_btn);
+    gtk_box_append(GTK_BOX(row2_controls), do_repl_btn);
     
     self->replace_all_btn = gtk_button_new_with_label(_("Replace All"));
     g_signal_connect(self->replace_all_btn, "clicked", G_CALLBACK(on_replace_all_clicked), self);
-    gtk_box_append(GTK_BOX(self->replace_box), self->replace_all_btn);
+    gtk_box_append(GTK_BOX(row2_controls), self->replace_all_btn);
     
     /* History Button for Replace */
     self->replace_history_btn = gtk_menu_button_new();
@@ -1098,7 +1098,12 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_add_css_class(self->replace_history_btn, "flat");
     GtkWidget *replace_popover = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->replace_history_btn), replace_popover);
-    gtk_box_append(GTK_BOX(self->replace_box), self->replace_history_btn);
+    gtk_box_append(GTK_BOX(row2_controls), self->replace_history_btn);
+    
+    GtkSizeGroup *sg = gtk_size_group_new(GTK_SIZE_GROUP_HORIZONTAL);
+    gtk_size_group_add_widget(sg, row1_controls);
+    gtk_size_group_add_widget(sg, row2_controls);
+    g_object_unref(sg);
     
     /* Listen for document changes */
     Document *doc = editor_widget_get_document(editor);
@@ -1117,7 +1122,6 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
 
 void vite_find_replace_bar_toggle_replace(ViteFindReplaceBar *bar) {
     gboolean vis = gtk_widget_get_visible(bar->replace_box);
-    gtk_widget_set_visible(bar->replace_entry, !vis);
     gtk_widget_set_visible(bar->replace_box, !vis);
     if (!vis) gtk_widget_grab_focus(bar->replace_entry);
     else gtk_widget_grab_focus(bar->find_entry);
@@ -1155,7 +1159,6 @@ static void set_filter_mode(ViteFindReplaceBar *bar, gboolean enabled) {
         /* Clear Find State */
         cancel_current_search(bar);
         editor_widget_clear_search(bar->editor);
-        gtk_widget_set_visible(bar->replace_entry, FALSE);
         gtk_widget_set_visible(bar->replace_box, FALSE);
         
         /* Update UI for Filter */
