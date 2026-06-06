@@ -946,16 +946,16 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_orientable_set_orientation(GTK_ORIENTABLE(self), GTK_ORIENTATION_VERTICAL);
     gtk_box_set_spacing(GTK_BOX(self), 0);
     
-    /* Row 1: Find + Nav + Toggle + Options + Close */
-    GtkWidget *row1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_box_append(GTK_BOX(self), row1);
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 6);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 6);
+    gtk_box_append(GTK_BOX(self), grid);
     
     /* Composite Find Entry Box */
-    /* We create a Box that *looks* like an entry */
     /* Find Entry Overlay */
     GtkWidget *overlay = gtk_overlay_new();
     gtk_widget_set_hexpand(overlay, TRUE);
-    gtk_box_append(GTK_BOX(row1), overlay);
+    gtk_grid_attach(GTK_GRID(grid), overlay, 0, 0, 1, 1);
 
     /* Search Entry */
     self->find_entry = gtk_search_entry_new();
@@ -984,6 +984,10 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), self->matches_label);
 
     /* Navigation (Up/Down) */
+    GtkWidget *row1_controls = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    gtk_widget_set_halign(row1_controls, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), row1_controls, 1, 0, 1, 1);
+
     GtkWidget *nav_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class(nav_box, "linked");
     GtkWidget *prev_btn = gtk_button_new_from_icon_name("go-up-symbolic");
@@ -994,7 +998,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_set_tooltip_text(next_btn, _("Next Match"));
     g_signal_connect(next_btn, "clicked", G_CALLBACK(on_next_clicked), self);
     gtk_box_append(GTK_BOX(nav_box), next_btn);
-    gtk_box_append(GTK_BOX(row1), nav_box);
+    gtk_box_append(GTK_BOX(row1_controls), nav_box);
 
     /* Toggle Replace Button (After Nav) */
     GtkWidget *toggle_repl_btn = gtk_button_new_from_icon_name("view-more-symbolic");
@@ -1002,7 +1006,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_set_tooltip_text(toggle_repl_btn, _("Toggle Replace"));
     gtk_widget_add_css_class(toggle_repl_btn, "flat");
     g_signal_connect_swapped(toggle_repl_btn, "clicked", G_CALLBACK(vite_find_replace_bar_toggle_replace), self);
-    gtk_box_append(GTK_BOX(row1), toggle_repl_btn);
+    gtk_box_append(GTK_BOX(row1_controls), toggle_repl_btn);
     self->toggle_repl_btn = toggle_repl_btn;
 
     /* History Button for Find */
@@ -1011,7 +1015,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_add_css_class(self->find_history_btn, "flat");
     GtkWidget *find_popover = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->find_history_btn), find_popover);
-    gtk_box_append(GTK_BOX(row1), self->find_history_btn);
+    gtk_box_append(GTK_BOX(row1_controls), self->find_history_btn);
 
     /* Options Menu */
     GtkWidget *options_btn = gtk_menu_button_new();
@@ -1039,7 +1043,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     
     gtk_popover_set_child(GTK_POPOVER(popover), pop_box);
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(options_btn), popover);
-    gtk_box_append(GTK_BOX(row1), options_btn);
+    gtk_box_append(GTK_BOX(row1_controls), options_btn);
     
     /* Matches Label (Removed from here, moved to find_wrapper) */
     /* self->matches_label handled above */
@@ -1048,21 +1052,13 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     GtkWidget *close_btn = gtk_button_new_from_icon_name("window-close-symbolic");
     gtk_widget_add_css_class(close_btn, "flat");
     g_signal_connect(close_btn, "clicked", G_CALLBACK(on_close_clicked), self);
-    gtk_box_append(GTK_BOX(row1), close_btn);
+    gtk_box_append(GTK_BOX(row1_controls), close_btn);
     
     /* Row 2: Replace */
     self->replace_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_margin_top(self->replace_box, 6); /* Add some spacing from row1 */
+    gtk_widget_set_halign(self->replace_box, GTK_ALIGN_END);
     gtk_widget_set_visible(self->replace_box, FALSE);
-    gtk_box_append(GTK_BOX(self), self->replace_box);
-    
-    /* Spacer to align with Find... 
-       Left side is roughly 6px + width of icon ~20px + margin 8px = ~34px? 
-       Actually, `find_wrapper` has an icon. `replace_entry` might also need an icon to align text?
-       Or just an icon in replace entry for "Replace"?
-       Current replace entry has icon at start `GTK_ENTRY_ICON_PRIMARY`. 
-       So text alignment should be roughly similar if icon sizing matches.
-    */
+    gtk_grid_attach(GTK_GRID(grid), self->replace_box, 1, 1, 1, 1);
     
     /* Replace Entry */
     self->replace_entry = gtk_entry_new();
@@ -1077,7 +1073,8 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     g_signal_connect(repl_key_ctrl, "key-pressed", G_CALLBACK(on_key_pressed), self);
     gtk_widget_add_controller(self->replace_entry, repl_key_ctrl);
     
-    gtk_box_append(GTK_BOX(self->replace_box), self->replace_entry);
+    gtk_widget_set_visible(self->replace_entry, FALSE);
+    gtk_grid_attach(GTK_GRID(grid), self->replace_entry, 0, 1, 1, 1);
     
     /* Replace Status Label */
     self->replace_status_label = gtk_label_new("");
@@ -1120,6 +1117,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
 
 void vite_find_replace_bar_toggle_replace(ViteFindReplaceBar *bar) {
     gboolean vis = gtk_widget_get_visible(bar->replace_box);
+    gtk_widget_set_visible(bar->replace_entry, !vis);
     gtk_widget_set_visible(bar->replace_box, !vis);
     if (!vis) gtk_widget_grab_focus(bar->replace_entry);
     else gtk_widget_grab_focus(bar->find_entry);
@@ -1157,6 +1155,7 @@ static void set_filter_mode(ViteFindReplaceBar *bar, gboolean enabled) {
         /* Clear Find State */
         cancel_current_search(bar);
         editor_widget_clear_search(bar->editor);
+        gtk_widget_set_visible(bar->replace_entry, FALSE);
         gtk_widget_set_visible(bar->replace_box, FALSE);
         
         /* Update UI for Filter */
@@ -1268,6 +1267,7 @@ void vite_find_replace_bar_show_replace(ViteFindReplaceBar *bar, gboolean has_se
     if (!bar) return;
     set_filter_mode(bar, FALSE);
     gtk_widget_set_visible(GTK_WIDGET(bar), TRUE);
+    gtk_widget_set_visible(bar->replace_entry, TRUE);
     gtk_widget_set_visible(bar->replace_box, TRUE);
     
     /* Focus replace entry only if there's search text, otherwise focus find entry */
