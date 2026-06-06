@@ -996,6 +996,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_widget_set_tooltip_text(next_btn, _("Next Match"));
     g_signal_connect(next_btn, "clicked", G_CALLBACK(on_next_clicked), self);
     gtk_box_append(GTK_BOX(nav_box), next_btn);
+    gtk_widget_set_valign(nav_box, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(row1_controls), nav_box);
 
     /* Toggle Replace Button (After Nav) */
@@ -1003,6 +1004,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_button_set_icon_name(GTK_BUTTON(toggle_repl_btn), "edit-find-replace-symbolic");
     gtk_widget_set_tooltip_text(toggle_repl_btn, _("Toggle Replace"));
     gtk_widget_add_css_class(toggle_repl_btn, "flat");
+    gtk_widget_set_valign(toggle_repl_btn, GTK_ALIGN_CENTER);
     g_signal_connect_swapped(toggle_repl_btn, "clicked", G_CALLBACK(vite_find_replace_bar_toggle_replace), self);
     gtk_box_append(GTK_BOX(row1_controls), toggle_repl_btn);
     self->toggle_repl_btn = toggle_repl_btn;
@@ -1011,6 +1013,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     self->find_history_btn = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(self->find_history_btn), "view-list-symbolic");
     gtk_widget_add_css_class(self->find_history_btn, "flat");
+    gtk_widget_set_valign(self->find_history_btn, GTK_ALIGN_CENTER);
     GtkWidget *find_popover = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->find_history_btn), find_popover);
     gtk_box_append(GTK_BOX(row1_controls), self->find_history_btn);
@@ -1019,6 +1022,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     GtkWidget *options_btn = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(options_btn), "system-run-symbolic");
     gtk_widget_add_css_class(options_btn, "flat");
+    gtk_widget_set_valign(options_btn, GTK_ALIGN_CENTER);
     
     GtkWidget *popover = gtk_popover_new();
     GtkWidget *pop_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
@@ -1047,8 +1051,13 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     /* self->matches_label handled above */
 
     /* Close Button */
+    GtkWidget *spacer1 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer1, TRUE);
+    gtk_box_append(GTK_BOX(row1_controls), spacer1);
+
     GtkWidget *close_btn = gtk_button_new_from_icon_name("window-close-symbolic");
     gtk_widget_add_css_class(close_btn, "flat");
+    gtk_widget_set_valign(close_btn, GTK_ALIGN_CENTER);
     g_signal_connect(close_btn, "clicked", G_CALLBACK(on_close_clicked), self);
     gtk_box_append(GTK_BOX(row1_controls), close_btn);
     
@@ -1086,20 +1095,32 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     
     GtkWidget *do_repl_btn = gtk_button_new_with_label(_("Replace"));
     g_signal_connect(do_repl_btn, "clicked", G_CALLBACK(on_replace_clicked), self);
+    gtk_widget_set_valign(do_repl_btn, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(row2_controls), do_repl_btn);
     
     self->replace_all_btn = gtk_button_new_with_label(_("Replace All"));
     g_signal_connect(self->replace_all_btn, "clicked", G_CALLBACK(on_replace_all_clicked), self);
+    gtk_widget_set_valign(self->replace_all_btn, GTK_ALIGN_CENTER);
     gtk_box_append(GTK_BOX(row2_controls), self->replace_all_btn);
     
     /* History Button for Replace */
+    GtkWidget *spacer2 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer2, TRUE);
+    gtk_box_append(GTK_BOX(row2_controls), spacer2);
+
     self->replace_history_btn = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(self->replace_history_btn), "view-list-symbolic");
     gtk_widget_add_css_class(self->replace_history_btn, "flat");
+    gtk_widget_set_valign(self->replace_history_btn, GTK_ALIGN_CENTER);
     GtkWidget *replace_popover = gtk_popover_new();
     gtk_menu_button_set_popover(GTK_MENU_BUTTON(self->replace_history_btn), replace_popover);
     gtk_box_append(GTK_BOX(row2_controls), self->replace_history_btn);
     
+    gtk_widget_set_hexpand(row1_controls, FALSE);
+    gtk_widget_set_hexpand_set(row1_controls, TRUE);
+    gtk_widget_set_hexpand(row2_controls, FALSE);
+    gtk_widget_set_hexpand_set(row2_controls, TRUE);
+
     GtkSizeGroup *sg = gtk_size_group_new(GTK_SIZE_GROUP_HORIZONTAL);
     gtk_size_group_add_widget(sg, row1_controls);
     gtk_size_group_add_widget(sg, row2_controls);
