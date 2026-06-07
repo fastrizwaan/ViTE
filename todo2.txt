@@ -1,7 +1,7 @@
 1. copy pasting utf-16le with crlf file contents is getting garbage, perhaps utf-8
-2. huge file select all, clicking on the text (to clear up the selection) takes a lot of time
-3. find/replace, make the find and replace entry align vertically.
+[x] 2. huge file select all, clicking on the text (to clear up the selection) takes a lot of time
+[x] 3. find/replace, make the find and replace entry align vertically.
 4. unfocused window's inactive tab is having some alpha. it should be same as headerbar color.
 5. need to fix the find/replace history, the history should be clearable. and popup entries should be list. refactor/redesign find/replace bar. refer svite.py
 6. vite RAM usage has increased from 50-60MB to 200-400MB when we cut/copy/paste and undo/redo.
-also like we handle our opened file (temporary one) we should delete the cache's undo/redo files they are wasting space
+7. like we handle our opened file (temporary one) we should delete the cache's undo/redo/clipboard (which is used for temporary storage) files they are wasting space
