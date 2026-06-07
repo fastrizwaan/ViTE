@@ -1000,8 +1000,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_box_append(GTK_BOX(row1_controls), nav_box);
 
     /* Toggle Replace Button (After Nav) */
-    GtkWidget *toggle_repl_btn = gtk_button_new_from_icon_name("view-more-symbolic");
-    gtk_button_set_icon_name(GTK_BUTTON(toggle_repl_btn), "edit-find-replace-symbolic");
+    GtkWidget *toggle_repl_btn = gtk_button_new_from_icon_name("edit-find-replace-symbolic");
     gtk_widget_set_tooltip_text(toggle_repl_btn, _("Toggle Replace"));
     gtk_widget_add_css_class(toggle_repl_btn, "flat");
     gtk_widget_set_valign(toggle_repl_btn, GTK_ALIGN_CENTER);
@@ -1125,6 +1124,16 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
     gtk_size_group_add_widget(sg, row1_controls);
     gtk_size_group_add_widget(sg, row2_controls);
     g_object_unref(sg);
+
+    GtkSizeGroup *btn_sg = gtk_size_group_new(GTK_SIZE_GROUP_BOTH);
+    gtk_size_group_add_widget(btn_sg, prev_btn);
+    gtk_size_group_add_widget(btn_sg, next_btn);
+    gtk_size_group_add_widget(btn_sg, toggle_repl_btn);
+    gtk_size_group_add_widget(btn_sg, self->find_history_btn);
+    gtk_size_group_add_widget(btn_sg, options_btn);
+    gtk_size_group_add_widget(btn_sg, close_btn);
+    gtk_size_group_add_widget(btn_sg, self->replace_history_btn);
+    g_object_unref(btn_sg);
     
     /* Listen for document changes */
     Document *doc = editor_widget_get_document(editor);
