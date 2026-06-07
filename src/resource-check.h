@@ -37,6 +37,7 @@ GString *resource_safe_g_string_sized_new(size_t dfl_size);
 
 /* Get safe, disk-backed cache directory for zero-RAM operations */
 const char *resource_get_vite_cache_dir(void);
+void resource_cleanup_vite_cache(void);
 /* Safe malloc0 that returns NULL if size is too large or invalid */
 void *resource_safe_malloc0(size_t size);
 

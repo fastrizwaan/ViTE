@@ -1,3 +1,4 @@
+#include "resource-check.h"
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <glib/gstdio.h>
@@ -6616,6 +6617,8 @@ on_open(GtkApplication *app, GFile **files, int n_files, char *hint G_GNUC_UNUSE
 static void
 on_app_startup(GApplication *app, gpointer user_data)
 {
+    /* Clean up temporary cache files left over from previous sessions or crashes */
+    resource_cleanup_vite_cache();
     (void)app;
     (void)user_data;
     settings_init();

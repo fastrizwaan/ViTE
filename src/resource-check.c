@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <glib.h>
+#include <glib/gstdio.h>
 
 /* Maximum fraction of available RAM we'll allocate in one go (50%) */
 /* Maximum fraction of available RAM we'll allocate in one go (90%) */
@@ -205,6 +208,27 @@ resource_get_vite_cache_dir(void)
         g_mkdir_with_parents(cache_dir, 0700);
     }
     return cache_dir;
+}
+
+void
+resource_cleanup_vite_cache(void)
+{
+    const char *cache_dir = resource_get_vite_cache_dir();
+    if (!cache_dir) return;
+
+    GDir *dir = g_dir_open(cache_dir, 0, NULL);
+    if (!dir) return;
+
+    const char *name;
+    while ((name = g_dir_read_name(dir)) != NULL) {
+        if (g_str_has_prefix(name, "vite")) {
+            
+            char *path = g_build_filename(cache_dir, name, NULL);
+            g_unlink(path);
+            g_free(path);
+        }
+    }
+    g_dir_close(dir);
 }
 
 void *
