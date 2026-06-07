@@ -66,6 +66,17 @@ undo_stack_new(void)
 
 static void free_command(gpointer data);
 
+static UndoCommand*
+undo_command_new(void)
+{
+    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    if (cmd) {
+        cmd->undo_fd = -1;
+        cmd->redo_fd = -1;
+    }
+    return cmd;
+}
+
 static void
 free_command(gpointer data)
 {
@@ -73,13 +84,13 @@ free_command(gpointer data)
     
     /* cached_text is removed from struct */
  
-    if (cmd->undo_path) {
-        unlink(cmd->undo_path);
-        g_free(cmd->undo_path);
+    if (cmd->undo_fd >= 0) {
+        close(cmd->undo_fd);
+        cmd->undo_fd = -1;
     }
-    if (cmd->redo_path) {
-        unlink(cmd->redo_path);
-        g_free(cmd->redo_path);
+    if (cmd->redo_fd >= 0) {
+        close(cmd->redo_fd);
+        cmd->redo_fd = -1;
     }
     if (cmd->type == UNDO_OP_CUSTOM && cmd->custom_free) {
         cmd->custom_free(cmd->custom_data);
@@ -209,7 +220,7 @@ undo_stack_push_insert(UndoStack *stack, size_t start, const char *text, size_t 
         return;
     }
     
-    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = undo_command_new();
     cmd->type = UNDO_OP_INSERT;
     cmd->start = start;
     cmd->length = len;
@@ -252,7 +263,7 @@ undo_stack_push_insert_from_fd(UndoStack *stack, size_t start, int fd, size_t le
         return;
     }
 
-    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = undo_command_new();
     cmd->type = UNDO_OP_INSERT;
     cmd->start = start;
     cmd->length = len;
@@ -317,7 +328,7 @@ undo_stack_push_insert_from_fd_async(UndoStack *stack, size_t start, int fd, siz
     task->fd = fd;
     task->total_len = len;
     
-    task->cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    task->cmd = undo_command_new();
     task->cmd->type = UNDO_OP_INSERT;
     task->cmd->start = start;
     task->cmd->length = len;
@@ -411,7 +422,7 @@ undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text,
          return;
     }
     
-    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = undo_command_new();
     cmd->type = UNDO_OP_DELETE;
     cmd->start = start;
     cmd->length = len;
@@ -452,7 +463,7 @@ undo_stack_push_delete_streaming(UndoStack *stack, size_t start, PieceTable *pt,
         return;
     }
     
-    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = undo_command_new();
     cmd->type = UNDO_OP_DELETE;
     cmd->start = start;
     cmd->length = len;
@@ -506,14 +517,14 @@ undo_stack_push_delete_streaming(UndoStack *stack, size_t start, PieceTable *pt,
 }
 
 void
-undo_stack_push_restore_path(UndoStack *stack, const char *undo_path, const char *redo_path)
+undo_stack_push_restore_fd(UndoStack *stack, int undo_fd, int redo_fd)
 {
     if (stack->in_undo_redo) return;
 
-    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = undo_command_new();
     cmd->type = UNDO_OP_RESTORE_FROM_PATH;
-    cmd->undo_path = g_strdup(undo_path);
-    cmd->redo_path = g_strdup(redo_path);
+    cmd->undo_fd = undo_fd;
+    cmd->redo_fd = redo_fd;
     
     undo_stack_push_command(stack, cmd);
 }
@@ -523,7 +534,7 @@ undo_stack_push_custom(UndoStack *stack, void *data, void (*exec_func)(void *, g
 {
     if (stack->in_undo_redo) return;
 
-    UndoCommand *cmd = resource_safe_malloc0(sizeof(UndoCommand));
+    UndoCommand *cmd = undo_command_new();
     cmd->type = UNDO_OP_CUSTOM;
     cmd->custom_data = data;
     cmd->custom_execute = exec_func;
@@ -541,7 +552,7 @@ undo_stack_begin_group(UndoStack *stack)
     /* If for some reason current_group is already set (should differ from depth > 1 check), abort */
     if (stack->current_group) return; 
     
-    UndoCommand *group = resource_safe_malloc0(sizeof(UndoCommand));
+    UndoCommand *group = undo_command_new();
     group->type = UNDO_OP_GROUP;
     stack->current_group = group;
     stack->current_group_size = 0; /* Reset accumulator */
@@ -618,18 +629,14 @@ execute_command(UndoStack *stack, UndoCommand *cmd, PieceTable *pt, gboolean und
              piece_table_delete(pt, cmd->start, cmd->length);
         }
     } else if (cmd->type == UNDO_OP_RESTORE_FROM_PATH) {
-        /* Swap backing file */
-        const char *path = undo ? cmd->undo_path : cmd->redo_path;
+        int fd = undo ? cmd->undo_fd : cmd->redo_fd;
         
-        if (path) {
-            int fd = open(path, O_RDONLY);
-            if (fd >= 0) {
-                struct stat st;
-                fstat(fd, &st);
-                size_t sz = st.st_size;
-                piece_table_replace_from_fd(pt, fd, sz, 0);
-                close(fd);
-            }
+        if (fd >= 0) {
+            struct stat st;
+            fstat(fd, &st);
+            size_t sz = st.st_size;
+            lseek(fd, 0, SEEK_SET);
+            piece_table_replace_from_fd(pt, fd, sz, 0);
         }
         
     } else if (cmd->type == UNDO_OP_GROUP) {

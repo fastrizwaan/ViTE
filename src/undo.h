@@ -26,9 +26,9 @@ typedef struct _UndoCommand {
     size_t length;
     /* cached_text removed - using mmap exclusively */
     
-    /* For RESTORE_FROM_PATH: Paths to snapshot files */
-    char *undo_path;
-    char *redo_path;
+    /* For RESTORE_FROM_PATH: File descriptors to snapshot files */
+    int undo_fd;
+    int redo_fd;
     
     GList *group_commands; /* List of UndoCommand* if type == UNDO_OP_GROUP */
     
@@ -85,7 +85,7 @@ void undo_stack_push_insert_from_fd_cancel(UndoInsertFdTask *task);
 void undo_stack_push_delete(UndoStack *stack, size_t start, const char *deleted_text, size_t len);
 /* Zero-copy streaming delete: reads directly from piece table iterator into log */
 void undo_stack_push_delete_streaming(UndoStack *stack, size_t start, PieceTable *pt, size_t offset, size_t len);
-void undo_stack_push_restore_path(UndoStack *stack, const char *undo_path, const char *redo_path);
+void undo_stack_push_restore_fd(UndoStack *stack, int undo_fd, int redo_fd);
 void undo_stack_push_custom(UndoStack *stack, void *data, void (*exec_func)(void *, gboolean), void (*free_func)(void *));
 void undo_stack_push_command(UndoStack *stack, UndoCommand *cmd);
 

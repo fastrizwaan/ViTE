@@ -60,9 +60,8 @@ free_entry(ViteClipboardEntry *entry)
     if (!entry) return;
     g_free(entry->cached_text);
     g_free(entry->source_file_path);
-    if (entry->persisted_file_path) {
-        unlink(entry->persisted_file_path);
-        g_free(entry->persisted_file_path);
+    if (entry->persisted_fd >= 0) {
+        close(entry->persisted_fd);
     }
     g_free(entry);
 }
@@ -114,7 +113,7 @@ vite_clipboard_set_reference(ViteClipboard *clip, Document *doc,
     entry->is_valid = TRUE;
     entry->is_cut = is_cut;
     entry->cached_text = NULL;
-    entry->cached_len = 0;
+    entry->persisted_fd = -1;
     
     clip->current = entry;
     clip->system_sync_pending = TRUE;
@@ -124,7 +123,7 @@ vite_clipboard_set_reference(ViteClipboard *clip, Document *doc,
 }
 
 void
-vite_clipboard_persist_to_file(ViteClipboard *clip)
+vite_clipboard_persist_to_fd(ViteClipboard *clip)
 {
     if (!clip || !clip->current) return;
     
@@ -147,13 +146,12 @@ vite_clipboard_persist_to_file(ViteClipboard *clip)
         return;
     }
     
-    g_debug("vite_clipboard: Persisting %zu bytes to %s", len, fname);
+    unlink(fname);
+    g_free(fname);
     
     if (!resource_can_write_disk(resource_get_vite_cache_dir(), len)) {
         g_warning("vite_clipboard: Insufficient disk space to persist clipboard");
         close(fd);
-        unlink(fname);
-        g_free(fname);
         return;
     }
     
@@ -181,20 +179,17 @@ vite_clipboard_persist_to_file(ViteClipboard *clip)
         written += to_write;
     }
     
-    close(fd);
-    
     if (success) {
         /* Update entry to FILE type */
         entry->type = VITE_CLIPBOARD_ENTRY_FILE;
-        entry->persisted_file_path = fname;
+        entry->persisted_fd = fd;
         /* Clear reference */
         entry->source_doc = NULL;
         /* is_valid remains TRUE, as file is static */
         g_debug("vite_clipboard: Persistence successful, switched to FILE mode");
     } else {
         g_warning("vite_clipboard: Persistence failed");
-        unlink(fname);
-        g_free(fname);
+        close(fd);
     }
 }
 
@@ -210,7 +205,6 @@ struct _ViteClipboardCopyTask {
     gpointer user_data;
     guint idle_id;
     int fd;
-    char *path;
     size_t written;
 };
 
@@ -249,9 +243,6 @@ vite_clipboard_copy_idle_step(gpointer user_data)
             return G_SOURCE_CONTINUE;
         }
     }
-    
-    close(task->fd);
-    
     gboolean committed = FALSE;
 
     if (task->written == len && task->clip->generation == task->generation) {
@@ -261,7 +252,8 @@ vite_clipboard_copy_idle_step(gpointer user_data)
         
         ViteClipboardEntry *entry = resource_safe_malloc0(sizeof(ViteClipboardEntry));
         entry->type = VITE_CLIPBOARD_ENTRY_FILE;
-        entry->persisted_file_path = task->path; /* takes ownership */
+        /* Hand ownership of fd to entry */
+        entry->persisted_fd = task->fd;
         entry->start_offset = 0;
         entry->end_offset = len;
         entry->is_valid = TRUE;
@@ -270,8 +262,7 @@ vite_clipboard_copy_idle_step(gpointer user_data)
         task->clip->current = entry;
         committed = TRUE;
     } else {
-        unlink(task->path);
-        g_free(task->path);
+        close(task->fd);
     }
     
     if (task->clip->active_copy == task) {
@@ -314,7 +305,10 @@ vite_clipboard_copy_async(ViteClipboard *clip, Document *doc, size_t start, size
         g_free(full_template);
         return NULL;
     }
-
+    
+    unlink(full_template);
+    g_free(full_template);
+    
     vite_clipboard_clear(clip);
     
     ViteClipboardCopyTask *task = g_new0(ViteClipboardCopyTask, 1);
@@ -327,7 +321,6 @@ vite_clipboard_copy_async(ViteClipboard *clip, Document *doc, size_t start, size
     task->cb = cb;
     task->user_data = user_data;
     task->fd = fd;
-    task->path = full_template;
     
     task->idle_id = g_idle_add(vite_clipboard_copy_idle_step, task);
     clip->active_copy = task;
@@ -343,8 +336,6 @@ vite_clipboard_copy_async_cancel(ViteClipboardCopyTask *task)
     }
     if (task->idle_id) g_source_remove(task->idle_id);
     close(task->fd);
-    unlink(task->path);
-    g_free(task->path);
     if (task->cb) task->cb(0, 0, task->user_data);
     g_free(task);
 }
@@ -558,12 +549,13 @@ vite_clipboard_paste_streaming(ViteClipboard *clip, Document *target,
         /* 1. Ensure file backing */
         if (entry->type == VITE_CLIPBOARD_ENTRY_REFERENCE) {
             /* This might take a moment (synchronous write), but prevents OOM */
-             vite_clipboard_persist_to_file(clip);
+             vite_clipboard_persist_to_fd(clip);
         }
         
-        if (entry->type == VITE_CLIPBOARD_ENTRY_FILE && entry->persisted_file_path) {
-            int fd = open(entry->persisted_file_path, O_RDONLY);
+        if (entry->type == VITE_CLIPBOARD_ENTRY_FILE && entry->persisted_fd >= 0) {
+            int fd = dup(entry->persisted_fd);
             if (fd >= 0) {
+                 lseek(fd, 0, SEEK_SET);
                  /* 2. Insert using async chunking */
                  document_begin_undo_group(target);
                  struct _PasteAsyncData *pad = g_new0(struct _PasteAsyncData, 1);
@@ -575,7 +567,7 @@ vite_clipboard_paste_streaming(ViteClipboard *clip, Document *target,
                  document_insert_from_fd_async(target, offset, fd, total, on_insert_from_fd_async_progress, pad);
                  return;
             } else {
-                 g_warning("vite_clipboard: Failed to open persisted file for Zero-RAM paste");
+                 g_warning("vite_clipboard: Failed to duplicate persisted file descriptor for Zero-RAM paste");
                  /* Fallback to streaming if open failed */
             }
         }
@@ -596,10 +588,12 @@ vite_clipboard_paste_streaming(ViteClipboard *clip, Document *target,
     paste->in_undo_group = TRUE;
     paste->source_fd = -1;
     
-    if (entry->type == VITE_CLIPBOARD_ENTRY_FILE) {
-        paste->source_fd = open(entry->persisted_file_path, O_RDONLY);
-        if (paste->source_fd < 0) {
-            g_warning("Failed to open clipboard file: %s", entry->persisted_file_path);
+    if (entry->type == VITE_CLIPBOARD_ENTRY_FILE && entry->persisted_fd >= 0) {
+        paste->source_fd = dup(entry->persisted_fd);
+        if (paste->source_fd >= 0) {
+            lseek(paste->source_fd, 0, SEEK_SET);
+        } else {
+            g_warning("Failed to duplicate clipboard file descriptor");
             g_free(paste);
             return;
         }
@@ -648,24 +642,25 @@ vite_clipboard_paste_sync(ViteClipboard *clip, Document *target,
     
     /* Ensure content is file-backed */
     if (entry->type == VITE_CLIPBOARD_ENTRY_REFERENCE) {
-        vite_clipboard_persist_to_file(clip);
+        vite_clipboard_persist_to_fd(clip);
         /* Re-check after persist */
-        if (entry->type != VITE_CLIPBOARD_ENTRY_FILE || !entry->persisted_file_path) {
+        if (entry->type != VITE_CLIPBOARD_ENTRY_FILE || entry->persisted_fd < 0) {
             g_warning("vite_clipboard: Failed to persist for zero-RAM paste");
             return FALSE;
         }
     }
     
     /* Now we have file-backed content - use Zero-RAM insert */
-    if (entry->type == VITE_CLIPBOARD_ENTRY_FILE && entry->persisted_file_path) {
-        int fd = open(entry->persisted_file_path, O_RDONLY);
+    if (entry->type == VITE_CLIPBOARD_ENTRY_FILE && entry->persisted_fd >= 0) {
+        int fd = dup(entry->persisted_fd);
         if (fd >= 0) {
+            lseek(fd, 0, SEEK_SET);
             document_insert_from_fd(target, offset, fd, len);
             close(fd);
             if (out_pasted_len) *out_pasted_len = len;
             return TRUE;
         }
-        g_warning("vite_clipboard: Failed to open persisted file: %s", entry->persisted_file_path);
+        g_warning("vite_clipboard: Failed to duplicate persisted file descriptor");
     }
     
     /* Fallback for edge cases (should not normally reach here) */
@@ -710,50 +705,18 @@ vite_clipboard_sync_to_system(ViteClipboard *clip)
            We'll stick to the existing "vite-temp://" protocol.
         */
         
-        char *path = NULL;
-        gboolean create_temp = TRUE;
-        
-        if (entry->type == VITE_CLIPBOARD_ENTRY_FILE) {
-            /* We already have a file. Reuse it? 
-               We should probably not pass the internal persistence file ownership.
-               But for now, sticking to logic:
-            */
-             path = g_strdup(entry->persisted_file_path);
-             create_temp = FALSE; 
-        }
-        
-        if (create_temp) {
-            /* Create new temp file ... existing logic ... */
-             /* We can reuse persist logic if we implemented it generically.
-                But let's keep the dedicated export logic or 
-                just call persist_to_file if not already persisted?
-             */
-             if (entry->type == VITE_CLIPBOARD_ENTRY_REFERENCE) {
-                 vite_clipboard_persist_to_file(clip);
-                 /* Now we are FILE backed */
-                 path = g_strdup(entry->persisted_file_path);
-             }
-        }
-        
-        if (path) {
-            char *uri = g_strdup_printf("vite-temp://%s", path);
-            if (clip->system_clipboard) {
-                gdk_clipboard_set_text(clip->system_clipboard, uri);
-                g_debug("vite_clipboard: Set huge content pointer: %s", uri);
-            }
-            g_free(uri);
-            g_free(path);
-        }
-        
+        /* Huge content - skip system sync since we no longer have a file path */
+        g_warning("vite_clipboard: Content too large for system clipboard (removed vite-temp:// fallback)");
         clip->system_sync_pending = FALSE;
         return;
     }
     
     /* Small content - materialize */
     if (!entry->cached_text) {
-        if (entry->type == VITE_CLIPBOARD_ENTRY_FILE) {
-             int fd = open(entry->persisted_file_path, O_RDONLY);
+        if (entry->type == VITE_CLIPBOARD_ENTRY_FILE && entry->persisted_fd >= 0) {
+             int fd = dup(entry->persisted_fd);
              if (fd >= 0) {
+                 lseek(fd, 0, SEEK_SET);
                  entry->cached_text = resource_safe_malloc(len + 1);
                  if (entry->cached_text) {
                      ssize_t r = read(fd, entry->cached_text, len);

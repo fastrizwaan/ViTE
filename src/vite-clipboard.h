@@ -41,7 +41,7 @@ typedef struct {
     size_t cached_len;
 
     /* For FILE type (persisted from reference) */
-    char *persisted_file_path;    /* Temp file containing the content */
+    int persisted_fd;             /* Temp file descriptor containing the content */
     
     /* Flags */
     gboolean is_valid;            /* FALSE if source was modified/closed */
@@ -112,7 +112,7 @@ void vite_clipboard_cancel_streaming(ViteClipboard *clip);
 /* Check if reference is still valid (source not modified) */
 gboolean vite_clipboard_is_reference_valid(ViteClipboard *clip);
 
-/* Persist current reference clipboard entry to a file (used for Cut) */
-void vite_clipboard_persist_to_file(ViteClipboard *clip);
+/* Persist current reference clipboard entry to a file descriptor (used for Cut) */
+void vite_clipboard_persist_to_fd(ViteClipboard *clip);
 
 #endif /* VITE_CLIPBOARD_H */

@@ -14,7 +14,7 @@
 #include <sys/statvfs.h>
 
 /* Forward declarations */
-static char *document_snapshot_to_file(Document *doc);
+static int document_snapshot_to_fd(Document *doc);
 
 static gboolean
 file_monitor_event_may_change_content(GFileMonitorEvent event_type)
@@ -632,17 +632,16 @@ document_delete_entire(Document *doc)
     /* Snapshot-based delete: save current state to file, then clear.
      * This is O(file_size) I/O but O(1) RAM — much better than streaming
      * the entire file through the undo log for very large files. */
-    char *undo_path = document_snapshot_to_file(doc);
+    int undo_fd = document_snapshot_to_fd(doc);
     
-    if (!undo_path) {
+    if (undo_fd < 0) {
         /* Fallback to streaming if snapshot fails */
         document_delete_streaming(doc, 0, total);
         return;
     }
     
-    /* Push undo command: undo restores from snapshot, redo has no path (empty doc) */
-    undo_stack_push_restore_path(doc->undo_stack, undo_path, NULL);
-    g_free(undo_path);
+    /* Push undo command: undo restores from snapshot, redo has no fd (empty doc) */
+    undo_stack_push_restore_fd(doc->undo_stack, undo_fd, -1);
     
     /* Clear the piece table */
     size_t old_lines = piece_table_get_line_count(doc->pt);
@@ -697,7 +696,15 @@ document_delete_entire_idle_step(gpointer user_data)
     }
     
     size_t total = piece_table_get_length(task->doc->pt);
-    undo_stack_push_restore_path(task->doc->undo_stack, task->snapshot_path, NULL);
+    
+    int undo_fd = open(task->snapshot_path, O_RDONLY);
+    unlink(task->snapshot_path);
+    
+    if (undo_fd >= 0) {
+        undo_stack_push_restore_fd(task->doc->undo_stack, undo_fd, -1);
+    } else {
+        g_warning("document_delete_entire: failed to open snapshot path");
+    }
     
     /* Clear the piece table */
     size_t old_lines = piece_table_get_line_count(task->doc->pt);
@@ -1125,12 +1132,13 @@ document_undo_async(Document *doc, UndoRedoProgressCallback callback, gpointer u
     
     /* Check if this is a massive restoration */
     UndoCommand *cmd = undo_stack_peek(doc->undo_stack);
-    if (cmd && cmd->type == UNDO_OP_RESTORE_FROM_PATH && cmd->undo_path) {
-        int fd = open(cmd->undo_path, O_RDONLY);
+    if (cmd && cmd->type == UNDO_OP_RESTORE_FROM_PATH && cmd->undo_fd >= 0) {
+        int fd = dup(cmd->undo_fd);
         if (fd >= 0) {
             struct stat st;
             fstat(fd, &st);
             if (st.st_size > 10 * 1024 * 1024) { /* > 10MB, process async */
+                lseek(fd, 0, SEEK_SET);
                 task->pt_task = piece_table_replace_async_start(doc->pt, fd, st.st_size);
             }
             close(fd); /* task will re-open or piece_table uses mmap */
@@ -1163,12 +1171,13 @@ document_redo_async(Document *doc, UndoRedoProgressCallback callback, gpointer u
     
     /* Check if this is a massive restoration */
     UndoCommand *cmd = undo_stack_peek_redo(doc->undo_stack);
-    if (cmd && cmd->type == UNDO_OP_RESTORE_FROM_PATH && cmd->redo_path) {
-        int fd = open(cmd->redo_path, O_RDONLY);
+    if (cmd && cmd->type == UNDO_OP_RESTORE_FROM_PATH && cmd->redo_fd >= 0) {
+        int fd = dup(cmd->redo_fd);
         if (fd >= 0) {
             struct stat st;
             fstat(fd, &st);
             if (st.st_size > 10 * 1024 * 1024) { /* > 10MB, process async */
+                lseek(fd, 0, SEEK_SET);
                 task->pt_task = piece_table_replace_async_start(doc->pt, fd, st.st_size);
             }
             close(fd);
@@ -3083,15 +3092,12 @@ static gboolean streaming_replace_idle_step(gpointer user_data) {
     }
     
     /* Snapshot BEFORE replacing - for undo support */
-    char *undo_path = document_snapshot_to_file(doc);
+    int undo_fd = document_snapshot_to_fd(doc);
     
-    /* Push Undo Command - use output_path as redo_path */
-    if (undo_path) {
-        undo_stack_push_restore_path(doc->undo_stack, undo_path, task->output_path);
-        g_free(undo_path);
-        /* Don't free output_path here - it's now owned by the undo stack */
-        /* Set to NULL so streaming_replace_task_free won't unlink it */
-        task->output_path = NULL;
+    /* Push Undo Command - use output file fd as redo_fd */
+    if (undo_fd >= 0) {
+        int redo_fd = dup(fd);
+        undo_stack_push_restore_fd(doc->undo_stack, undo_fd, redo_fd);
     }
     
     /* mmap the temp file and replace document content */
@@ -3192,6 +3198,8 @@ document_replace_streaming_start(Document *doc, const char *raw_query, const cha
         streaming_replace_task_free(task);
         return NULL;
     }
+    
+    unlink(task->output_path);
     
     /* Convert to FILE* for buffered I/O */
     task->output_file = fdopen(fd, "w+");
@@ -3636,23 +3644,24 @@ streaming_change_case_task_free(StreamingChangeCaseTask *task)
 
 
 
-/* Helper to snapshot current document state to a temp file */
-static char *
-document_snapshot_to_file(Document *doc)
+/* Helper to snapshot current document state to a temp file (Returns FD) */
+static int
+document_snapshot_to_fd(Document *doc)
 {
     char *path = g_strdup_printf("%s/vite_snapshot_XXXXXX", document_temp_dir());
     int fd = mkstemp(path);
     if (fd == -1) {
         g_free(path);
-        return NULL;
+        return -1;
     }
     
-    FILE *f = fdopen(fd, "w");
+    unlink(path);
+    g_free(path);
+    
+    FILE *f = fdopen(fd, "w+");
     if (!f) {
         close(fd);
-        unlink(path);
-        g_free(path);
-        return NULL;
+        return -1;
     }
     
     /* Stream entire document to file */
@@ -3666,7 +3675,7 @@ document_snapshot_to_file(Document *doc)
     while ((chunk = piece_table_iter_get_chunk(&iter, &chunk_len))) {
         if (chunk_len > 0) {
             if (fwrite(chunk, 1, chunk_len, f) != chunk_len) {
-                g_warning("document_snapshot_to_file: fwrite failed");
+                g_warning("document_snapshot_to_fd: fwrite failed");
                 success = FALSE;
                 break;
             }
@@ -3674,15 +3683,16 @@ document_snapshot_to_file(Document *doc)
         piece_table_iter_advance(&iter, chunk_len);
     }
     
-    fclose(f);
-    
     if (!success) {
-        unlink(path);
-        g_free(path);
-        return NULL;
+        fclose(f);
+        return -1;
     }
     
-    return path; /* Caller owns path and file */
+    fflush(f);
+    int ret_fd = dup(fileno(f));
+    fclose(f);
+    
+    return ret_fd; /* Caller owns fd */
 }
 
 static gboolean
@@ -3790,18 +3800,21 @@ streaming_change_case_idle_step(gpointer user_data)
         }
         
         /* Snapshot BEFORE replacing logic */
-        char *undo_path = document_snapshot_to_file(doc);
-        char *redo_path = g_strdup(task->output_path);
-
-        /* Push Undo CMD */
-        if (undo_path) {
-             undo_stack_push_restore_path(doc->undo_stack, undo_path, redo_path);
-             g_free(undo_path);
-             g_free(redo_path);
-        }
+        int undo_fd = document_snapshot_to_fd(doc);
         
         /* Replace document content */
         piece_table_replace_from_fd(doc->pt, fd, task->output_size, task->lf_count);
+
+        /* Snapshot AFTER replacing logic */
+        int redo_fd = document_snapshot_to_fd(doc);
+
+        /* Push Undo CMD */
+        if (undo_fd >= 0 && redo_fd >= 0) {
+             undo_stack_push_restore_fd(doc->undo_stack, undo_fd, redo_fd);
+        } else {
+             if (undo_fd >= 0) close(undo_fd);
+             if (redo_fd >= 0) close(redo_fd);
+        }
         
         /* Mark document as modified */
         check_modification_state(doc);
@@ -3854,6 +3867,8 @@ document_change_case_streaming_start(Document *doc,
         streaming_change_case_task_free(task);
         return NULL;
     }
+    
+    unlink(task->output_path);
     
     task->output_file = fdopen(fd, "w+");
     if (!task->output_file) {

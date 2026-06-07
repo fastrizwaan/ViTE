@@ -297,12 +297,13 @@ perform_copy_internal(EditorWidget *self, size_t total_size)
         return;
     }
     
+    unlink(template_path);
+    g_free(template_path);
+    
     /* Use posix_fallocate to reserve physical disk blocks immediately instead of creating a sparse file.
      * This prevents a SIGBUS when faulting in mmap pages if the disk/quota gets exhausted. */
     if (posix_fallocate(fd, 0, total_size + 1) != 0) {
         close(fd);
-        unlink(template_path);
-        g_free(template_path);
         show_allocation_error_dialog(self);
         return;
     }
@@ -310,8 +311,6 @@ perform_copy_internal(EditorWidget *self, size_t total_size)
     char *clip_text = mmap(NULL, total_size + 1, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (clip_text == MAP_FAILED) {
         close(fd);
-        unlink(template_path);
-        g_free(template_path);
         show_allocation_error_dialog(self);
         return;
     }
@@ -385,8 +384,6 @@ perform_copy_internal(EditorWidget *self, size_t total_size)
     g_array_free(sorted, TRUE);
     munmap(clip_text, total_size + 1);
     close(fd);
-    unlink(template_path);
-    g_free(template_path);
 }
 
 
@@ -605,7 +602,7 @@ editor_widget_cut(EditorWidget *self)
         /* If we used Internal Reference Copy, we MUST persist to file before deleting! */
         ViteClipboard *clip = vite_clipboard_get_default();
         if (vite_clipboard_has_internal_content(clip) && vite_clipboard_is_reference_valid(clip)) {
-             vite_clipboard_persist_to_file(clip);
+             vite_clipboard_persist_to_fd(clip);
         }
         
         document_begin_undo_group(self->doc);
