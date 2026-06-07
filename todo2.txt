@@ -7,4 +7,4 @@
 [x] 7. like we handle our opened file (temporary one) we should delete the cache's undo/redo/clipboard (which is used for temporary storage) files they are wasting space
 8. fles are saved as /tmp/vite-xxx when we copy paste to a new tab then try to save as.
 
-9. undo/redo with huge files is using up disk space, when it reaches to a point where it can't create undo/redoc temporary file, it is perhaps getting deleted by the kernel.   we should monitor disk space after undo redo so that undo/redo/copy/paste would not fill up 100% disk space. say we have a 2 GB file and we select all and cut, then 2GB extra is used in the filesystem. undo/redo would add more.
+9. undo/redo with huge files is using up disk space, when it reaches to a point where it can't create undo/redo temporary file, it is perhaps getting deleted by the kernel, which is good. but undo/redo history is lost with that. we should monitor disk space after undo redo so that undo/redo/copy/paste would not fill up 100% disk space and undo/redo can work. say we have a 2 GB file and we select all and cut, then 2GB extra is used in the filesystem. undo/redo would add more.
