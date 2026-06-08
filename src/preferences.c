@@ -43,8 +43,10 @@ create_spin_row(const char *title, const char *key, int min, int max, int step)
     return row;
 }
 
-static void on_save_button_visibility_toggled(GObject *object, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
+static void on_save_button_visibility_toggled(GObject *object, GParamSpec *pspec, gpointer user_data)
 {
+    (void)pspec;
+    (void)user_data;
     AdwSwitchRow *switch_row = ADW_SWITCH_ROW(object);
     gboolean visible = adw_switch_row_get_active(switch_row);
     
@@ -187,28 +189,14 @@ create_font_expander(EditorWidget *editor)
     return expander;
 }
 
-static void on_indent_style_changed(GObject *combo, GParamSpec *pspec G_GNUC_UNUSED, gpointer user_data)
+static void on_indent_style_changed(GObject *combo, GParamSpec *pspec, gpointer user_data)
 {
+    (void)pspec;
+    (void)user_data;
     ViteSettings *settings = settings_get();
     settings->indent_style = adw_combo_row_get_selected(ADW_COMBO_ROW(combo));
     settings_save();
     settings_apply_to_all_editors();
-}
-
-static void on_font_size_changed(GtkSpinButton *spin, gpointer user_data)
-{
-    int size = gtk_spin_button_get_value_as_int(spin);
-    ViteSettings *settings = settings_get();
-    if (settings->font_name) {
-        PangoFontDescription *desc = pango_font_description_from_string(settings->font_name);
-        pango_font_description_set_size(desc, size * PANGO_SCALE);
-        char *new_font = pango_font_description_to_string(desc);
-        g_free(settings->font_name);
-        settings->font_name = new_font;
-        pango_font_description_free(desc);
-        settings_save();
-        settings_apply_to_all_editors();
-    }
 }
 
 static GtkWidget*

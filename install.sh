@@ -8,18 +8,18 @@ set -e  # Exit on any error
 echo "Building and installing ViTE..."
 
 # Create build directory if it doesn't exist
-if [ ! -d "builddir" ]; then
+if [ ! -d "build" ]; then
     echo "Setting up build directory..."
-    meson setup builddir
+    meson setup build
 fi
 
 # Recompile the project
 echo "Compiling ViTE..."
-ninja -C builddir
+ninja -C build
 
 # Install the application
 echo "Installing ViTE..."
-sudo ninja -C builddir install
+sudo ninja -C build install
 
 # Update icon cache and desktop database
 echo "Updating icon cache and desktop database..."
@@ -32,4 +32,4 @@ echo "You can now:"
 echo "- Run 'vite' from the command line"
 echo "- Find 'Virtual Text Editor' in your applications menu"
 echo ""
-echo "To uninstall, you can run: sudo ninja -C builddir uninstall"
+echo "To uninstall, you can run: sudo ninja -C build uninstall"
