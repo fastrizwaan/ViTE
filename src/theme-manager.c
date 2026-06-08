@@ -1348,8 +1348,8 @@ generate_css(const ViteTheme *theme)
     /* --- Tab bar container: use chrome bg for consistency --- */
     g_string_append_printf(css,
         ".vite-tab-bar-container { background-color: %s; }\n"
-        ".vite-tab-bar-container:backdrop { background-color: %s; }\n",
-        c_chrome, c_bd_chrome);
+        ".vite-tab-bar-container:backdrop { background-color: transparent; }\n",
+        c_chrome);
 
     /* --- Headerbar --- */
     g_string_append_printf(css,
