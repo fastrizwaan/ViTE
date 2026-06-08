@@ -1152,6 +1152,7 @@ GtkWidget *vite_find_replace_bar_new(EditorWidget *editor) {
 
 void vite_find_replace_bar_toggle_replace(ViteFindReplaceBar *bar) {
     gboolean vis = gtk_widget_get_visible(bar->replace_box);
+    gtk_widget_set_visible(bar->replace_entry, !vis);
     gtk_widget_set_visible(bar->replace_box, !vis);
     if (!vis) gtk_widget_grab_focus(bar->replace_entry);
     else gtk_widget_grab_focus(bar->find_entry);
