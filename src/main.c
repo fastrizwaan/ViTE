@@ -1803,13 +1803,13 @@ on_document_content_changed(Document *doc, void *user_data)
             } else {
                  /* Text is all whitespace or empty - Restore original title */
                  const char *orig = g_object_get_data(G_OBJECT(tab), "original_title");
-                 if (orig) vite_tab_set_title(tab, orig);
+                 vite_tab_set_title(tab, orig ? orig : "Untitled");
             }
             g_free(stripped);
         } else {
              /* Empty document */
              const char *orig = g_object_get_data(G_OBJECT(tab), "original_title");
-             if (orig) vite_tab_set_title(tab, orig);
+             vite_tab_set_title(tab, orig ? orig : "Untitled");
         }
         g_free(line);
         
@@ -1850,6 +1850,12 @@ on_document_modified(Document *doc G_GNUC_UNUSED, gboolean modified, void *user_
     ViteWindow *win;
 
     vite_tab_set_modified(tab, modified);
+    
+    /* If an untitled document is reverted to its original unmodified state, force the title reset */
+    if (!modified && !document_get_file_path(doc)) {
+        const char *orig = g_object_get_data(G_OBJECT(tab), "original_title");
+        vite_tab_set_title(tab, orig ? orig : "Untitled");
+    }
     
     /* Update window title if this is the active tab */
     if (vite_tab_is_active(tab)) {
