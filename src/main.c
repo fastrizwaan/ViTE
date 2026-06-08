@@ -2615,6 +2615,25 @@ find_terminal_view_recursive(GtkWidget *widget)
     return NULL;
 }
 
+typedef struct {
+    GWeakRef paned_ref;
+    int position;
+} PanedPosData;
+
+static gboolean
+set_paned_pos_idle(gpointer user_data)
+{
+    PanedPosData *data = (PanedPosData *)user_data;
+    GObject *paned = g_weak_ref_get(&data->paned_ref);
+    if (paned) {
+        gtk_paned_set_position(GTK_PANED(paned), data->position);
+        g_object_unref(paned);
+    }
+    g_weak_ref_clear(&data->paned_ref);
+    g_free(data);
+    return G_SOURCE_REMOVE;
+}
+
 static void
 do_terminal_split(ViteWindow *win, GtkOrientation orientation)
 {
@@ -2627,20 +2646,29 @@ do_terminal_split(ViteWindow *win, GtkOrientation orientation)
     GtkWidget *view_container = resolve_split_target_view(win, tab, page, FALSE);
     if (!view_container) return;
 
+    int size = (orientation == GTK_ORIENTATION_HORIZONTAL) ? gtk_widget_get_width(view_container) : gtk_widget_get_height(view_container);
+
     GtkWidget *paned = gtk_paned_new(orientation);
     if (!replace_view_with_paned(view_container, paned)) return;
 
     GtkWidget *terminal = create_embedded_terminal(win);
     
     GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scrolled), 50);
+    gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scrolled), 50);
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), terminal);
 
     GtkWidget *terminal_view = create_view_container(win, scrolled);
     g_object_set_data(G_OBJECT(terminal_view), "is-terminal-view", GINT_TO_POINTER(1));
+    gtk_widget_set_size_request(terminal_view, 50, 50);
     gtk_paned_set_end_child(GTK_PANED(paned), terminal_view);
 
-    int size = (orientation == GTK_ORIENTATION_HORIZONTAL) ? gtk_widget_get_width(view_container) : gtk_widget_get_height(view_container);
-    if (size > 0) gtk_paned_set_position(GTK_PANED(paned), size / 2);
+    if (size > 0) {
+        PanedPosData *pos_data = g_new0(PanedPosData, 1);
+        g_weak_ref_init(&pos_data->paned_ref, paned);
+        pos_data->position = (size * 7) / 10;
+        g_idle_add(set_paned_pos_idle, pos_data);
+    }
 
     defer_focus(terminal);
 }

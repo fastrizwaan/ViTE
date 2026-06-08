@@ -1,1 +1,1 @@
-./build.sh && ./vite
+./build.sh && ./build/vite
