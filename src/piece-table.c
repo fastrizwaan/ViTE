@@ -487,6 +487,28 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
 
     if (size == 0) return;
 
+    /* --- Null-byte heuristic for UTF-16/32 without BOM --- */
+    /* Run this pre-check before uchardet because uchardet may misdetect UTF-16LE without BOM as ASCII */
+    {
+        size_t check_len = (size > 65536) ? 65536 : size;
+        if (size >= 4) {
+            size_t le_count = 0, be_count = 0;
+            for (size_t i = 0; i + 1 < check_len; i += 2) {
+                if (data[i+1] == 0 && data[i] != 0) le_count++;
+                if (data[i]   == 0 && data[i+1] != 0) be_count++;
+            }
+            size_t u32_le = 0, u32_be = 0;
+            for (size_t i = 0; i + 3 < check_len; i += 4) {
+                if (data[i] != 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 0) u32_le++;
+                if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] != 0) u32_be++;
+            }
+            if      (u32_le > check_len / 16) { *enc = ENCODING_UTF32LE; return; }
+            else if (u32_be > check_len / 16) { *enc = ENCODING_UTF32BE; return; }
+            else if (le_count > check_len / 4) { *enc = ENCODING_UTF16LE; return; }
+            else if (be_count > check_len / 4) { *enc = ENCODING_UTF16BE; return; }
+        }
+    }
+
     /* --- uchardet-based detection (no BOM found) --- */
 #ifdef HAVE_UCHARDET
     {
@@ -509,28 +531,8 @@ detect_encoding(const char *data, size_t size, FileEncoding *enc, gboolean *has_
     }
 #endif
 
-    /* --- Fallback: simple null-byte heuristic for UTF-16 without BOM --- */
-    {
-        size_t check_len = (size > 65536) ? 65536 : size;
-        if (size >= 4) {
-            size_t le_count = 0, be_count = 0;
-            for (size_t i = 0; i + 1 < check_len; i += 2) {
-                if (data[i+1] == 0 && data[i] != 0) le_count++;
-                if (data[i]   == 0 && data[i+1] != 0) be_count++;
-            }
-            size_t u32_le = 0, u32_be = 0;
-            for (size_t i = 0; i + 3 < check_len; i += 4) {
-                if (data[i] != 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] == 0) u32_le++;
-                if (data[i] == 0 && data[i+1] == 0 && data[i+2] == 0 && data[i+3] != 0) u32_be++;
-            }
-            if      (u32_le > check_len / 16) { *enc = ENCODING_UTF32LE; return; }
-            else if (u32_be > check_len / 16) { *enc = ENCODING_UTF32BE; return; }
-            else if (le_count > check_len / 4) { *enc = ENCODING_UTF16LE; return; }
-            else if (be_count > check_len / 4) { *enc = ENCODING_UTF16BE; return; }
-        }
-        /* Default: treat as UTF-8 */
-        *enc = ENCODING_UTF8;
-    }
+    /* Default: treat as UTF-8 */
+    *enc = ENCODING_UTF8;
 }
 
 static void
