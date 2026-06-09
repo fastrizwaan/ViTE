@@ -26,8 +26,8 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
     size_t total_lines = get_visual_line_count(self);
     double content_height = 0;
 
-    if (!self->wrap_lines || total_lines == 0) {
-        /* Simple calculation for no-wrap mode or empty doc */
+    if (!self->wrap_lines || total_lines == 0 || widget_width <= 0) {
+        /* Simple calculation for no-wrap mode, empty doc, or unallocated width */
         content_height = (double)total_lines * self->line_height + self->padding_top * 2;
         
         if (self->line_y_offsets) {
@@ -46,7 +46,7 @@ calculate_total_content_height(EditorWidget *self, int widget_width, int widget_
         /* Use active_right_padding instead of hardcoded 20.0 */
         double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
         
-        if (wrap_width < 1.0) wrap_width = 1.0;
+        if (wrap_width < 50.0) wrap_width = 50.0;
         
         /* Estimate chars per line using cached char width */
         int chars_per_line = (int)(wrap_width / self->cached_char_width);
@@ -352,7 +352,7 @@ scroll_to_cursor(EditorWidget *self)
                 if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
             }
             double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
-            if (wrap_width < 1.0) wrap_width = 1.0;
+            if (wrap_width < 50.0) wrap_width = 50.0;
             double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
             int chars_per_line = (int)(wrap_width / cw);
             if (chars_per_line < 1) chars_per_line = 1;
@@ -434,7 +434,7 @@ scroll_to_cursor_centered(EditorWidget *self)
                 if (minimap_w > (double)widget_width / 2.0) minimap_w = (double)widget_width / 2.0;
             }
             double wrap_width = (double)widget_width - text_start_x - (double)self->active_right_padding - minimap_w;
-            if (wrap_width < 1.0) wrap_width = 1.0;
+            if (wrap_width < 50.0) wrap_width = 50.0;
             double cw = (self->cached_char_width > 1.0) ? self->cached_char_width : 8.0;
             int chars_per_line = (int)(wrap_width / cw);
             if (chars_per_line < 1) chars_per_line = 1;
